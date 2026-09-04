@@ -69,7 +69,8 @@ data class AudioClip(
   val fadeOutMs: Long = 0L,
   val isMuted: Boolean = false,
   val isVoiceOver: Boolean = false,
-  val waveformData: List<Float> = emptyList()
+  val waveformData: List<Float> = emptyList(),
+  val gainDb: Float = 0.0f
 )
 
 data class TextClip(
