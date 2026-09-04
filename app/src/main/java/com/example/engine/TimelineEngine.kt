@@ -151,7 +151,13 @@ class TimelineEngine {
     name: String,
     isVideo: Boolean = true,
     durationMs: Long = 3000L,
-    atPlayhead: Boolean = false
+    atPlayhead: Boolean = false,
+    width: Int = 1920,
+    height: Int = 1080,
+    rotationDegrees: Int = 0,
+    frameRate: Float = 30f,
+    mimeType: String = "video/mp4",
+    hasAudio: Boolean = true
   ) {
     recordHistory()
     val currentClips = _timeline.value.videoClips.toMutableList()
@@ -167,7 +173,13 @@ class TimelineEngine {
       timelineStartMs = startMs,
       durationMs = durationMs,
       sourceStartMs = 0L,
-      sourceEndMs = durationMs
+      sourceEndMs = durationMs,
+      width = width,
+      height = height,
+      naturalRotation = rotationDegrees,
+      frameRate = frameRate,
+      mimeType = mimeType,
+      hasAudio = hasAudio
     )
     currentClips.add(newClip)
     currentClips.sortBy { it.timelineStartMs }
@@ -186,7 +198,13 @@ class TimelineEngine {
     posX: Float = 0.25f,
     posY: Float = -0.25f,
     opacity: Float = 1.0f,
-    blendMode: String = "Normal"
+    blendMode: String = "Normal",
+    width: Int = 1920,
+    height: Int = 1080,
+    rotationDegrees: Int = 0,
+    frameRate: Float = 30f,
+    mimeType: String = "video/mp4",
+    hasAudio: Boolean = true
   ) {
     recordHistory()
     val currentOverlays = _timeline.value.overlayClips.toMutableList()
@@ -202,12 +220,102 @@ class TimelineEngine {
       cropOffsetX = posX,
       cropOffsetY = posY,
       opacity = opacity,
-      blendMode = blendMode
+      blendMode = blendMode,
+      width = width,
+      height = height,
+      naturalRotation = rotationDegrees,
+      frameRate = frameRate,
+      mimeType = mimeType,
+      hasAudio = hasAudio
     )
     currentOverlays.add(newOverlay)
     currentOverlays.sortBy { it.timelineStartMs }
     _timeline.value = _timeline.value.copy(overlayClips = currentOverlays)
     _selectedElement.value = SelectedTrackElement.Overlay(newOverlay.id)
+  }
+
+  fun replaceSelectedMedia(
+    newUri: String,
+    newName: String,
+    width: Int,
+    height: Int,
+    durationMs: Long,
+    isVideo: Boolean,
+    rotationDegrees: Int = 0,
+    frameRate: Float = 30f,
+    mimeType: String = "video/mp4",
+    hasAudio: Boolean = true
+  ) {
+    val selected = _selectedElement.value
+    recordHistory()
+    if (selected is SelectedTrackElement.Video) {
+      val list = _timeline.value.videoClips.map { clip ->
+        if (clip.id == selected.clipId) {
+          clip.copy(
+            uri = newUri,
+            name = newName,
+            isVideo = isVideo,
+            durationMs = durationMs,
+            sourceStartMs = 0L,
+            sourceEndMs = durationMs,
+            width = width,
+            height = height,
+            naturalRotation = rotationDegrees,
+            frameRate = frameRate,
+            mimeType = mimeType,
+            hasAudio = hasAudio
+          )
+        } else clip
+      }
+      _timeline.value = _timeline.value.copy(videoClips = list)
+    } else if (selected is SelectedTrackElement.Overlay) {
+      val list = _timeline.value.overlayClips.map { clip ->
+        if (clip.id == selected.clipId) {
+          clip.copy(
+            uri = newUri,
+            name = newName,
+            isVideo = isVideo,
+            durationMs = durationMs,
+            sourceStartMs = 0L,
+            sourceEndMs = durationMs,
+            width = width,
+            height = height,
+            naturalRotation = rotationDegrees,
+            frameRate = frameRate,
+            mimeType = mimeType,
+            hasAudio = hasAudio
+          )
+        } else clip
+      }
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+    }
+  }
+
+  fun toggleSelectedClipMute() {
+    val selected = _selectedElement.value
+    recordHistory()
+    if (selected is SelectedTrackElement.Video) {
+      val list = _timeline.value.videoClips.map { clip ->
+        if (clip.id == selected.clipId) clip.copy(isMuted = !clip.isMuted) else clip
+      }
+      _timeline.value = _timeline.value.copy(videoClips = list)
+    } else if (selected is SelectedTrackElement.Overlay) {
+      val list = _timeline.value.overlayClips.map { clip ->
+        if (clip.id == selected.clipId) clip.copy(isMuted = !clip.isMuted) else clip
+      }
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+    }
+  }
+
+  fun toggleSelectedClipReverse() {
+    val selected = _selectedElement.value
+    recordHistory()
+    if (selected is SelectedTrackElement.Video) {
+      val list = _timeline.value.videoClips.map { clip ->
+        if (clip.id == selected.clipId) clip.copy(isReversed = !clip.isReversed) else clip
+      }
+      _timeline.value = _timeline.value.copy(videoClips = list)
+    }
   }
 
   fun updateOverlayClip(updated: VideoClip) {

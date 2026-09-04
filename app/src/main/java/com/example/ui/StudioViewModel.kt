@@ -64,6 +64,20 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   val aiTools = AIToolsService()
   val videoExporter = VideoExporter(application)
 
+  private var isSyncingFromPlayback = false
+
+  val playbackEngine = com.example.engine.playback.VideoPlaybackEngine(
+    context = application,
+    onTimelinePositionChanged = { posMs ->
+      isSyncingFromPlayback = true
+      timelineEngine.setPosition(posMs)
+      isSyncingFromPlayback = false
+    },
+    onPlaybackEnded = {
+      timelineEngine.pause()
+    }
+  )
+
   val allProjects: StateFlow<List<ProjectEntity>> = repository.allProjects
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -118,13 +132,29 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
       repository.createSampleProjectIfEmpty()
     }
 
+    // Sync Timeline changes with Playback Engine
+    viewModelScope.launch {
+      timelineEngine.timeline.collectLatest { timeline ->
+        playbackEngine.updateTimeline(timeline)
+      }
+    }
+
     // Monitor playback state from TimelineEngine
     viewModelScope.launch {
       timelineEngine.isPlaying.collectLatest { isPlaying ->
         if (isPlaying) {
-          startPlaybackLoop()
+          playbackEngine.play()
         } else {
-          playbackJob?.cancel()
+          playbackEngine.pause()
+        }
+      }
+    }
+
+    // Sync seeking from timeline UI into playback engine
+    viewModelScope.launch {
+      timelineEngine.currentPositionMs.collectLatest { posMs ->
+        if (!isSyncingFromPlayback && !timelineEngine.isPlaying.value) {
+          playbackEngine.seekTo(posMs)
         }
       }
     }
@@ -185,14 +215,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     aspectRatio: AspectRatio = AspectRatio.RATIO_9_16
   ) {
     var runningStart = 0L
+    val appContext = getApplication<Application>().applicationContext
     val clips = uris.mapIndexed { index, uri ->
-      val duration = if (isVideo) 4000L else 3000L
+      val meta = com.example.engine.media.MediaMetadataHelper.extractMetadata(appContext, uri)
+      val duration = meta.durationMs
       val clip = VideoClip(
         uri = uri,
-        name = if (isVideo) "Video ${index + 1}" else "Photo ${index + 1}",
+        name = if (meta.isVideo) "Video ${index + 1}" else "Photo ${index + 1}",
         timelineStartMs = runningStart,
         durationMs = duration,
-        isVideo = isVideo
+        sourceStartMs = 0L,
+        sourceEndMs = duration,
+        isVideo = meta.isVideo,
+        width = meta.width,
+        height = meta.height,
+        naturalRotation = meta.rotationDegrees,
+        frameRate = meta.frameRate,
+        mimeType = meta.mimeType,
+        hasAudio = meta.hasAudio
       )
       runningStart += duration
       clip
@@ -319,18 +359,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch {
       _isAIBusy.value = true
       _aiStatusMessage.value = "AI analyzing audio & generating synchronized captions..."
-      val captions = aiTools.generateAutoCaptions(
-        _activeProjectName.value,
-        timelineEngine.timeline.value.totalDurationMs,
-        language
-      )
-      val currentList = timelineEngine.timeline.value.textClips.toMutableList()
-      currentList.addAll(captions)
-      timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = currentList))
-      _isAIBusy.value = false
-      _aiStatusMessage.value = "Generated ${captions.size} auto captions successfully!"
-      delay(2000)
-      _aiStatusMessage.value = ""
+      try {
+        val captions = aiTools.generateAutoCaptions(
+          _activeProjectName.value,
+          timelineEngine.timeline.value.totalDurationMs,
+          language
+        )
+        val currentList = timelineEngine.timeline.value.textClips.toMutableList()
+        currentList.addAll(captions)
+        timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = currentList))
+        _aiStatusMessage.value = "Generated ${captions.size} auto captions successfully!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "AI Captions unavailable. Please configure Gemini API key."
+      } finally {
+        _isAIBusy.value = false
+        delay(3500)
+        _aiStatusMessage.value = ""
+      }
     }
   }
 
@@ -338,12 +383,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch {
       _isAIBusy.value = true
       _aiStatusMessage.value = "AI translating captions to $targetLanguage..."
-      val translated = aiTools.translateCaptions(timelineEngine.timeline.value.textClips, targetLanguage)
-      timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = translated))
-      _isAIBusy.value = false
-      _aiStatusMessage.value = "Captions translated to $targetLanguage!"
-      delay(2000)
-      _aiStatusMessage.value = ""
+      try {
+        val translated = aiTools.translateCaptions(timelineEngine.timeline.value.textClips, targetLanguage)
+        timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = translated))
+        _aiStatusMessage.value = "Captions translated to $targetLanguage!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "Translation unavailable."
+      } finally {
+        _isAIBusy.value = false
+        delay(3500)
+        _aiStatusMessage.value = ""
+      }
     }
   }
 
@@ -351,10 +401,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch {
       _isAIBusy.value = true
       _aiStatusMessage.value = "AI scanning visual motion and highlight moments..."
-      val highlights = aiTools.analyzeHighlights(timelineEngine.timeline.value)
-      _aiHighlights.value = highlights
-      _isAIBusy.value = false
-      _aiStatusMessage.value = "Found ${highlights.size} optimal scene moments!"
+      try {
+        val highlights = aiTools.analyzeHighlights(timelineEngine.timeline.value)
+        _aiHighlights.value = highlights
+        _aiStatusMessage.value = "Found ${highlights.size} optimal scene moments!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "Highlight analysis unavailable."
+      } finally {
+        _isAIBusy.value = false
+        delay(3500)
+        _aiStatusMessage.value = ""
+      }
     }
   }
 
@@ -399,6 +456,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     super.onCleared()
     playbackJob?.cancel()
     autoSaveJob?.cancel()
+    playbackEngine.release()
     audioEngine.release()
   }
 }

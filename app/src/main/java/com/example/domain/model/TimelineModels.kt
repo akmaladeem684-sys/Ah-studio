@@ -34,8 +34,26 @@ data class VideoClip(
   val cropOffsetY: Float = 0f,
   val opacity: Float = 1.0f,
   val blendMode: String = "Normal",
+  val width: Int = 1920,
+  val height: Int = 1080,
+  val naturalRotation: Int = 0,
+  val frameRate: Float = 30f,
+  val mimeType: String = "video/mp4",
+  val hasAudio: Boolean = true,
+  val isReversed: Boolean = false,
+  val freezeFrameAtMs: Long? = null,
   val keyframes: List<ClipKeyframe> = emptyList()
-)
+) {
+  fun timelineToSourceMs(timelinePosMs: Long): Long {
+    val offset = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
+    val scaledOffset = (offset * speed).toLong()
+    return if (isReversed) {
+      (sourceEndMs - scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
+    } else {
+      (sourceStartMs + scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
+    }
+  }
+}
 
 data class AudioClip(
   val id: String = UUID.randomUUID().toString(),
@@ -212,7 +230,8 @@ data class Timeline(
   val adjustments: VideoAdjustments = VideoAdjustments(),
   val filter: FilterSettings = FilterSettings(),
   val chromaKey: ChromaKeySettings = ChromaKeySettings(),
-  val canvasBackgroundColor: Long = 0xFF000000
+  val canvasBackgroundColor: Long = 0xFF000000,
+  val aspectRatio: AspectRatio = AspectRatio.RATIO_9_16
 ) {
   val totalDurationMs: Long
     get() {

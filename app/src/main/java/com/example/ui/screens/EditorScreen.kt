@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -26,12 +27,19 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
 import com.example.engine.SelectedTrackElement
@@ -190,6 +198,7 @@ fun EditorScreen(
           aspectRatio = aspectRatio,
           selectedElement = selectedElement,
           onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+          player = viewModel.playbackEngine.player,
           modifier = Modifier.fillMaxSize()
         )
       }
@@ -349,6 +358,7 @@ fun VideoPreviewSurface(
   aspectRatio: AspectRatio,
   selectedElement: SelectedTrackElement = SelectedTrackElement.None,
   onSelectElement: (SelectedTrackElement) -> Unit = {},
+  player: ExoPlayer? = null,
   modifier: Modifier = Modifier
 ) {
   // Find current active video clip
@@ -410,44 +420,35 @@ fun VideoPreviewSurface(
         .fillMaxSize()
         .clip(RoundedCornerShape(12.dp))
     ) {
-      // Background Image / Gradient Layer
+      // Background Video / Image Layer
       if (activeClip != null) {
-        val clipBgColor = remember(activeClip.id) {
-          when (activeClip.id.hashCode() % 4) {
-            0 -> Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF334155)))
-            1 -> Brush.linearGradient(listOf(Color(0xFF1E1B4B), Color(0xFF312E81), Color(0xFF4338CA)))
-            2 -> Brush.linearGradient(listOf(Color(0xFF14532D), Color(0xFF166534), Color(0xFF15803D)))
-            else -> Brush.linearGradient(listOf(Color(0xFF7C2D12), Color(0xFF9A3412), Color(0xFFC2410C)))
-          }
-        }
-
         Box(
           modifier = Modifier
             .fillMaxSize()
             .scale(clipTransform?.scale ?: 1f)
-            .rotate(clipTransform?.rotation ?: 0f)
-            .background(clipBgColor),
+            .rotate(clipTransform?.rotation ?: 0f),
           contentAlignment = Alignment.Center
         ) {
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-              Icons.Default.Movie,
-              contentDescription = null,
-              tint = CyanAccent.copy(alpha = 0.8f),
-              modifier = Modifier.size(54.dp)
+          if (activeClip.isVideo && player != null) {
+            AndroidView(
+              factory = { ctx ->
+                PlayerView(ctx).apply {
+                  this.player = player
+                  useController = false
+                  layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                  )
+                }
+              },
+              modifier = Modifier.fillMaxSize()
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              text = activeClip.name,
-              style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                fontSize = 15.sp
-              )
-            )
-            Text(
-              text = "Speed: ${activeClip.speed}x • Frame: ${(currentPosMs / 33)}",
-              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+          } else {
+            AsyncImage(
+              model = activeClip.uri,
+              contentDescription = activeClip.name,
+              contentScale = ContentScale.Fit,
+              modifier = Modifier.fillMaxSize()
             )
           }
         }
@@ -519,25 +520,27 @@ fun VideoPreviewSurface(
             .width(160.dp)
             .height(100.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(
-              Brush.linearGradient(
-                listOf(
-                  Color(0xFF1E1B4B),
-                  Color(0xFF312E81),
-                  Color(0xFF4338CA)
-                )
-              )
-            )
+            .background(Color(0xFF1E293B))
             .border(
               width = if (isOverlaySelected) 2.dp else 1.dp,
               color = if (isOverlaySelected) AmberAccent else Color.White.copy(alpha = 0.5f),
               shape = RoundedCornerShape(8.dp)
             )
             .clickable { onSelectElement(SelectedTrackElement.Overlay(overlay.id)) }
-            .padding(6.dp)
         ) {
+          AsyncImage(
+            model = overlay.uri,
+            contentDescription = overlay.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+              .fillMaxSize()
+              .alpha(overlay.opacity)
+          )
+
           Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(4.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
             Row(
@@ -567,25 +570,16 @@ fun VideoPreviewSurface(
                 modifier = Modifier.size(14.dp)
               )
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-              Text(
-                text = overlay.name,
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = TextPrimary
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-              )
-              Text(
-                text = "Opacity: ${(overlay.opacity * 100).toInt()}%",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontSize = 9.sp,
-                  color = TextSecondary
-                )
-              )
-            }
+            Text(
+              text = overlay.name,
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+              ),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
           }
         }
       }
@@ -595,21 +589,33 @@ fun VideoPreviewSurface(
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-          contentAlignment = Alignment.BottomCenter
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+          contentAlignment = Alignment.Center
         ) {
-          Text(
-            text = textClip.text,
-            style = MaterialTheme.typography.headlineSmall.copy(
-              fontWeight = FontWeight(textClip.fontWeight),
-              fontSize = textClip.fontSizeSp.sp,
-              color = Color(textClip.textColor),
-              textAlign = TextAlign.Center
-            ),
+          Box(
             modifier = Modifier
-              .background(Color(textClip.backgroundColor), RoundedCornerShape(8.dp))
+              .offset(
+                x = (textClip.posX * 120).dp,
+                y = (textClip.posY * 160).dp
+              )
+              .rotate(textClip.rotation)
+              .scale(textClip.scale)
+              .background(
+                if (textClip.hasBackground) Color(textClip.backgroundColor) else Color.Transparent,
+                RoundedCornerShape(8.dp)
+              )
               .padding(horizontal = 12.dp, vertical = 6.dp)
-          )
+          ) {
+            Text(
+              text = textClip.text,
+              style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight(textClip.fontWeight),
+                fontSize = textClip.fontSizeSp.sp,
+                color = Color(textClip.textColor),
+                textAlign = TextAlign.Center
+              )
+            )
+          }
         }
       }
 
