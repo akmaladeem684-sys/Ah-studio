@@ -71,5 +71,88 @@ class ExampleRobolectricTest {
     engine.deleteSelected()
     assertEquals(0, engine.timeline.value.overlayClips.size)
   }
+
+  @Test
+  fun `gpu composition shader sources contain required uniforms and algorithms`() {
+    val vertexShader = com.example.engine.composition.gpu.GpuShaders.VERTEX_SHADER
+    assertTrue(vertexShader.contains("uMVPMatrix"))
+    assertTrue(vertexShader.contains("uTexMatrix"))
+    assertTrue(vertexShader.contains("aPosition"))
+    assertTrue(vertexShader.contains("aTextureCoord"))
+
+    val fragmentShader = com.example.engine.composition.gpu.GpuShaders.buildFragmentShader(isOes = true)
+    assertTrue(fragmentShader.contains("GL_OES_EGL_image_external"))
+    assertTrue(fragmentShader.contains("uChromaEnabled"))
+    assertTrue(fragmentShader.contains("uChromaKeyColor"))
+    assertTrue(fragmentShader.contains("uChromaSimilarity"))
+    assertTrue(fragmentShader.contains("uChromaSmoothness"))
+    assertTrue(fragmentShader.contains("uBrightness"))
+    assertTrue(fragmentShader.contains("uContrast"))
+    assertTrue(fragmentShader.contains("uSaturation"))
+    assertTrue(fragmentShader.contains("uExposure"))
+    assertTrue(fragmentShader.contains("uTemperature"))
+    assertTrue(fragmentShader.contains("uVignette"))
+    assertTrue(fragmentShader.contains("uTransitionType"))
+    assertTrue(fragmentShader.contains("uTransitionProgress"))
+    assertTrue(fragmentShader.contains("uBlendMode"))
+    assertTrue(fragmentShader.contains("uOpacity"))
+  }
+
+  @Test
+  fun `video composition engine evaluates frame properties and transforms`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val engine = com.example.engine.composition.VideoCompositionEngine(context)
+
+    val timeline = com.example.domain.model.Timeline(
+      videoClips = listOf(
+        com.example.domain.model.VideoClip(
+          id = "clip_1",
+          name = "Clip 1",
+          uri = "content://media/clip1",
+          isVideo = true,
+          timelineStartMs = 0L,
+          durationMs = 4000L
+        )
+      ),
+      overlayClips = listOf(
+        com.example.domain.model.VideoClip(
+          id = "pip_1",
+          name = "PIP 1",
+          uri = "content://media/pip1",
+          isVideo = false,
+          timelineStartMs = 1000L,
+          durationMs = 2000L,
+          cropScale = 0.5f,
+          cropOffsetX = 0.2f,
+          cropOffsetY = -0.2f,
+          opacity = 0.9f
+        )
+      ),
+      textClips = listOf(
+        com.example.domain.model.TextClip(
+          id = "text_1",
+          text = "Title Text",
+          timelineStartMs = 500L,
+          durationMs = 2000L,
+          animationType = "Pop",
+          animDurationMs = 500L
+        )
+      )
+    )
+
+    // Evaluate frame at 1500ms
+    val frame = engine.evaluateFrame(timeline, 1500L)
+    assertNotNull(frame.activeClip)
+    assertEquals("clip_1", frame.activeClip?.id)
+    assertEquals(1, frame.activeOverlays.size)
+    assertEquals("pip_1", frame.activeOverlays.first().clip.id)
+    assertEquals(0.5f, frame.activeOverlays.first().scale, 0.01f)
+    assertEquals(0.9f, frame.activeOverlays.first().opacity, 0.01f)
+    assertEquals(1, frame.activeTexts.size)
+    assertEquals("Title Text", frame.activeTexts.first().clip.text)
+
+    // Verify GPU renderer lifecycle release
+    engine.releaseGpu()
+  }
 }
 

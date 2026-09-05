@@ -7,9 +7,13 @@ import android.graphics.Canvas
 import android.media.*
 import android.net.Uri
 import android.util.Log
+import android.view.Surface
 import com.example.domain.model.*
 import com.example.engine.composition.ComposedFrame
 import com.example.engine.composition.VideoCompositionEngine
+import com.example.engine.composition.gpu.EglCore
+import com.example.engine.composition.gpu.GpuCompositionRenderer
+import com.example.engine.composition.gpu.WindowSurface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -210,6 +214,10 @@ class VideoExporter(private val context: Context) {
     var mediaMuxer: MediaMuxer? = null
     var videoEncoder: MediaCodec? = null
     var audioEncoder: MediaCodec? = null
+    var eglCore: EglCore? = null
+    var windowSurface: WindowSurface? = null
+    var gpuRenderer: GpuCompositionRenderer? = null
+    var encoderInputSurface: Surface? = null
 
     // Cache retrievers and bitmaps
     val retrievers = mutableMapOf<String, MediaMetadataRetriever>()
@@ -274,9 +282,50 @@ class VideoExporter(private val context: Context) {
       } else {
         MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
       }
-      videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, chosenColorFormat)
-      videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-      videoEncoder.start()
+
+      var useGpuSurface = false
+
+      val supportsSurface = caps.colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+      if (supportsSurface) {
+        try {
+          videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+          videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          val surface = videoEncoder.createInputSurface()
+          encoderInputSurface = surface
+
+          val core = EglCore(null, EglCore.FLAG_RECORDABLE)
+          val winSurface = WindowSurface(core, surface, false)
+          winSurface.makeCurrent()
+          val renderer = GpuCompositionRenderer(context)
+          renderer.initGl()
+
+          eglCore = core
+          windowSurface = winSurface
+          gpuRenderer = renderer
+
+          videoEncoder.start()
+          useGpuSurface = true
+          Log.i(tag, "GPU hardware surface composition pipeline activated ($exportWidth x $exportHeight @ ${fps}fps)")
+        } catch (e: Throwable) {
+          Log.w(tag, "GPU surface initialization fallback to buffer pipeline: ${e.message}")
+          useGpuSurface = false
+          try { windowSurface?.release() } catch (ignored: Exception) {}
+          try { eglCore?.release() } catch (ignored: Exception) {}
+          try { gpuRenderer?.release() } catch (ignored: Exception) {}
+          windowSurface = null
+          eglCore = null
+          gpuRenderer = null
+          try { encoderInputSurface?.release() } catch (ignored: Exception) {}
+          encoderInputSurface = null
+          try { videoEncoder.reset() } catch (ignored: Exception) {}
+        }
+      }
+
+      if (!useGpuSurface) {
+        videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, chosenColorFormat)
+        videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        videoEncoder.start()
+      }
 
       // 3. Initialize Audio Encoder (AAC) if audio is present
       val audioSampleRate = audioProcessor.sampleRate
@@ -300,10 +349,10 @@ class VideoExporter(private val context: Context) {
       val frameDurationUs = 1_000_000L / fps
       val frameDurationMs = 1000L / fps
 
-      val frameBitmap = Bitmap.createBitmap(exportWidth, exportHeight, Bitmap.Config.ARGB_8888)
-      val frameCanvas = Canvas(frameBitmap)
-      val pixelBuffer = IntArray(exportWidth * exportHeight)
-      val yuvBuffer = ByteArray(exportWidth * exportHeight * 3 / 2)
+      val frameBitmap = if (!useGpuSurface) Bitmap.createBitmap(exportWidth, exportHeight, Bitmap.Config.ARGB_8888) else null
+      val frameCanvas = if (frameBitmap != null) Canvas(frameBitmap) else null
+      val pixelBuffer = if (!useGpuSurface) IntArray(exportWidth * exportHeight) else null
+      val yuvBuffer = if (!useGpuSurface) ByteArray(exportWidth * exportHeight * 3 / 2) else null
 
       val totalAudioFrames = masterPcm.size / audioChannels
       var fedAudioFrames = 0
@@ -311,6 +360,10 @@ class VideoExporter(private val context: Context) {
       // 5. Main Interleaved Video & Audio Encoding Loop
       for (frameIndex in 0 until totalFrames) {
         if (isCancelled) {
+          try { windowSurface?.release() } catch (ignored: Exception) {}
+          try { eglCore?.release() } catch (ignored: Exception) {}
+          try { gpuRenderer?.release() } catch (ignored: Exception) {}
+          try { encoderInputSurface?.release() } catch (ignored: Exception) {}
           cleanUp(videoEncoder, audioEncoder, mediaMuxer, outputFile)
           _exportState.value = ExportState.Idle
           return@withContext null
@@ -319,56 +372,86 @@ class VideoExporter(private val context: Context) {
         val timelinePosMs = frameIndex * frameDurationMs
         val composedFrame = compositionEngine.evaluateFrame(timeline, timelinePosMs)
 
-        // Fetch main clip bitmap at current position
-        val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps)
+        if (useGpuSurface && gpuRenderer != null && windowSurface != null) {
+          // Hardware GPU rendering directly to encoder surface
+          val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps)
+          val mainTexId = if (mainBmp != null) {
+            gpuRenderer.uploadImageTexture("main_${composedFrame.activeClip?.id ?: "none"}", mainBmp)
+          } else 0
 
-        // Fetch overlay bitmaps
-        val overlayBmps = mutableMapOf<String, Bitmap>()
-        for (overlay in composedFrame.activeOverlays) {
-          val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps)
-          if (bmp != null) {
-            overlayBmps[overlay.clip.id] = bmp
-          }
-        }
-
-        // Render frame
-        frameBitmap.eraseColor(android.graphics.Color.BLACK)
-        compositionEngine.renderFrame(
-          canvas = frameCanvas,
-          frame = composedFrame,
-          mainBitmap = mainBmp,
-          overlayBitmaps = overlayBmps,
-          canvasWidth = exportWidth,
-          canvasHeight = exportHeight,
-          chromaKey = timeline.chromaKey
-        )
-
-        // Convert Bitmap ARGB to YUV420
-        frameBitmap.getPixels(pixelBuffer, 0, exportWidth, 0, 0, exportWidth, exportHeight)
-        if (chosenColorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
-          encodeYUV420Planar(yuvBuffer, pixelBuffer, exportWidth, exportHeight)
-        } else {
-          encodeYUV420SemiPlanar(yuvBuffer, pixelBuffer, exportWidth, exportHeight)
-        }
-
-        // Feed video frame into videoEncoder
-        var videoFed = false
-        var attempts = 0
-        while (!videoFed && attempts < 50) {
-          val inIndex = videoEncoder.dequeueInputBuffer(10_000L)
-          if (inIndex >= 0) {
-            val inBuf = videoEncoder.getInputBuffer(inIndex)
-            if (inBuf != null) {
-              inBuf.clear()
-              inBuf.put(yuvBuffer)
-              val ptsUs = frameIndex * frameDurationUs
-              videoEncoder.queueInputBuffer(inIndex, 0, yuvBuffer.size, ptsUs, 0)
-              videoFed = true
+          val overlayTexMap = mutableMapOf<String, Int>()
+          for (overlay in composedFrame.activeOverlays) {
+            val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps)
+            if (bmp != null) {
+              val texId = gpuRenderer.uploadImageTexture("overlay_${overlay.clip.id}", bmp)
+              overlayTexMap[overlay.clip.id] = texId
             }
-          } else {
-            // Drain output if input buffers are busy
-            drainVideoEncoder(videoEncoder, coordinator, false)
-            attempts++
+          }
+
+          gpuRenderer.render(
+            frame = composedFrame,
+            mainTextureId = mainTexId,
+            isMainOes = false,
+            mainTexMatrix = null,
+            overlayTextures = overlayTexMap,
+            viewportWidth = exportWidth,
+            viewportHeight = exportHeight,
+            timelineAdjustments = timeline.adjustments,
+            timelineFilter = timeline.filter,
+            chromaKey = timeline.chromaKey
+          )
+
+          val ptsNs = frameIndex * frameDurationUs * 1000L
+          windowSurface.setPresentationTime(ptsNs)
+          windowSurface.swapBuffers()
+        } else {
+          // CPU buffer fallback for headless environments
+          val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps)
+          val overlayBmps = mutableMapOf<String, Bitmap>()
+          for (overlay in composedFrame.activeOverlays) {
+            val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps)
+            if (bmp != null) {
+              overlayBmps[overlay.clip.id] = bmp
+            }
+          }
+
+          if (frameBitmap != null && frameCanvas != null && pixelBuffer != null && yuvBuffer != null) {
+            frameBitmap.eraseColor(android.graphics.Color.BLACK)
+            compositionEngine.renderFrame(
+              canvas = frameCanvas,
+              frame = composedFrame,
+              mainBitmap = mainBmp,
+              overlayBitmaps = overlayBmps,
+              canvasWidth = exportWidth,
+              canvasHeight = exportHeight,
+              chromaKey = timeline.chromaKey
+            )
+
+            frameBitmap.getPixels(pixelBuffer, 0, exportWidth, 0, 0, exportWidth, exportHeight)
+            if (chosenColorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
+              encodeYUV420Planar(yuvBuffer, pixelBuffer, exportWidth, exportHeight)
+            } else {
+              encodeYUV420SemiPlanar(yuvBuffer, pixelBuffer, exportWidth, exportHeight)
+            }
+
+            var videoFed = false
+            var attempts = 0
+            while (!videoFed && attempts < 50) {
+              val inIndex = videoEncoder.dequeueInputBuffer(10_000L)
+              if (inIndex >= 0) {
+                val inBuf = videoEncoder.getInputBuffer(inIndex)
+                if (inBuf != null) {
+                  inBuf.clear()
+                  inBuf.put(yuvBuffer)
+                  val ptsUs = frameIndex * frameDurationUs
+                  videoEncoder.queueInputBuffer(inIndex, 0, yuvBuffer.size, ptsUs, 0)
+                  videoFed = true
+                }
+              } else {
+                drainVideoEncoder(videoEncoder, coordinator, false)
+                attempts++
+              }
+            }
           }
         }
 
@@ -414,17 +497,25 @@ class VideoExporter(private val context: Context) {
       }
 
       // 6. Signal End-Of-Stream to Video Encoder
-      val videoEosPtsUs = totalFrames * frameDurationUs
-      var videoEosQueued = false
-      var eosAttempts = 0
-      while (!videoEosQueued && eosAttempts < 100) {
-        val inIndex = videoEncoder.dequeueInputBuffer(10_000L)
-        if (inIndex >= 0) {
-          videoEncoder.queueInputBuffer(inIndex, 0, 0, videoEosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-          videoEosQueued = true
-        } else {
-          drainVideoEncoder(videoEncoder, coordinator, false)
-          eosAttempts++
+      if (useGpuSurface) {
+        try {
+          videoEncoder.signalEndOfInputStream()
+        } catch (e: Exception) {
+          Log.w(tag, "signalEndOfInputStream: ${e.message}")
+        }
+      } else {
+        val videoEosPtsUs = totalFrames * frameDurationUs
+        var videoEosQueued = false
+        var eosAttempts = 0
+        while (!videoEosQueued && eosAttempts < 100) {
+          val inIndex = videoEncoder.dequeueInputBuffer(10_000L)
+          if (inIndex >= 0) {
+            videoEncoder.queueInputBuffer(inIndex, 0, 0, videoEosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            videoEosQueued = true
+          } else {
+            drainVideoEncoder(videoEncoder, coordinator, false)
+            eosAttempts++
+          }
         }
       }
 
@@ -527,6 +618,10 @@ class VideoExporter(private val context: Context) {
       _exportState.value = ExportState.Error(errorMsg)
       return@withContext null
     } finally {
+      try { windowSurface?.release() } catch (ignored: Exception) {}
+      try { eglCore?.release() } catch (ignored: Exception) {}
+      try { gpuRenderer?.release() } catch (ignored: Exception) {}
+      try { encoderInputSurface?.release() } catch (ignored: Exception) {}
       for (r in retrievers.values) {
         try { r.release() } catch (ignored: Exception) {}
       }
@@ -534,6 +629,11 @@ class VideoExporter(private val context: Context) {
       imageBitmaps.clear()
       audioProcessor.clearCache()
     }
+  }
+
+  fun release() {
+    isCancelled = true
+    audioProcessor.clearCache()
   }
 
   private fun drainVideoEncoder(

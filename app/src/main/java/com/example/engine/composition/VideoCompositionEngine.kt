@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.*
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
+import com.example.engine.composition.gpu.GpuCompositionRenderer
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -58,99 +59,151 @@ data class ComposedTransition(
 
 class VideoCompositionEngine(private val context: Context) {
 
+  val gpuRenderer: GpuCompositionRenderer by lazy {
+    GpuCompositionRenderer(context)
+  }
+
+  /**
+   * Renders the composed frame on the GPU into the currently active OpenGL surface/framebuffer.
+   */
+  fun renderGpuFrame(
+    frame: ComposedFrame,
+    mainTextureId: Int,
+    isMainOes: Boolean,
+    mainTexMatrix: FloatArray? = null,
+    overlayTextures: Map<String, Int> = emptyMap(),
+    viewportWidth: Int,
+    viewportHeight: Int,
+    adjustments: VideoAdjustments = VideoAdjustments(),
+    filter: FilterSettings = FilterSettings(),
+    chromaKey: ChromaKeySettings = ChromaKeySettings()
+  ) {
+    gpuRenderer.render(
+      frame = frame,
+      mainTextureId = mainTextureId,
+      isMainOes = isMainOes,
+      mainTexMatrix = mainTexMatrix,
+      overlayTextures = overlayTextures,
+      viewportWidth = viewportWidth,
+      viewportHeight = viewportHeight,
+      timelineAdjustments = adjustments,
+      timelineFilter = filter,
+      chromaKey = chromaKey
+    )
+  }
+
+  fun releaseGpu() {
+    gpuRenderer.release()
+  }
+
   /**
    * Calculates the exact state of all timeline elements at any timestamp.
    */
   fun evaluateFrame(timeline: Timeline, posMs: Long): ComposedFrame {
-    val activeClip = timeline.videoClips.find {
-      posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-    } ?: timeline.videoClips.lastOrNull()
+    val isVideoHidden = timeline.trackSettings[TrackType.MAIN_VIDEO]?.isHidden == true
+    val isOverlayHidden = timeline.trackSettings[TrackType.OVERLAY]?.isHidden == true
+    val isTextHidden = timeline.trackSettings[TrackType.TEXT]?.isHidden == true
+    val isStickerHidden = timeline.trackSettings[TrackType.STICKER]?.isHidden == true
+
+    val activeClip = if (!isVideoHidden) {
+      timeline.videoClips.find {
+        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+      } ?: timeline.videoClips.lastOrNull()
+    } else null
 
     val sourcePosMs = activeClip?.timelineToSourceMs(posMs) ?: 0L
 
     // Check transition
     var activeTransition: ComposedTransition? = null
-    for (tr in timeline.transitions) {
-      if (tr.clipIndexBefore >= 0 && tr.clipIndexBefore < timeline.videoClips.size - 1) {
-        val clipBefore = timeline.videoClips[tr.clipIndexBefore]
-        val clipAfter = timeline.videoClips[tr.clipIndexBefore + 1]
-        val transitionStart = clipBefore.timelineStartMs + clipBefore.durationMs - (tr.durationMs / 2)
-        val transitionEnd = transitionStart + tr.durationMs
+    if (!isVideoHidden) {
+      for (tr in timeline.transitions) {
+        if (tr.clipIndexBefore >= 0 && tr.clipIndexBefore < timeline.videoClips.size - 1) {
+          val clipBefore = timeline.videoClips[tr.clipIndexBefore]
+          val clipAfter = timeline.videoClips[tr.clipIndexBefore + 1]
+          val transitionStart = clipBefore.timelineStartMs + clipBefore.durationMs - (tr.durationMs / 2)
+          val transitionEnd = transitionStart + tr.durationMs
 
-        if (posMs in transitionStart until transitionEnd) {
-          val progress = ((posMs - transitionStart).toFloat() / tr.durationMs).coerceIn(0f, 1f)
-          activeTransition = ComposedTransition(
-            type = tr.type,
-            progress = progress,
-            clipBefore = clipBefore,
-            clipAfter = clipAfter
-          )
-          break
+          if (posMs in transitionStart until transitionEnd) {
+            val progress = ((posMs - transitionStart).toFloat() / tr.durationMs).coerceIn(0f, 1f)
+            activeTransition = ComposedTransition(
+              type = tr.type,
+              progress = progress,
+              clipBefore = clipBefore,
+              clipAfter = clipAfter
+            )
+            break
+          }
         }
       }
     }
 
     // Overlays with keyframes
-    val overlays = timeline.overlayClips.filter {
-      posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-    }.map { clip ->
-      val rel = posMs - clip.timelineStartMs
-      val kf = KeyframeInterpolator.interpolate(clip, rel)
-      ComposedOverlay(
-        clip = clip,
-        sourcePosMs = clip.timelineToSourceMs(posMs),
-        posX = kf.posX,
-        posY = kf.posY,
-        scale = kf.scale,
-        rotation = kf.rotation,
-        opacity = kf.opacity,
-        blendMode = clip.blendMode
-      )
-    }
+    val overlays = if (!isOverlayHidden) {
+      timeline.overlayClips.filter {
+        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+      }.map { clip ->
+        val rel = posMs - clip.timelineStartMs
+        val kf = KeyframeInterpolator.interpolate(clip, rel)
+        ComposedOverlay(
+          clip = clip,
+          sourcePosMs = clip.timelineToSourceMs(posMs),
+          posX = kf.posX,
+          posY = kf.posY,
+          scale = kf.scale,
+          rotation = kf.rotation,
+          opacity = kf.opacity,
+          blendMode = clip.blendMode
+        )
+      }
+    } else emptyList()
 
     // Texts
-    val texts = timeline.textClips.filter {
-      posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-    }.map { clip ->
-      val rel = posMs - clip.timelineStartMs
-      var textScale = clip.scale
-      var textOpacity = clip.opacity
-      var textPosY = clip.posY
+    val texts = if (!isTextHidden) {
+      timeline.textClips.filter {
+        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+      }.map { clip ->
+        val rel = posMs - clip.timelineStartMs
+        var textScale = clip.scale
+        var textOpacity = clip.opacity
+        var textPosY = clip.posY
 
-      // Text intro animation
-      if (rel < clip.animDurationMs) {
-        val animProgress = (rel.toFloat() / clip.animDurationMs).coerceIn(0f, 1f)
-        when (clip.animationType) {
-          "Fade" -> textOpacity *= animProgress
-          "Pop" -> textScale *= (animProgress * 1.15f).coerceAtMost(1f)
-          "Slide" -> textPosY += (1f - animProgress) * 0.2f
-          "Zoom" -> textScale *= (0.3f + 0.7f * animProgress)
+        // Text intro animation
+        if (rel < clip.animDurationMs) {
+          val animProgress = (rel.toFloat() / clip.animDurationMs).coerceIn(0f, 1f)
+          when (clip.animationType) {
+            "Fade" -> textOpacity *= animProgress
+            "Pop" -> textScale *= (animProgress * 1.15f).coerceAtMost(1f)
+            "Slide" -> textPosY += (1f - animProgress) * 0.2f
+            "Zoom" -> textScale *= (0.3f + 0.7f * animProgress)
+          }
         }
-      }
 
-      ComposedText(
-        clip = clip,
-        posX = clip.posX,
-        posY = textPosY,
-        scale = textScale,
-        rotation = clip.rotation,
-        opacity = textOpacity
-      )
-    }
+        ComposedText(
+          clip = clip,
+          posX = clip.posX,
+          posY = textPosY,
+          scale = textScale,
+          rotation = clip.rotation,
+          opacity = textOpacity
+        )
+      }
+    } else emptyList()
 
     // Stickers
-    val stickers = timeline.stickerClips.filter {
-      posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-    }.map { clip ->
-      ComposedSticker(
-        clip = clip,
-        posX = clip.posX,
-        posY = clip.posY,
-        scale = clip.scale,
-        rotation = clip.rotation,
-        opacity = clip.opacity
-      )
-    }
+    val stickers = if (!isStickerHidden) {
+      timeline.stickerClips.filter {
+        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+      }.map { clip ->
+        ComposedSticker(
+          clip = clip,
+          posX = clip.posX,
+          posY = clip.posY,
+          scale = clip.scale,
+          rotation = clip.rotation,
+          opacity = clip.opacity
+        )
+      }
+    } else emptyList()
 
     // Adjustments & Filters
     val colorMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter)

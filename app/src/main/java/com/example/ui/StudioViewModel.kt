@@ -62,6 +62,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   val timelineEngine = TimelineEngine()
   val audioEngine = AudioEngine(application)
   val aiTools = AIToolsService()
+  val compositionEngine = com.example.engine.composition.VideoCompositionEngine(application)
   val videoExporter = VideoExporter(application)
 
   private var isSyncingFromPlayback = false
@@ -458,5 +459,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     autoSaveJob?.cancel()
     playbackEngine.release()
     audioEngine.release()
+    videoExporter.release()
+    compositionEngine.releaseGpu()
   }
 }

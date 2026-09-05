@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -48,6 +51,7 @@ import com.example.ui.EditorToolbarTab
 import com.example.ui.StudioViewModel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.formatDurationShort
+import com.example.ui.components.timeline.*
 import com.example.ui.theme.*
 import kotlin.math.sin
 
@@ -68,8 +72,29 @@ fun EditorScreen(
   val activeTab by viewModel.activeToolbarTab.collectAsState()
   val isSnapping by viewModel.timelineEngine.isSnappingEnabled.collectAsState()
   val timelineZoom by viewModel.timelineEngine.timelineZoom.collectAsState()
+  val selectedClipIds by viewModel.timelineEngine.selectedClipIds.collectAsState()
+  val isMultiSelectMode by viewModel.timelineEngine.isMultiSelectMode.collectAsState()
+  val snapIndicatorMs by viewModel.timelineEngine.snapIndicatorMs.collectAsState()
+  val isMagnetic by viewModel.timelineEngine.isMagneticEnabled.collectAsState()
+  val clipboardClips by viewModel.timelineEngine.clipboardClips.collectAsState()
 
   var showRenameDialog by remember { mutableStateOf(false) }
+  var showSpeedDialog by remember { mutableStateOf(false) }
+  var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
+
+  val replaceMediaPickerLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickVisualMedia()
+  ) { uri ->
+    if (uri != null && pendingReplaceClipId != null) {
+      val clipId = pendingReplaceClipId!!
+      viewModel.timelineEngine.replaceMedia(
+        clipId = clipId,
+        newUri = uri.toString(),
+        newName = "Replaced Media"
+      )
+      pendingReplaceClipId = null
+    }
+  }
 
   Scaffold(
     modifier = modifier
@@ -220,19 +245,147 @@ fun EditorScreen(
         onZoomChange = { viewModel.timelineEngine.setZoom(it) }
       )
 
-      // 3. Multi-Track Timeline Canvas
+      // 3. Timeline Quick Action Toolbar
+      TimelineActionToolbar(
+        hasSelection = selectedElement !is SelectedTrackElement.None || selectedClipIds.isNotEmpty(),
+        isMultiSelectMode = isMultiSelectMode,
+        selectedCount = selectedClipIds.size,
+        canPaste = clipboardClips.isNotEmpty(),
+        isMagnetic = isMagnetic,
+        onSplit = { viewModel.timelineEngine.splitAtPlayhead() },
+        onTrimLeft = {
+          val activeClipId = (selectedElement as? SelectedTrackElement.Video)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Overlay)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Audio)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Text)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Sticker)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Effect)?.clipId
+            ?: selectedClipIds.firstOrNull()
+          if (activeClipId != null) {
+            viewModel.timelineEngine.trimClipLeft(activeClipId, currentPosMs)
+          }
+        },
+        onTrimRight = {
+          val activeClipId = (selectedElement as? SelectedTrackElement.Video)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Overlay)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Audio)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Text)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Sticker)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Effect)?.clipId
+            ?: selectedClipIds.firstOrNull()
+          if (activeClipId != null) {
+            val clipStart = when (val el = viewModel.timelineEngine.findTrackElementForClip(activeClipId)) {
+              is SelectedTrackElement.Video -> timeline.videoClips.find { c -> c.id == activeClipId }?.timelineStartMs
+              is SelectedTrackElement.Overlay -> timeline.overlayClips.find { c -> c.id == activeClipId }?.timelineStartMs
+              is SelectedTrackElement.Audio -> timeline.audioClips.find { c -> c.id == activeClipId }?.timelineStartMs
+              is SelectedTrackElement.Text -> timeline.textClips.find { c -> c.id == activeClipId }?.timelineStartMs
+              is SelectedTrackElement.Sticker -> timeline.stickerClips.find { c -> c.id == activeClipId }?.timelineStartMs
+              is SelectedTrackElement.Effect -> timeline.effectClips.find { c -> c.id == activeClipId }?.timelineStartMs
+              else -> null
+            } ?: 0L
+            val newDuration = (currentPosMs - clipStart).coerceAtLeast(100L)
+            viewModel.timelineEngine.trimClipRight(activeClipId, newDuration)
+          }
+        },
+        onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
+        onNormalDelete = { viewModel.timelineEngine.normalDelete() },
+        onDuplicate = { viewModel.timelineEngine.duplicateClips() },
+        onCopy = { viewModel.timelineEngine.copySelectedClips() },
+        onPaste = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
+        onSpeedClick = { showSpeedDialog = true },
+        onReverse = { viewModel.timelineEngine.toggleReverseSelectedClip() },
+        onFreezeFrame = { viewModel.timelineEngine.freezeFrameAtPlayhead() },
+        onReplaceMedia = {
+          val activeClipId = (selectedElement as? SelectedTrackElement.Video)?.clipId
+            ?: (selectedElement as? SelectedTrackElement.Overlay)?.clipId
+            ?: selectedClipIds.firstOrNull()
+          if (activeClipId != null) {
+            pendingReplaceClipId = activeClipId
+            replaceMediaPickerLauncher.launch(
+              PickVisualMediaRequest(
+                ActivityResultContracts.PickVisualMedia.ImageAndVideo
+              )
+            )
+          }
+        },
+        onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
+        onToggleMagnetic = { viewModel.timelineEngine.toggleMagneticMovement() }
+      )
+
+      // 4. Professional Multi-Track Timeline Canvas
       MultiTrackTimeline(
         timeline = timeline,
         currentPosMs = currentPosMs,
         zoom = timelineZoom,
         selectedElement = selectedElement,
+        selectedClipIds = selectedClipIds,
+        isMultiSelectMode = isMultiSelectMode,
+        snapIndicatorMs = snapIndicatorMs,
         onSeek = { viewModel.timelineEngine.setPosition(it) },
         onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+        onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
+        onZoomChange = { viewModel.timelineEngine.setZoom(it) },
+        onMoveClip = { clipId, deltaMs ->
+          val currentStart = when (viewModel.timelineEngine.findTrackElementForClip(clipId)) {
+            is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Audio -> timeline.audioClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Text -> timeline.textClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Sticker -> timeline.stickerClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Effect -> timeline.effectClips.find { it.id == clipId }?.timelineStartMs
+            else -> null
+          } ?: 0L
+          viewModel.timelineEngine.moveClip(clipId, currentStart + deltaMs)
+        },
+        onTrimClipLeft = { clipId, deltaMs ->
+          val currentStart = when (viewModel.timelineEngine.findTrackElementForClip(clipId)) {
+            is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Audio -> timeline.audioClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Text -> timeline.textClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Sticker -> timeline.stickerClips.find { it.id == clipId }?.timelineStartMs
+            is SelectedTrackElement.Effect -> timeline.effectClips.find { it.id == clipId }?.timelineStartMs
+            else -> null
+          } ?: 0L
+          viewModel.timelineEngine.trimClipLeft(clipId, currentStart + deltaMs)
+        },
+        onTrimClipRight = { clipId, deltaMs ->
+          val currentDur = when (viewModel.timelineEngine.findTrackElementForClip(clipId)) {
+            is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == clipId }?.durationMs
+            is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == clipId }?.durationMs
+            is SelectedTrackElement.Audio -> timeline.audioClips.find { it.id == clipId }?.durationMs
+            is SelectedTrackElement.Text -> timeline.textClips.find { it.id == clipId }?.durationMs
+            is SelectedTrackElement.Sticker -> timeline.stickerClips.find { it.id == clipId }?.durationMs
+            is SelectedTrackElement.Effect -> timeline.effectClips.find { it.id == clipId }?.durationMs
+            else -> null
+          } ?: 1000L
+          viewModel.timelineEngine.trimClipRight(clipId, currentDur + deltaMs)
+        },
+        onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
+        onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
+        onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
+        onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
+        onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
         modifier = Modifier
           .fillMaxWidth()
-          .height(200.dp)
+          .weight(1.1f)
       )
     }
+  }
+
+  // Speed Dialog
+  if (showSpeedDialog) {
+    val activeSpeed = (selectedElement as? SelectedTrackElement.Video)?.let { sel ->
+      timeline.videoClips.find { it.id == sel.clipId }?.speed
+    } ?: 1.0f
+    ClipSpeedDialog(
+      currentSpeed = activeSpeed,
+      onDismiss = { showSpeedDialog = false },
+      onConfirm = { newSpeed ->
+        viewModel.timelineEngine.setClipSpeed(speed = newSpeed)
+        showSpeedDialog = false
+      }
+    )
   }
 
   // Rename Dialog
@@ -400,12 +553,13 @@ fun VideoPreviewSurface(
     } else null
   }
 
-  // Color Matrix for video adjustments
-  val adjustments = timeline.adjustments
-  val colorMatrix = remember(adjustments) {
-    val cm = ColorMatrix()
-    cm.setToSaturation(adjustments.saturation)
-    cm
+  // Color Matrix for video adjustments and filter presets matching export pipeline
+  val combinedColorFilter = remember(timeline.adjustments, timeline.filter) {
+    val androidMatrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+      timeline.adjustments,
+      timeline.filter
+    )
+    ColorFilter.colorMatrix(ColorMatrix(androidMatrix.array))
   }
 
   Card(
@@ -448,6 +602,7 @@ fun VideoPreviewSurface(
               model = activeClip.uri,
               contentDescription = activeClip.name,
               contentScale = ContentScale.Fit,
+              colorFilter = combinedColorFilter,
               modifier = Modifier.fillMaxSize()
             )
           }
@@ -503,20 +658,24 @@ fun VideoPreviewSurface(
         }
       }
 
-      // Active Overlays (Picture-in-Picture / Floating Media)
+      // Active Overlays (Picture-in-Picture / Floating Media with Keyframe Interpolation)
       activeOverlays.forEach { overlay ->
         val isOverlaySelected = selectedElement is SelectedTrackElement.Overlay &&
           (selectedElement as SelectedTrackElement.Overlay).clipId == overlay.id
+
+        val relTime = currentPosMs - overlay.timelineStartMs
+        val kf = com.example.engine.KeyframeInterpolator.interpolate(overlay, relTime)
 
         Box(
           modifier = Modifier
             .align(Alignment.Center)
             .offset(
-              x = (overlay.cropOffsetX * 140).dp,
-              y = (overlay.cropOffsetY * 140).dp
+              x = (kf.posX * 140).dp,
+              y = (kf.posY * 140).dp
             )
-            .scale(overlay.cropScale)
-            .rotate(overlay.rotationDegrees.toFloat())
+            .scale(kf.scale)
+            .rotate(kf.rotation)
+            .alpha(kf.opacity)
             .width(160.dp)
             .height(100.dp)
             .clip(RoundedCornerShape(8.dp))
@@ -532,9 +691,7 @@ fun VideoPreviewSurface(
             model = overlay.uri,
             contentDescription = overlay.name,
             contentScale = ContentScale.Crop,
-            modifier = Modifier
-              .fillMaxSize()
-              .alpha(overlay.opacity)
+            modifier = Modifier.fillMaxSize()
           )
 
           Column(
@@ -584,8 +741,23 @@ fun VideoPreviewSurface(
         }
       }
 
-      // Active Text Overlays (Subtitles & Titles)
+      // Active Text Overlays (Subtitles & Titles with Intro Animations)
       activeTexts.forEach { textClip ->
+        val relTime = (currentPosMs - textClip.timelineStartMs).coerceAtLeast(0L)
+        val animFactor = if (relTime < textClip.animDurationMs) {
+          (relTime.toFloat() / textClip.animDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+        } else 1f
+
+        val (animScale, animAlpha) = when (textClip.animationType.lowercase()) {
+          "pop" -> Pair(0.4f + 0.6f * animFactor, animFactor)
+          "zoom" -> Pair(0.2f + 0.8f * animFactor, animFactor)
+          "fade" -> Pair(1f, animFactor)
+          "slide" -> Pair(1f, animFactor)
+          "bounce" -> Pair(0.5f + 0.5f * animFactor, animFactor)
+          "none" -> Pair(1f, 1f)
+          else -> Pair(1f, animFactor)
+        }
+
         Box(
           modifier = Modifier
             .fillMaxSize()
@@ -599,7 +771,8 @@ fun VideoPreviewSurface(
                 y = (textClip.posY * 160).dp
               )
               .rotate(textClip.rotation)
-              .scale(textClip.scale)
+              .scale(textClip.scale * animScale)
+              .alpha(animAlpha)
               .background(
                 if (textClip.hasBackground) Color(textClip.backgroundColor) else Color.Transparent,
                 RoundedCornerShape(8.dp)
@@ -720,313 +893,6 @@ private fun TimelineControlsBar(
         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = RedAccent)
       }
     }
-  }
-}
-
-@Composable
-private fun MultiTrackTimeline(
-  timeline: Timeline,
-  currentPosMs: Long,
-  zoom: Float,
-  selectedElement: SelectedTrackElement,
-  onSeek: (Long) -> Unit,
-  onSelectElement: (SelectedTrackElement) -> Unit,
-  modifier: Modifier = Modifier
-) {
-  val scrollState = rememberScrollState()
-  val totalDuration = timeline.totalDurationMs.coerceAtLeast(6000L)
-  val msPerPixel = remember(zoom) { 20f / zoom } // 20ms per pixel base
-  val totalWidthPx = remember(totalDuration, msPerPixel) { (totalDuration / msPerPixel).toInt() }
-
-  Box(
-    modifier = modifier
-      .background(StudioDarkBg)
-      .border(1.dp, StudioBorder)
-  ) {
-    // Scrollable Tracks Canvas
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .horizontalScroll(scrollState)
-        .pointerInput(totalDuration, msPerPixel) {
-          detectTapGestures { offset ->
-            val clickedMs = (offset.x * msPerPixel).toLong().coerceIn(0L, totalDuration)
-            onSeek(clickedMs)
-          }
-        }
-    ) {
-      // 1. Timecode Ruler
-      TimecodeRuler(
-        totalDurationMs = totalDuration,
-        msPerPixel = msPerPixel,
-        modifier = Modifier
-          .width((totalDuration / msPerPixel).dp)
-          .height(26.dp)
-      )
-
-      // 2. Video / Main Track
-      TrackRow(
-        title = "Video",
-        icon = Icons.Default.Movie,
-        accentColor = CyanAccent,
-        modifier = Modifier.width((totalDuration / msPerPixel).dp)
-      ) {
-        timeline.videoClips.forEach { clip ->
-          val startPx = (clip.timelineStartMs / msPerPixel).dp
-          val widthPx = (clip.durationMs / msPerPixel).dp
-          val isSelected = selectedElement is SelectedTrackElement.Video &&
-            (selectedElement as SelectedTrackElement.Video).clipId == clip.id
-
-          Box(
-            modifier = Modifier
-              .offset(x = startPx)
-              .width(widthPx)
-              .height(44.dp)
-              .clip(RoundedCornerShape(8.dp))
-              .background(if (isSelected) StudioSurfaceVariant else Color(0xFF1E293B))
-              .border(
-                if (isSelected) 2.dp else 1.dp,
-                if (isSelected) CyanAccent else StudioBorder,
-                RoundedCornerShape(8.dp)
-              )
-              .clickable { onSelectElement(SelectedTrackElement.Video(clip.id)) }
-              .padding(horizontal = 8.dp, vertical = 4.dp)
-          ) {
-            Row(
-              modifier = Modifier.fillMaxSize(),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Text(
-                text = clip.name,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1
-              )
-              Text(
-                text = formatDurationShort(clip.durationMs),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, color = CyanAccent)
-              )
-            }
-          }
-        }
-      }
-
-      // 3. Overlay (PIP) Track
-      TrackRow(
-        title = "Overlay",
-        icon = Icons.Default.Layers,
-        accentColor = AmberAccent,
-        modifier = Modifier.width((totalDuration / msPerPixel).dp)
-      ) {
-        timeline.overlayClips.forEach { clip ->
-          val startPx = (clip.timelineStartMs / msPerPixel).dp
-          val widthPx = (clip.durationMs / msPerPixel).dp
-          val isSelected = selectedElement is SelectedTrackElement.Overlay &&
-            (selectedElement as SelectedTrackElement.Overlay).clipId == clip.id
-
-          Box(
-            modifier = Modifier
-              .offset(x = startPx)
-              .width(widthPx)
-              .height(38.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(if (isSelected) Color(0xFF78350F) else Color(0xFF451A03))
-              .border(
-                if (isSelected) 2.dp else 1.dp,
-                if (isSelected) AmberAccent else Color(0xFFB45309),
-                RoundedCornerShape(6.dp)
-              )
-              .clickable { onSelectElement(SelectedTrackElement.Overlay(clip.id)) }
-              .padding(horizontal = 6.dp, vertical = 2.dp)
-          ) {
-            Row(
-              modifier = Modifier.fillMaxSize(),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                  if (clip.isVideo) Icons.Default.Movie else Icons.Default.Image,
-                  contentDescription = null,
-                  tint = AmberAccent,
-                  modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                  text = clip.name,
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
-                )
-              }
-              Text(
-                text = formatDurationShort(clip.durationMs),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, color = AmberAccent)
-              )
-            }
-          }
-        }
-      }
-
-      // 4. Text / Subtitle Track
-      TrackRow(
-        title = "Text",
-        icon = Icons.Default.TextFields,
-        accentColor = PurpleAccent,
-        modifier = Modifier.width((totalDuration / msPerPixel).dp)
-      ) {
-        timeline.textClips.forEach { clip ->
-          val startPx = (clip.timelineStartMs / msPerPixel).dp
-          val widthPx = (clip.durationMs / msPerPixel).dp
-          val isSelected = selectedElement is SelectedTrackElement.Text &&
-            (selectedElement as SelectedTrackElement.Text).clipId == clip.id
-
-          Box(
-            modifier = Modifier
-              .offset(x = startPx)
-              .width(widthPx)
-              .height(34.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(Color(0xFF312E81))
-              .border(
-                if (isSelected) 2.dp else 1.dp,
-                if (isSelected) PurpleAccent else Color.Transparent,
-                RoundedCornerShape(6.dp)
-              )
-              .clickable { onSelectElement(SelectedTrackElement.Text(clip.id)) }
-              .padding(horizontal = 6.dp, vertical = 2.dp)
-          ) {
-            Text(
-              text = clip.text,
-              style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold),
-              maxLines = 1
-            )
-          }
-        }
-      }
-
-      // 4. Audio Track (with Waveform!)
-      TrackRow(
-        title = "Audio",
-        icon = Icons.Default.Audiotrack,
-        accentColor = GreenAccent,
-        modifier = Modifier.width((totalDuration / msPerPixel).dp)
-      ) {
-        timeline.audioClips.forEach { clip ->
-          val startPx = (clip.timelineStartMs / msPerPixel).dp
-          val widthPx = (clip.durationMs / msPerPixel).dp
-          val isSelected = selectedElement is SelectedTrackElement.Audio &&
-            (selectedElement as SelectedTrackElement.Audio).clipId == clip.id
-
-          Box(
-            modifier = Modifier
-              .offset(x = startPx)
-              .width(widthPx)
-              .height(38.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(Color(0xFF064E3B))
-              .border(
-                if (isSelected) 2.dp else 1.dp,
-                if (isSelected) GreenAccent else Color.Transparent,
-                RoundedCornerShape(6.dp)
-              )
-              .clickable { onSelectElement(SelectedTrackElement.Audio(clip.id)) }
-              .padding(horizontal = 6.dp, vertical = 2.dp)
-          ) {
-            Row(
-              modifier = Modifier.fillMaxSize(),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = clip.title,
-                style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Medium),
-                maxLines = 1,
-                modifier = Modifier.widthIn(max = 90.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              // Waveform representation
-              Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                clip.waveformData.take(24).forEach { amp ->
-                  Box(
-                    modifier = Modifier
-                      .width(2.dp)
-                      .height((amp * 24).dp)
-                      .background(GreenAccent)
-                  )
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Centered / Track Playhead (Red Needle)
-    val playheadX = (currentPosMs / msPerPixel).dp
-    Box(
-      modifier = Modifier
-        .offset(x = playheadX - scrollState.value.dp)
-        .width(2.dp)
-        .fillMaxHeight()
-        .background(RedAccent)
-    )
-  }
-}
-
-@Composable
-private fun TimecodeRuler(
-  totalDurationMs: Long,
-  msPerPixel: Float,
-  modifier: Modifier = Modifier
-) {
-  Box(
-    modifier = modifier
-      .background(StudioSurface)
-      .border(1.dp, StudioBorder)
-  ) {
-    val secondInterval = 1000L
-    val count = (totalDurationMs / secondInterval).toInt()
-    for (i in 0..count) {
-      val secondMs = i * secondInterval
-      val xOffset = (secondMs / msPerPixel).dp
-      Box(
-        modifier = Modifier
-          .offset(x = xOffset)
-          .width(1.dp)
-          .height(if (i % 5 == 0) 14.dp else 8.dp)
-          .background(if (i % 5 == 0) TextSecondary else TextTertiary)
-      )
-      if (i % 5 == 0) {
-        Text(
-          text = "${i}s",
-          style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, color = TextSecondary),
-          modifier = Modifier.offset(x = xOffset + 4.dp, y = 2.dp)
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun TrackRow(
-  title: String,
-  icon: ImageVector,
-  accentColor: Color,
-  modifier: Modifier = Modifier,
-  content: @Composable BoxScope.() -> Unit
-) {
-  Box(
-    modifier = modifier
-      .height(50.dp)
-      .background(StudioDarkBg)
-      .border(0.5.dp, StudioBorder.copy(alpha = 0.4f))
-      .padding(vertical = 4.dp)
-  ) {
-    content()
   }
 }
 

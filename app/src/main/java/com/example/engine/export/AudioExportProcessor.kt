@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import com.example.domain.model.AudioClip
 import com.example.domain.model.Timeline
+import com.example.domain.model.TrackType
 import com.example.domain.model.VideoClip
 import com.example.engine.audio.SoundEffectsCatalog
 import kotlinx.coroutines.Dispatchers
@@ -50,9 +51,14 @@ class AudioExportProcessor(private val context: Context) {
   }
 
   fun hasActiveAudio(timeline: Timeline): Boolean {
-    val hasVideoAudio = timeline.videoClips.any { it.isVideo && it.hasAudio && !it.isMuted && it.uri.isNotBlank() }
-    val hasOverlayAudio = timeline.overlayClips.any { it.isVideo && it.hasAudio && !it.isMuted && it.uri.isNotBlank() }
-    val hasAudioClips = timeline.audioClips.any { !it.isMuted && (it.uri.isNotBlank() || it.title.isNotBlank()) }
+    val anySolo = timeline.trackSettings.values.any { it.isSolo }
+    val videoAudible = (timeline.trackSettings[TrackType.MAIN_VIDEO]?.isMuted != true) && (!anySolo || timeline.trackSettings[TrackType.MAIN_VIDEO]?.isSolo == true)
+    val overlayAudible = (timeline.trackSettings[TrackType.OVERLAY]?.isMuted != true) && (!anySolo || timeline.trackSettings[TrackType.OVERLAY]?.isSolo == true)
+    val audioAudible = (timeline.trackSettings[TrackType.AUDIO]?.isMuted != true) && (!anySolo || timeline.trackSettings[TrackType.AUDIO]?.isSolo == true)
+
+    val hasVideoAudio = videoAudible && timeline.videoClips.any { it.isVideo && it.hasAudio && !it.isMuted && it.uri.isNotBlank() }
+    val hasOverlayAudio = overlayAudible && timeline.overlayClips.any { it.isVideo && it.hasAudio && !it.isMuted && it.uri.isNotBlank() }
+    val hasAudioClips = audioAudible && timeline.audioClips.any { !it.isMuted && (it.uri.isNotBlank() || it.title.isNotBlank()) }
     return hasVideoAudio || hasOverlayAudio || hasAudioClips
   }
 
@@ -70,72 +76,82 @@ class AudioExportProcessor(private val context: Context) {
     val masterRight = FloatArray(totalFrames)
 
     val trackDescriptors = mutableListOf<AudioTrackDescriptor>()
+    val anySolo = timeline.trackSettings.values.any { it.isSolo }
+    val videoAudible = (timeline.trackSettings[TrackType.MAIN_VIDEO]?.isMuted != true) && (!anySolo || timeline.trackSettings[TrackType.MAIN_VIDEO]?.isSolo == true)
+    val overlayAudible = (timeline.trackSettings[TrackType.OVERLAY]?.isMuted != true) && (!anySolo || timeline.trackSettings[TrackType.OVERLAY]?.isSolo == true)
+    val audioAudible = (timeline.trackSettings[TrackType.AUDIO]?.isMuted != true) && (!anySolo || timeline.trackSettings[TrackType.AUDIO]?.isSolo == true)
 
     // 1. Video clips with audio
-    for (clip in timeline.videoClips) {
-      if (clip.isVideo && clip.hasAudio && !clip.isMuted && clip.uri.isNotBlank()) {
-        trackDescriptors.add(
-          AudioTrackDescriptor(
-            uri = clip.uri,
-            title = clip.name,
-            timelineStartMs = clip.timelineStartMs,
-            durationMs = clip.durationMs,
-            sourceStartMs = clip.sourceStartMs,
-            sourceEndMs = clip.sourceEndMs,
-            speed = clip.speed.coerceIn(0.1f, 10f),
-            volume = clip.volume.coerceAtLeast(0f),
-            gainDb = 0f,
-            fadeInMs = 0L,
-            fadeOutMs = 0L,
-            isMuted = clip.isMuted,
-            isReversed = clip.isReversed
+    if (videoAudible) {
+      for (clip in timeline.videoClips) {
+        if (clip.isVideo && clip.hasAudio && !clip.isMuted && clip.uri.isNotBlank()) {
+          trackDescriptors.add(
+            AudioTrackDescriptor(
+              uri = clip.uri,
+              title = clip.name,
+              timelineStartMs = clip.timelineStartMs,
+              durationMs = clip.durationMs,
+              sourceStartMs = clip.sourceStartMs,
+              sourceEndMs = clip.sourceEndMs,
+              speed = clip.speed.coerceIn(0.1f, 10f),
+              volume = clip.volume.coerceAtLeast(0f),
+              gainDb = 0f,
+              fadeInMs = 0L,
+              fadeOutMs = 0L,
+              isMuted = clip.isMuted,
+              isReversed = clip.isReversed
+            )
           )
-        )
+        }
       }
     }
 
     // 2. Picture-in-picture overlay clips with audio
-    for (clip in timeline.overlayClips) {
-      if (clip.isVideo && clip.hasAudio && !clip.isMuted && clip.uri.isNotBlank()) {
-        trackDescriptors.add(
-          AudioTrackDescriptor(
-            uri = clip.uri,
-            title = clip.name,
-            timelineStartMs = clip.timelineStartMs,
-            durationMs = clip.durationMs,
-            sourceStartMs = clip.sourceStartMs,
-            sourceEndMs = clip.sourceEndMs,
-            speed = clip.speed.coerceIn(0.1f, 10f),
-            volume = clip.volume.coerceAtLeast(0f),
-            gainDb = 0f,
-            fadeInMs = 0L,
-            fadeOutMs = 0L,
-            isMuted = clip.isMuted,
-            isReversed = clip.isReversed
+    if (overlayAudible) {
+      for (clip in timeline.overlayClips) {
+        if (clip.isVideo && clip.hasAudio && !clip.isMuted && clip.uri.isNotBlank()) {
+          trackDescriptors.add(
+            AudioTrackDescriptor(
+              uri = clip.uri,
+              title = clip.name,
+              timelineStartMs = clip.timelineStartMs,
+              durationMs = clip.durationMs,
+              sourceStartMs = clip.sourceStartMs,
+              sourceEndMs = clip.sourceEndMs,
+              speed = clip.speed.coerceIn(0.1f, 10f),
+              volume = clip.volume.coerceAtLeast(0f),
+              gainDb = 0f,
+              fadeInMs = 0L,
+              fadeOutMs = 0L,
+              isMuted = clip.isMuted,
+              isReversed = clip.isReversed
+            )
           )
-        )
+        }
       }
     }
 
     // 3. Audio clips (Music, SFX, Voiceover, Extracted Audio)
-    for (clip in timeline.audioClips) {
-      if (!clip.isMuted && (clip.uri.isNotBlank() || clip.title.isNotBlank())) {
-        trackDescriptors.add(
-          AudioTrackDescriptor(
-            uri = clip.uri,
-            title = clip.title,
-            timelineStartMs = clip.timelineStartMs,
-            durationMs = clip.durationMs,
-            sourceStartMs = clip.sourceStartMs,
-            sourceEndMs = clip.sourceEndMs,
-            speed = clip.speed.coerceIn(0.1f, 10f),
-            volume = clip.volume.coerceAtLeast(0f),
-            gainDb = clip.gainDb,
-            fadeInMs = clip.fadeInMs.coerceAtLeast(0L),
-            fadeOutMs = clip.fadeOutMs.coerceAtLeast(0L),
-            isMuted = clip.isMuted
+    if (audioAudible) {
+      for (clip in timeline.audioClips) {
+        if (!clip.isMuted && (clip.uri.isNotBlank() || clip.title.isNotBlank())) {
+          trackDescriptors.add(
+            AudioTrackDescriptor(
+              uri = clip.uri,
+              title = clip.title,
+              timelineStartMs = clip.timelineStartMs,
+              durationMs = clip.durationMs,
+              sourceStartMs = clip.sourceStartMs,
+              sourceEndMs = clip.sourceEndMs,
+              speed = clip.speed.coerceIn(0.1f, 10f),
+              volume = clip.volume.coerceAtLeast(0f),
+              gainDb = clip.gainDb,
+              fadeInMs = clip.fadeInMs.coerceAtLeast(0L),
+              fadeOutMs = clip.fadeOutMs.coerceAtLeast(0L),
+              isMuted = clip.isMuted
+            )
           )
-        )
+        }
       }
     }
 

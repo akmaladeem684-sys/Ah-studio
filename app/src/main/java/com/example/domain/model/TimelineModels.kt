@@ -70,7 +70,8 @@ data class AudioClip(
   val isMuted: Boolean = false,
   val isVoiceOver: Boolean = false,
   val waveformData: List<Float> = emptyList(),
-  val gainDb: Float = 0.0f
+  val gainDb: Float = 0.0f,
+  val isReversed: Boolean = false
 )
 
 data class TextClip(
@@ -220,6 +221,34 @@ data class ChromaKeySettings(
   val backgroundUri: String? = null
 )
 
+enum class TrackType {
+  MAIN_VIDEO,
+  OVERLAY,
+  TEXT,
+  AUDIO,
+  STICKER,
+  EFFECT
+}
+
+enum class TrackHeight(val label: String, val heightDp: Int) {
+  COMPACT("Compact", 40),
+  NORMAL("Normal", 56),
+  EXPANDED("Expanded", 78)
+}
+
+data class TrackSettings(
+  val type: TrackType,
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false,
+  val isMuted: Boolean = false,
+  val isSolo: Boolean = false,
+  val height: TrackHeight = TrackHeight.NORMAL
+)
+
+fun defaultTrackSettings(): Map<TrackType, TrackSettings> {
+  return TrackType.values().associateWith { TrackSettings(it) }
+}
+
 data class Timeline(
   val videoClips: List<VideoClip> = emptyList(),
   val overlayClips: List<VideoClip> = emptyList(),
@@ -232,7 +261,8 @@ data class Timeline(
   val filter: FilterSettings = FilterSettings(),
   val chromaKey: ChromaKeySettings = ChromaKeySettings(),
   val canvasBackgroundColor: Long = 0xFF000000,
-  val aspectRatio: AspectRatio = AspectRatio.RATIO_9_16
+  val aspectRatio: AspectRatio = AspectRatio.RATIO_9_16,
+  val trackSettings: Map<TrackType, TrackSettings> = defaultTrackSettings()
 ) {
   val totalDurationMs: Long
     get() {
