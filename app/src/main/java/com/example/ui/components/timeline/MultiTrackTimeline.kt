@@ -49,6 +49,9 @@ fun MultiTrackTimeline(
   onToggleTrackMute: (TrackType) -> Unit,
   onToggleTrackSolo: (TrackType) -> Unit,
   onCycleTrackHeight: (TrackType) -> Unit,
+  selectedKeyframeIds: Set<String> = emptySet(),
+  onSelectKeyframe: ((String) -> Unit)? = null,
+  onMoveKeyframe: ((String, Long) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val horizontalScrollState = rememberScrollState()
@@ -215,6 +218,9 @@ fun MultiTrackTimeline(
                           isReversed = clip.isReversed,
                           isFreeze = !clip.isVideo,
                           keyframes = clip.keyframes,
+                          selectedKeyframeIds = selectedKeyframeIds,
+                          onSelectKeyframe = onSelectKeyframe,
+                          onMoveKeyframe = onMoveKeyframe,
                           onSelect = {
                             if (isMultiSelectMode) onToggleClipSelection(clip.id)
                             else onSelectElement(SelectedTrackElement.Video(clip.id))
@@ -245,6 +251,9 @@ fun MultiTrackTimeline(
                           speed = clip.speed,
                           isReversed = clip.isReversed,
                           keyframes = clip.keyframes,
+                          selectedKeyframeIds = selectedKeyframeIds,
+                          onSelectKeyframe = onSelectKeyframe,
+                          onMoveKeyframe = onMoveKeyframe,
                           onSelect = {
                             if (isMultiSelectMode) onToggleClipSelection(clip.id)
                             else onSelectElement(SelectedTrackElement.Overlay(clip.id))
@@ -300,6 +309,10 @@ fun MultiTrackTimeline(
                           isMultiSelected = isMulti,
                           isLocked = settings.isLocked,
                           waveformData = clip.waveformData,
+                          keyframes = clip.keyframes,
+                          selectedKeyframeIds = selectedKeyframeIds,
+                          onSelectKeyframe = onSelectKeyframe,
+                          onMoveKeyframe = onMoveKeyframe,
                           onSelect = {
                             if (isMultiSelectMode) onToggleClipSelection(clip.id)
                             else onSelectElement(SelectedTrackElement.Audio(clip.id))

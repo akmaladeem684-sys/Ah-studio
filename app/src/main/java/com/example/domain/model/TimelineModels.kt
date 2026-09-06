@@ -2,17 +2,75 @@ package com.example.domain.model
 
 import java.util.UUID
 
+enum class KeyframeInterpolation(val displayName: String) {
+  LINEAR("Linear"),
+  EASE_IN("Ease In"),
+  EASE_OUT("Ease Out"),
+  EASE_IN_OUT("Ease In-Out"),
+  CUSTOM_CURVE("Custom Curve");
+
+  companion object {
+    fun fromString(str: String): KeyframeInterpolation {
+      return when (str.trim().lowercase()) {
+        "linear" -> LINEAR
+        "ease in", "easein", "ease_in" -> EASE_IN
+        "ease out", "easeout", "ease_out" -> EASE_OUT
+        "ease in-out", "easeinout", "ease_in_out", "smoothease" -> EASE_IN_OUT
+        "custom curve", "custom", "bezier" -> CUSTOM_CURVE
+        else -> LINEAR
+      }
+    }
+  }
+}
+
 data class ClipKeyframe(
   val id: String = UUID.randomUUID().toString(),
   val timeMs: Long,
-  val scale: Float = 1f,
-  val rotation: Float = 0f,
   val posX: Float = 0f,
   val posY: Float = 0f,
+  val scaleX: Float = 1f,
+  val scaleY: Float = 1f,
+  val rotation: Float = 0f,
   val opacity: Float = 1f,
   val volume: Float = 1f,
-  val interpolation: String = "Linear" // "Linear" or "SmoothEase"
-)
+  val blur: Float = 0f,
+  val brightness: Float = 0f,
+  val contrast: Float = 1f,
+  val saturation: Float = 1f,
+  val effectParam: Float = 0f,
+  val interpolation: KeyframeInterpolation = KeyframeInterpolation.LINEAR,
+  val customCurvePoints: List<Float> = listOf(0.42f, 0.0f, 0.58f, 1.0f) // P1x, P1y, P2x, P2y
+) {
+  val scale: Float get() = (scaleX + scaleY) / 2f
+
+  constructor(
+    id: String = UUID.randomUUID().toString(),
+    timeMs: Long,
+    scale: Float,
+    rotation: Float = 0f,
+    posX: Float = 0f,
+    posY: Float = 0f,
+    opacity: Float = 1f,
+    volume: Float = 1f,
+    interpolation: String = "Linear"
+  ) : this(
+    id = id,
+    timeMs = timeMs,
+    posX = posX,
+    posY = posY,
+    scaleX = scale,
+    scaleY = scale,
+    rotation = rotation,
+    opacity = opacity,
+    volume = volume,
+    blur = 0f,
+    brightness = 0f,
+    contrast = 1f,
+    saturation = 1f,
+    effectParam = 0f,
+    interpolation = KeyframeInterpolation.fromString(interpolation)
+  )
+}
 
 data class VideoClip(
   val id: String = UUID.randomUUID().toString(),
@@ -71,7 +129,14 @@ data class AudioClip(
   val isVoiceOver: Boolean = false,
   val waveformData: List<Float> = emptyList(),
   val gainDb: Float = 0.0f,
-  val isReversed: Boolean = false
+  val isReversed: Boolean = false,
+  val keyframes: List<ClipKeyframe> = emptyList()
+)
+
+data class WordTiming(
+  val word: String,
+  val startMs: Long,
+  val durationMs: Long
 )
 
 data class TextClip(
@@ -80,30 +145,39 @@ data class TextClip(
   val timelineStartMs: Long = 0L,
   val durationMs: Long = 3000L,
   val fontFamily: String = "Default",
+  val customFontPath: String? = null,
   val fontSizeSp: Float = 24f,
   val fontWeight: Int = 700,
   val isItalic: Boolean = false,
   val alignment: String = "Center",
   val letterSpacing: Float = 0f,
-  val lineSpacing: Float = 0f,
+  val lineSpacing: Float = 1.0f,
   val textColor: Long = 0xFFFFFFFF,
   val hasGradient: Boolean = false,
   val gradientColorStart: Long = 0xFF00E5FF,
   val gradientColorEnd: Long = 0xFF8B5CF6,
+  val gradientDirection: String = "Horizontal",
   val strokeWidth: Float = 0f,
   val strokeColor: Long = 0xFF000000,
   val hasShadow: Boolean = false,
   val shadowColor: Long = 0x88000000,
   val shadowBlur: Float = 4f,
+  val shadowOffsetX: Float = 2f,
+  val shadowOffsetY: Float = 2f,
   val hasBackground: Boolean = false,
   val backgroundColor: Long = 0xAA000000,
+  val cornerRadius: Float = 12f,
+  val bgPadding: Float = 16f,
   val opacity: Float = 1.0f,
   val rotation: Float = 0f,
   val posX: Float = 0f, // -1f to 1f normalized
-  val posY: Float = 0.3f, // -1f to 1f normalized
+  val posY: Float = 0.35f, // -1f to 1f normalized
   val scale: Float = 1f,
   val animationType: String = "Fade", // "None", "Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Pop", "Shake"
-  val animDurationMs: Long = 400L
+  val animDurationMs: Long = 400L,
+  val subtitleStyle: String = "Classic", // "Classic", "Bold", "HighlightWord", "Karaoke", "Animated"
+  val highlightColor: Long = 0xFFFFEB3B,
+  val words: List<WordTiming> = emptyList()
 )
 
 data class StickerClip(

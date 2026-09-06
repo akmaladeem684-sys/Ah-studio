@@ -42,6 +42,11 @@ class TimelineEngine {
   private val _selectedClipIds = MutableStateFlow<Set<String>>(emptySet())
   val selectedClipIds: StateFlow<Set<String>> = _selectedClipIds.asStateFlow()
 
+  private val _selectedKeyframeIds = MutableStateFlow<Set<String>>(emptySet())
+  val selectedKeyframeIds: StateFlow<Set<String>> = _selectedKeyframeIds.asStateFlow()
+
+  private var keyframeClipboard: List<ClipKeyframe> = emptyList()
+
   private val _snapIndicatorMs = MutableStateFlow<Long?>(null)
   val snapIndicatorMs: StateFlow<Long?> = _snapIndicatorMs.asStateFlow()
 
@@ -1846,41 +1851,506 @@ class TimelineEngine {
     _timeline.value = _timeline.value.copy(transitions = current)
   }
 
-  // --- Keyframe System ---
+  // --- Keyframe Animation System ---
 
-  fun addKeyframeToSelectedClip() {
-    val selected = _selectedElement.value
-    if (selected is SelectedTrackElement.Video) {
-      recordHistory()
-      val list = _timeline.value.videoClips.map { clip ->
-        if (clip.id == selected.clipId) {
-          val relTime = (_currentPositionMs.value - clip.timelineStartMs).coerceAtLeast(0L)
-          val existing = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 100L }
-          val newKf = ClipKeyframe(
-            timeMs = relTime,
-            scale = clip.cropScale,
-            rotation = clip.rotationDegrees.toFloat(),
-            posX = clip.cropOffsetX,
-            posY = clip.cropOffsetY
-          )
-          clip.copy(keyframes = (existing + newKf).sortedBy { it.timeMs })
-        } else clip
-      }
-      _timeline.value = _timeline.value.copy(videoClips = list)
+  fun selectKeyframe(keyframeId: String, addToSelection: Boolean = false) {
+    if (addToSelection) {
+      val current = _selectedKeyframeIds.value
+      _selectedKeyframeIds.value = if (keyframeId in current) current - keyframeId else current + keyframeId
+    } else {
+      _selectedKeyframeIds.value = setOf(keyframeId)
     }
   }
 
-  fun deleteKeyframeFromSelectedClip() {
+  fun toggleKeyframeSelection(keyframeId: String) {
+    selectKeyframe(keyframeId, addToSelection = true)
+  }
+
+  fun clearKeyframeSelection() {
+    _selectedKeyframeIds.value = emptySet()
+  }
+
+  fun selectAllKeyframesInSelectedClip() {
+    val keyframes = getSelectedClipKeyframes()?.second ?: emptyList()
+    _selectedKeyframeIds.value = keyframes.map { it.id }.toSet()
+  }
+
+  fun getSelectedClipKeyframes(): Pair<String, List<ClipKeyframe>>? {
     val selected = _selectedElement.value
-    if (selected is SelectedTrackElement.Video) {
-      recordHistory()
-      val list = _timeline.value.videoClips.map { clip ->
-        if (clip.id == selected.clipId) {
-          val relTime = (_currentPositionMs.value - clip.timelineStartMs).coerceAtLeast(0L)
-          clip.copy(keyframes = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 250L })
-        } else clip
+    return when (selected) {
+      is SelectedTrackElement.Video -> {
+        val clip = _timeline.value.videoClips.find { it.id == selected.clipId }
+        clip?.let { it.id to it.keyframes }
       }
-      _timeline.value = _timeline.value.copy(videoClips = list)
+      is SelectedTrackElement.Overlay -> {
+        val clip = _timeline.value.overlayClips.find { it.id == selected.clipId }
+        clip?.let { it.id to it.keyframes }
+      }
+      is SelectedTrackElement.Audio -> {
+        val clip = _timeline.value.audioClips.find { it.id == selected.clipId }
+        clip?.let { it.id to it.keyframes }
+      }
+      else -> null
     }
+  }
+
+  fun getKeyframeAtPlayhead(toleranceMs: Long = 150L): ClipKeyframe? {
+    val selected = _selectedElement.value
+    val (clipStartMs, keyframes) = when (selected) {
+      is SelectedTrackElement.Video -> {
+        val c = _timeline.value.videoClips.find { it.id == selected.clipId } ?: return null
+        c.timelineStartMs to c.keyframes
+      }
+      is SelectedTrackElement.Overlay -> {
+        val c = _timeline.value.overlayClips.find { it.id == selected.clipId } ?: return null
+        c.timelineStartMs to c.keyframes
+      }
+      is SelectedTrackElement.Audio -> {
+        val c = _timeline.value.audioClips.find { it.id == selected.clipId } ?: return null
+        c.timelineStartMs to c.keyframes
+      }
+      else -> return null
+    }
+
+    val relTime = _currentPositionMs.value - clipStartMs
+    return keyframes.find { kotlin.math.abs(it.timeMs - relTime) <= toleranceMs }
+  }
+
+  fun addKeyframeToSelectedClip(customKeyframe: ClipKeyframe? = null) {
+    val selected = _selectedElement.value
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        recordHistory()
+        var newlyAddedId: String? = null
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val relTime = (_currentPositionMs.value - clip.timelineStartMs).coerceIn(0L, clip.durationMs)
+            val existing = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 50L }
+            val interp = KeyframeInterpolator.interpolate(clip, relTime)
+            val newKf = customKeyframe?.copy(timeMs = relTime) ?: ClipKeyframe(
+              timeMs = relTime,
+              posX = interp.posX,
+              posY = interp.posY,
+              scaleX = interp.scaleX,
+              scaleY = interp.scaleY,
+              rotation = interp.rotation,
+              opacity = interp.opacity,
+              volume = interp.volume,
+              blur = interp.blur,
+              brightness = interp.brightness,
+              contrast = interp.contrast,
+              saturation = interp.saturation,
+              effectParam = interp.effectParam
+            )
+            newlyAddedId = newKf.id
+            clip.copy(keyframes = (existing + newKf).sortedBy { it.timeMs })
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+        newlyAddedId?.let { selectKeyframe(it) }
+      }
+      is SelectedTrackElement.Overlay -> {
+        recordHistory()
+        var newlyAddedId: String? = null
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val relTime = (_currentPositionMs.value - clip.timelineStartMs).coerceIn(0L, clip.durationMs)
+            val existing = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 50L }
+            val interp = KeyframeInterpolator.interpolate(clip, relTime)
+            val newKf = customKeyframe?.copy(timeMs = relTime) ?: ClipKeyframe(
+              timeMs = relTime,
+              posX = interp.posX,
+              posY = interp.posY,
+              scaleX = interp.scaleX,
+              scaleY = interp.scaleY,
+              rotation = interp.rotation,
+              opacity = interp.opacity,
+              volume = interp.volume,
+              blur = interp.blur,
+              brightness = interp.brightness,
+              contrast = interp.contrast,
+              saturation = interp.saturation,
+              effectParam = interp.effectParam
+            )
+            newlyAddedId = newKf.id
+            clip.copy(keyframes = (existing + newKf).sortedBy { it.timeMs })
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+        newlyAddedId?.let { selectKeyframe(it) }
+      }
+      is SelectedTrackElement.Audio -> {
+        recordHistory()
+        var newlyAddedId: String? = null
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val relTime = (_currentPositionMs.value - clip.timelineStartMs).coerceIn(0L, clip.durationMs)
+            val existing = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 50L }
+            val currentVol = KeyframeInterpolator.interpolateVolume(clip, relTime)
+            val newKf = customKeyframe?.copy(timeMs = relTime) ?: ClipKeyframe(
+              timeMs = relTime,
+              volume = currentVol
+            )
+            newlyAddedId = newKf.id
+            clip.copy(keyframes = (existing + newKf).sortedBy { it.timeMs })
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+        newlyAddedId?.let { selectKeyframe(it) }
+      }
+      else -> {}
+    }
+  }
+
+  fun deleteSelectedKeyframes() {
+    val selectedIds = _selectedKeyframeIds.value
+    val selected = _selectedElement.value
+    recordHistory()
+
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = if (selectedIds.isNotEmpty()) {
+              clip.keyframes.filterNot { it.id in selectedIds }
+            } else {
+              val relTime = _currentPositionMs.value - clip.timelineStartMs
+              clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 200L }
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+      }
+      is SelectedTrackElement.Overlay -> {
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = if (selectedIds.isNotEmpty()) {
+              clip.keyframes.filterNot { it.id in selectedIds }
+            } else {
+              val relTime = _currentPositionMs.value - clip.timelineStartMs
+              clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 200L }
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+      }
+      is SelectedTrackElement.Audio -> {
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = if (selectedIds.isNotEmpty()) {
+              clip.keyframes.filterNot { it.id in selectedIds }
+            } else {
+              val relTime = _currentPositionMs.value - clip.timelineStartMs
+              clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 200L }
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      else -> {}
+    }
+    clearKeyframeSelection()
+  }
+
+  fun deleteKeyframeFromSelectedClip() {
+    deleteSelectedKeyframes()
+  }
+
+  fun deleteKeyframe(keyframeId: String) {
+    _selectedKeyframeIds.value = setOf(keyframeId)
+    deleteSelectedKeyframes()
+  }
+
+  fun moveKeyframe(keyframeId: String, newTimeMs: Long) {
+    val selected = _selectedElement.value
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val clampedTime = newTimeMs.coerceIn(0L, clip.durationMs)
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) kf.copy(timeMs = clampedTime) else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+      }
+      is SelectedTrackElement.Overlay -> {
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val clampedTime = newTimeMs.coerceIn(0L, clip.durationMs)
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) kf.copy(timeMs = clampedTime) else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+      }
+      is SelectedTrackElement.Audio -> {
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val clampedTime = newTimeMs.coerceIn(0L, clip.durationMs)
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) kf.copy(timeMs = clampedTime) else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      else -> {}
+    }
+  }
+
+  fun moveSelectedKeyframes(deltaMs: Long) {
+    val selectedIds = _selectedKeyframeIds.value
+    if (selectedIds.isEmpty()) return
+    val selected = _selectedElement.value
+
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id in selectedIds) {
+                kf.copy(timeMs = (kf.timeMs + deltaMs).coerceIn(0L, clip.durationMs))
+              } else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+      }
+      is SelectedTrackElement.Overlay -> {
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id in selectedIds) {
+                kf.copy(timeMs = (kf.timeMs + deltaMs).coerceIn(0L, clip.durationMs))
+              } else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+      }
+      is SelectedTrackElement.Audio -> {
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id in selectedIds) {
+                kf.copy(timeMs = (kf.timeMs + deltaMs).coerceIn(0L, clip.durationMs))
+              } else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      else -> {}
+    }
+  }
+
+  fun updateKeyframe(keyframeId: String, transform: (ClipKeyframe) -> ClipKeyframe) {
+    val selected = _selectedElement.value
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) transform(kf) else kf
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+      }
+      is SelectedTrackElement.Overlay -> {
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) transform(kf) else kf
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+      }
+      is SelectedTrackElement.Audio -> {
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) transform(kf) else kf
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      else -> {}
+    }
+  }
+
+  fun copySelectedKeyframes() {
+    val keyframes = getSelectedClipKeyframes()?.second ?: return
+    val selectedIds = _selectedKeyframeIds.value
+    val toCopy = if (selectedIds.isNotEmpty()) {
+      keyframes.filter { it.id in selectedIds }
+    } else {
+      getKeyframeAtPlayhead()?.let { listOf(it) } ?: emptyList()
+    }
+    if (toCopy.isNotEmpty()) {
+      keyframeClipboard = toCopy
+    }
+  }
+
+  fun pasteKeyframes(targetTimeMs: Long? = null) {
+    if (keyframeClipboard.isEmpty()) return
+    val selected = _selectedElement.value ?: return
+    val minTime = keyframeClipboard.minOf { it.timeMs }
+
+    val clipStart = when (selected) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      else -> 0L
+    }
+
+    val basePasteTime = targetTimeMs ?: (_currentPositionMs.value - clipStart).coerceAtLeast(0L)
+    val pastedKeyframes = keyframeClipboard.map { kf ->
+      val offset = kf.timeMs - minTime
+      kf.copy(
+        id = java.util.UUID.randomUUID().toString(),
+        timeMs = basePasteTime + offset
+      )
+    }
+
+    recordHistory()
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = (clip.keyframes + pastedKeyframes.map { it.copy(timeMs = it.timeMs.coerceIn(0L, clip.durationMs)) }).sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+      }
+      is SelectedTrackElement.Overlay -> {
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = (clip.keyframes + pastedKeyframes.map { it.copy(timeMs = it.timeMs.coerceIn(0L, clip.durationMs)) }).sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+      }
+      is SelectedTrackElement.Audio -> {
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = (clip.keyframes + pastedKeyframes.map { it.copy(timeMs = it.timeMs.coerceIn(0L, clip.durationMs)) }).sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      else -> {}
+    }
+    _selectedKeyframeIds.value = pastedKeyframes.map { it.id }.toSet()
+  }
+
+  fun duplicateSelectedKeyframes(offsetMs: Long = 300L) {
+    val keyframes = getSelectedClipKeyframes()?.second ?: return
+    val selectedIds = _selectedKeyframeIds.value
+    val toDuplicate = if (selectedIds.isNotEmpty()) {
+      keyframes.filter { it.id in selectedIds }
+    } else {
+      getKeyframeAtPlayhead()?.let { listOf(it) } ?: emptyList()
+    }
+    if (toDuplicate.isEmpty()) return
+
+    val duplicated = toDuplicate.map { kf ->
+      kf.copy(
+        id = java.util.UUID.randomUUID().toString(),
+        timeMs = kf.timeMs + offsetMs
+      )
+    }
+
+    recordHistory()
+    val selected = _selectedElement.value
+    when (selected) {
+      is SelectedTrackElement.Video -> {
+        val list = _timeline.value.videoClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = (clip.keyframes + duplicated.map { it.copy(timeMs = it.timeMs.coerceIn(0L, clip.durationMs)) }).sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(videoClips = list)
+      }
+      is SelectedTrackElement.Overlay -> {
+        val list = _timeline.value.overlayClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = (clip.keyframes + duplicated.map { it.copy(timeMs = it.timeMs.coerceIn(0L, clip.durationMs)) }).sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+      }
+      is SelectedTrackElement.Audio -> {
+        val list = _timeline.value.audioClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = (clip.keyframes + duplicated.map { it.copy(timeMs = it.timeMs.coerceIn(0L, clip.durationMs)) }).sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      else -> {}
+    }
+    _selectedKeyframeIds.value = duplicated.map { it.id }.toSet()
+  }
+
+  fun jumpToPreviousKeyframe() {
+    val keyframesPair = getSelectedClipKeyframes() ?: return
+    val keyframes = keyframesPair.second.sortedBy { it.timeMs }
+    if (keyframes.isEmpty()) return
+
+    val selected = _selectedElement.value
+    val clipStart = when (selected) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      else -> 0L
+    }
+
+    val currentRelTime = _currentPositionMs.value - clipStart
+    val prev = keyframes.lastOrNull { it.timeMs < currentRelTime - 50L } ?: keyframes.first()
+    setPosition(clipStart + prev.timeMs)
+    selectKeyframe(prev.id)
+  }
+
+  fun jumpToNextKeyframe() {
+    val keyframesPair = getSelectedClipKeyframes() ?: return
+    val keyframes = keyframesPair.second.sortedBy { it.timeMs }
+    if (keyframes.isEmpty()) return
+
+    val selected = _selectedElement.value
+    val clipStart = when (selected) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == selected.clipId }?.timelineStartMs ?: 0L
+      else -> 0L
+    }
+
+    val currentRelTime = _currentPositionMs.value - clipStart
+    val next = keyframes.firstOrNull { it.timeMs > currentRelTime + 50L } ?: keyframes.last()
+    setPosition(clipStart + next.timeMs)
+    selectKeyframe(next.id)
   }
 }

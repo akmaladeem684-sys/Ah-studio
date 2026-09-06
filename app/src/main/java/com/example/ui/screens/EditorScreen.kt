@@ -28,9 +28,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,9 +49,11 @@ import android.widget.FrameLayout
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
 import com.example.engine.SelectedTrackElement
+import com.example.engine.text.TextLayerRenderer
 import com.example.ui.AppScreen
 import com.example.ui.EditorToolbarTab
 import com.example.ui.StudioViewModel
+import com.example.ui.components.KeyframeAnimationPanel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.formatDurationShort
 import com.example.ui.components.timeline.*
@@ -77,6 +82,7 @@ fun EditorScreen(
   val snapIndicatorMs by viewModel.timelineEngine.snapIndicatorMs.collectAsState()
   val isMagnetic by viewModel.timelineEngine.isMagneticEnabled.collectAsState()
   val clipboardClips by viewModel.timelineEngine.clipboardClips.collectAsState()
+  val selectedKeyframeIds by viewModel.timelineEngine.selectedKeyframeIds.collectAsState()
 
   var showRenameDialog by remember { mutableStateOf(false) }
   var showSpeedDialog by remember { mutableStateOf(false) }
@@ -149,6 +155,7 @@ fun EditorScreen(
             EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
             EditorToolbarTab.CHROMA -> ChromaKeyPanel(viewModel)
             EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
+            EditorToolbarTab.KEYFRAME -> KeyframeAnimationPanel(viewModel)
             EditorToolbarTab.AI -> {
               // Quick AI trigger
               Column(
@@ -240,7 +247,10 @@ fun EditorScreen(
         onStepForward = { viewModel.timelineEngine.stepForwardOneFrame() },
         onSplit = { viewModel.timelineEngine.splitSelectedClipAtPlayhead() },
         onDelete = { viewModel.timelineEngine.deleteSelected() },
-        onAddKeyframe = { viewModel.timelineEngine.addKeyframeToSelectedClip() },
+        onAddKeyframe = {
+          viewModel.timelineEngine.addKeyframeToSelectedClip()
+          viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME)
+        },
         onAddMedia = { viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA) },
         onZoomChange = { viewModel.timelineEngine.setZoom(it) }
       )
@@ -366,6 +376,14 @@ fun EditorScreen(
         onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
         onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
         onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
+        selectedKeyframeIds = selectedKeyframeIds,
+        onSelectKeyframe = { kfId ->
+          viewModel.timelineEngine.selectKeyframe(kfId)
+          viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME)
+        },
+        onMoveKeyframe = { kfId, newTimeMs ->
+          viewModel.timelineEngine.moveKeyframe(kfId, newTimeMs)
+        },
         modifier = Modifier
           .fillMaxWidth()
           .weight(1.1f)
@@ -741,53 +759,31 @@ fun VideoPreviewSurface(
         }
       }
 
-      // Active Text Overlays (Subtitles & Titles with Intro Animations)
-      activeTexts.forEach { textClip ->
-        val relTime = (currentPosMs - textClip.timelineStartMs).coerceAtLeast(0L)
-        val animFactor = if (relTime < textClip.animDurationMs) {
-          (relTime.toFloat() / textClip.animDurationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
-        } else 1f
-
-        val (animScale, animAlpha) = when (textClip.animationType.lowercase()) {
-          "pop" -> Pair(0.4f + 0.6f * animFactor, animFactor)
-          "zoom" -> Pair(0.2f + 0.8f * animFactor, animFactor)
-          "fade" -> Pair(1f, animFactor)
-          "slide" -> Pair(1f, animFactor)
-          "bounce" -> Pair(0.5f + 0.5f * animFactor, animFactor)
-          "none" -> Pair(1f, 1f)
-          else -> Pair(1f, animFactor)
-        }
-
-        Box(
+      // Active Text Overlays (Unified rendering with Export engine via TextLayerRenderer)
+      val context = LocalContext.current
+      if (activeTexts.isNotEmpty()) {
+        androidx.compose.foundation.Canvas(
           modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 20.dp),
-          contentAlignment = Alignment.Center
+            .pointerInput(activeTexts) {
+              detectTapGestures {
+                activeTexts.lastOrNull()?.let { clip ->
+                  onSelectElement(SelectedTrackElement.Text(clip.id))
+                }
+              }
+            }
         ) {
-          Box(
-            modifier = Modifier
-              .offset(
-                x = (textClip.posX * 120).dp,
-                y = (textClip.posY * 160).dp
+          drawIntoCanvas { canvas ->
+            activeTexts.forEach { textClip ->
+              TextLayerRenderer.draw(
+                canvas = canvas.nativeCanvas,
+                clip = textClip,
+                currentPosMs = currentPosMs,
+                width = size.width.toInt(),
+                height = size.height.toInt(),
+                context = context
               )
-              .rotate(textClip.rotation)
-              .scale(textClip.scale * animScale)
-              .alpha(animAlpha)
-              .background(
-                if (textClip.hasBackground) Color(textClip.backgroundColor) else Color.Transparent,
-                RoundedCornerShape(8.dp)
-              )
-              .padding(horizontal = 12.dp, vertical = 6.dp)
-          ) {
-            Text(
-              text = textClip.text,
-              style = MaterialTheme.typography.headlineSmall.copy(
-                fontWeight = FontWeight(textClip.fontWeight),
-                fontSize = textClip.fontSizeSp.sp,
-                color = Color(textClip.textColor),
-                textAlign = TextAlign.Center
-              )
-            )
+            }
           }
         }
       }
@@ -951,6 +947,9 @@ private fun EditorBottomToolbar(
     }
     EditorTabItem(icon = Icons.Default.AspectRatio, label = "Canvas", isSelected = activeTab == EditorToolbarTab.CANVAS) {
       onTabSelected(EditorToolbarTab.CANVAS)
+    }
+    EditorTabItem(icon = Icons.Default.Diamond, label = "Keyframe", isSelected = activeTab == EditorToolbarTab.KEYFRAME) {
+      onTabSelected(EditorToolbarTab.KEYFRAME)
     }
   }
 }

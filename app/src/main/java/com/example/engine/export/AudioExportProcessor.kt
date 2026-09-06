@@ -35,7 +35,8 @@ data class AudioTrackDescriptor(
   val fadeInMs: Long,
   val fadeOutMs: Long,
   val isMuted: Boolean,
-  val isReversed: Boolean = false
+  val isReversed: Boolean = false,
+  val keyframes: List<com.example.domain.model.ClipKeyframe> = emptyList()
 )
 
 class AudioExportProcessor(private val context: Context) {
@@ -99,7 +100,8 @@ class AudioExportProcessor(private val context: Context) {
               fadeInMs = 0L,
               fadeOutMs = 0L,
               isMuted = clip.isMuted,
-              isReversed = clip.isReversed
+              isReversed = clip.isReversed,
+              keyframes = clip.keyframes
             )
           )
         }
@@ -124,7 +126,8 @@ class AudioExportProcessor(private val context: Context) {
               fadeInMs = 0L,
               fadeOutMs = 0L,
               isMuted = clip.isMuted,
-              isReversed = clip.isReversed
+              isReversed = clip.isReversed,
+              keyframes = clip.keyframes
             )
           )
         }
@@ -148,7 +151,8 @@ class AudioExportProcessor(private val context: Context) {
               gainDb = clip.gainDb,
               fadeInMs = clip.fadeInMs.coerceAtLeast(0L),
               fadeOutMs = clip.fadeOutMs.coerceAtLeast(0L),
-              isMuted = clip.isMuted
+              isMuted = clip.isMuted,
+              keyframes = clip.keyframes
             )
           )
         }
@@ -250,7 +254,11 @@ class AudioExportProcessor(private val context: Context) {
         fade *= ((totalTrackMs - timeInClipMs).toFloat() / fadeOutDurationMs).coerceIn(0f, 1f)
       }
 
-      val effectiveMultiplier = baseVolume * fade
+      val kfVolume = if (track.keyframes.isNotEmpty()) {
+        com.example.engine.KeyframeInterpolator.interpolateVolume(track.keyframes, timeInClipMs.toLong(), 1.0f)
+      } else 1.0f
+
+      val effectiveMultiplier = baseVolume * fade * kfVolume
       masterLeft[targetTimelineIndex] += rawLeft * effectiveMultiplier
       masterRight[targetTimelineIndex] += rawRight * effectiveMultiplier
     }

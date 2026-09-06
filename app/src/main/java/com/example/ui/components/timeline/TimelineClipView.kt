@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -48,6 +49,9 @@ fun TimelineClipView(
   isFreeze: Boolean = false,
   waveformData: List<Float> = emptyList(),
   keyframes: List<ClipKeyframe> = emptyList(),
+  selectedKeyframeIds: Set<String> = emptySet(),
+  onSelectKeyframe: ((String) -> Unit)? = null,
+  onMoveKeyframe: ((String, Long) -> Unit)? = null,
   onSelect: () -> Unit,
   onLongClick: () -> Unit,
   onMoveClip: (deltaMs: Long) -> Unit,
@@ -246,13 +250,51 @@ fun TimelineClipView(
       if (keyframes.isNotEmpty()) {
         keyframes.forEach { kf ->
           val kfX = (kf.timeMs / msPerPixel).dp
+          val isKfSelected = kf.id in selectedKeyframeIds
+          var kfDragAccumulator by remember(kf.id) { mutableFloatStateOf(0f) }
+
           Box(
             modifier = Modifier
-              .offset(x = kfX - 4.dp, y = heightDp - 14.dp)
-              .size(6.dp)
-              .clip(RoundedCornerShape(1.dp))
-              .background(AmberAccent)
-          )
+              .offset(x = kfX - 8.dp, y = heightDp - 22.dp)
+              .size(18.dp)
+              .clip(CircleShape)
+              .clickable { onSelectKeyframe?.invoke(kf.id) }
+              .pointerInput(kf.id, msPerPixel) {
+                detectDragGestures(
+                  onDragStart = {
+                    kfDragAccumulator = 0f
+                    onSelectKeyframe?.invoke(kf.id)
+                  },
+                  onDrag = { change, dragAmount ->
+                    change.consume()
+                    kfDragAccumulator += dragAmount.x
+                    val deltaMs = (kfDragAccumulator * msPerPixel).toLong()
+                    if (kotlin.math.abs(deltaMs) >= 15L) {
+                      val newTime = (kf.timeMs + deltaMs).coerceIn(0L, durationMs)
+                      onMoveKeyframe?.invoke(kf.id, newTime)
+                      kfDragAccumulator = 0f
+                    }
+                  }
+                )
+              }
+              .testTag("keyframe_diamond_${kf.id}"),
+            contentAlignment = Alignment.Center
+          ) {
+            Box(
+              modifier = Modifier
+                .size(if (isKfSelected) 11.dp else 8.dp)
+                .rotate(45f)
+                .background(
+                  color = if (isKfSelected) PurpleAccent else AmberAccent,
+                  shape = RoundedCornerShape(1.dp)
+                )
+                .border(
+                  width = if (isKfSelected) 1.5.dp else 0.5.dp,
+                  color = if (isKfSelected) Color.White else Color.Black.copy(alpha = 0.7f),
+                  shape = RoundedCornerShape(1.dp)
+                )
+            )
+          }
         }
       }
     }

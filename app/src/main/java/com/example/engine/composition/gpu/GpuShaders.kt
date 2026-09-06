@@ -39,6 +39,10 @@ object GpuShaders {
       // Opacity
       uniform float uOpacity;
       
+      // Keyframe Blur & Effect
+      uniform float uBlur;
+      uniform float uEffectParam;
+      
       // Color Adjustments
       uniform float uBrightness;
       uniform float uContrast;
@@ -61,9 +65,15 @@ object GpuShaders {
       // Chroma Key
       uniform int uChromaEnabled;
       uniform vec3 uKeyColor;
+      uniform vec3 uChromaKeyColor;
       uniform float uChromaThreshold;
+      uniform float uChromaSimilarity;
       uniform float uChromaSmoothness;
       uniform float uChromaSpill;
+      
+      // Transitions
+      uniform int uTransitionType;
+      uniform float uTransitionProgress;
       
       // Blend Mode
       uniform int uBlendMode; // 0=Normal, 1=Screen, 2=Multiply, 3=Overlay, 4=Lighten, 5=Add
@@ -81,7 +91,20 @@ object GpuShaders {
         }
         
         vec4 color;
-        if (uSharpness > 0.01) {
+        if (uBlur > 0.005) {
+          float bRad = uBlur * 0.02;
+          vec4 bc = vec4(0.0);
+          bc += texture2D(uTexture, vTextureCoord + vec2(-bRad, -bRad)) * 0.0625;
+          bc += texture2D(uTexture, vTextureCoord + vec2(0.0, -bRad)) * 0.125;
+          bc += texture2D(uTexture, vTextureCoord + vec2(bRad, -bRad)) * 0.0625;
+          bc += texture2D(uTexture, vTextureCoord + vec2(-bRad, 0.0)) * 0.125;
+          bc += texture2D(uTexture, vTextureCoord) * 0.25;
+          bc += texture2D(uTexture, vTextureCoord + vec2(bRad, 0.0)) * 0.125;
+          bc += texture2D(uTexture, vTextureCoord + vec2(-bRad, bRad)) * 0.0625;
+          bc += texture2D(uTexture, vTextureCoord + vec2(0.0, bRad)) * 0.125;
+          bc += texture2D(uTexture, vTextureCoord + vec2(bRad, bRad)) * 0.0625;
+          color = bc;
+        } else if (uSharpness > 0.01) {
           // 4-tap Laplacian sharpening
           vec4 c = texture2D(uTexture, vTextureCoord);
           vec4 up = texture2D(uTexture, vTextureCoord + vec2(0.0, uTexelSize.y));
@@ -92,6 +115,14 @@ object GpuShaders {
           color = c - uSharpness * laplacian;
         } else {
           color = texture2D(uTexture, vTextureCoord);
+        }
+        
+        if (uEffectParam > 0.005) {
+          float splitDist = uEffectParam * 0.02;
+          float r = texture2D(uTexture, vTextureCoord + vec2(splitDist, 0.0)).r;
+          float g = color.g;
+          float b = texture2D(uTexture, vTextureCoord - vec2(splitDist, 0.0)).b;
+          color.rgb = vec3(r, g, b);
         }
         
         // 1. Chroma Key removal

@@ -34,6 +34,7 @@ import com.example.engine.SelectedTrackElement
 import com.example.engine.audio.SoundEffectsCatalog
 import com.example.ui.StudioViewModel
 import com.example.ui.components.formatDuration
+import com.example.ui.components.text.TextStudioPanel
 import com.example.ui.theme.*
 
 @Composable
@@ -557,109 +558,7 @@ fun TextEditorPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
-  val timeline by viewModel.timelineEngine.timeline.collectAsState()
-  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
-
-  val selectedTextClip = remember(timeline, selectedElement) {
-    if (selectedElement is SelectedTrackElement.Text) {
-      timeline.textClips.find { it.id == (selectedElement as SelectedTrackElement.Text).clipId }
-    } else timeline.textClips.firstOrNull()
-  }
-
-  var textValue by remember(selectedTextClip) { mutableStateOf(selectedTextClip?.text ?: "AH Studio") }
-  val animations = listOf("Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Pop", "Shake")
-
-  Column(
-    modifier = modifier
-      .fillMaxWidth()
-      .background(StudioSurface)
-      .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text(
-        text = "Text & Subtitle Typography",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-      )
-      Row {
-        IconButton(onClick = { viewModel.timelineEngine.addTextClip("NEW TITLE") }) {
-          Icon(Icons.Default.Add, contentDescription = "Add Text", tint = CyanAccent)
-        }
-        IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
-          Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-        }
-      }
-    }
-
-    OutlinedTextField(
-      value = textValue,
-      onValueChange = {
-        textValue = it
-        selectedTextClip?.let { clip ->
-          viewModel.timelineEngine.updateTextClip(clip.copy(text = it))
-        }
-      },
-      placeholder = { Text("Enter subtitle or title text...") },
-      singleLine = true,
-      modifier = Modifier.fillMaxWidth(),
-      colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = CyanAccent,
-        unfocusedBorderColor = StudioBorder,
-        focusedTextColor = TextPrimary,
-        unfocusedTextColor = TextPrimary
-      )
-    )
-
-    // Animation Types
-    Text("Entrance Animation", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      items(animations) { anim ->
-        val isSelected = selectedTextClip?.animationType == anim
-        FilterChip(
-          selected = isSelected,
-          onClick = {
-            selectedTextClip?.let { clip ->
-              viewModel.timelineEngine.updateTextClip(clip.copy(animationType = anim))
-            }
-          },
-          label = { Text(anim) },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = CyanAccent,
-            selectedLabelColor = Color.Black,
-            containerColor = StudioSurfaceVariant,
-            labelColor = TextPrimary
-          )
-        )
-      }
-    }
-
-    // Color Swatches
-    Text("Text Style & Color", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      val colors = listOf(0xFFFFFFFF, 0xFF00E5FF, 0xFFF59E0B, 0xFFEC4899, 0xFF8B5CF6, 0xFF10B981, 0xFFEF4444)
-      colors.forEach { col ->
-        Box(
-          modifier = Modifier
-            .size(32.dp)
-            .clip(CircleShape)
-            .background(Color(col))
-            .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape)
-            .clickable {
-              selectedTextClip?.let { clip ->
-                viewModel.timelineEngine.updateTextClip(clip.copy(textColor = col))
-              }
-            }
-        )
-      }
-    }
-  }
+  TextStudioPanel(viewModel = viewModel, modifier = modifier)
 }
 
 @Composable

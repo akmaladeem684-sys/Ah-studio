@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AIToolsService
@@ -52,7 +53,8 @@ enum class EditorToolbarTab {
   SPEED,
   CHROMA,
   AI,
-  CANVAS
+  CANVAS,
+  KEYFRAME
 }
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
@@ -61,7 +63,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   val repository = ProjectRepository(database)
   val timelineEngine = TimelineEngine()
   val audioEngine = AudioEngine(application)
-  val aiTools = AIToolsService()
+  val aiTools = AIToolsService(application)
   val compositionEngine = com.example.engine.composition.VideoCompositionEngine(application)
   val videoExporter = VideoExporter(application)
 
@@ -359,22 +361,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   fun runAIAutoCaptions(language: String = "English") {
     viewModelScope.launch {
       _isAIBusy.value = true
-      _aiStatusMessage.value = "AI analyzing audio & generating synchronized captions..."
+      _aiStatusMessage.value = "AI analyzing actual imported audio & transcribing..."
       try {
-        val captions = aiTools.generateAutoCaptions(
-          _activeProjectName.value,
-          timelineEngine.timeline.value.totalDurationMs,
-          language
-        )
-        val currentList = timelineEngine.timeline.value.textClips.toMutableList()
-        currentList.addAll(captions)
-        timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = currentList))
-        _aiStatusMessage.value = "Generated ${captions.size} auto captions successfully!"
+        val result = aiTools.generateAutoCaptions(timelineEngine.timeline.value, language)
+        val captions = result.getOrThrow()
+        if (captions.isEmpty()) {
+          _aiStatusMessage.value = "No spoken words detected in imported audio."
+        } else {
+          val currentList = timelineEngine.timeline.value.textClips.toMutableList()
+          currentList.addAll(captions)
+          timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = currentList))
+          _aiStatusMessage.value = "Generated ${captions.size} auto captions successfully!"
+        }
       } catch (e: Exception) {
-        _aiStatusMessage.value = e.message ?: "AI Captions unavailable. Please configure Gemini API key."
+        _aiStatusMessage.value = e.message ?: "AI Captions unavailable. Configure backend/API credentials."
       } finally {
         _isAIBusy.value = false
-        delay(3500)
+        delay(4000)
         _aiStatusMessage.value = ""
       }
     }
@@ -383,16 +386,111 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   fun runAITranslateCaptions(targetLanguage: String) {
     viewModelScope.launch {
       _isAIBusy.value = true
-      _aiStatusMessage.value = "AI translating captions to $targetLanguage..."
+      _aiStatusMessage.value = "AI translating captions to $targetLanguage (preserving timings)..."
       try {
-        val translated = aiTools.translateCaptions(timelineEngine.timeline.value.textClips, targetLanguage)
+        val result = aiTools.translateCaptions(timelineEngine.timeline.value.textClips, targetLanguage)
+        val translated = result.getOrThrow()
         timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(textClips = translated))
         _aiStatusMessage.value = "Captions translated to $targetLanguage!"
       } catch (e: Exception) {
         _aiStatusMessage.value = e.message ?: "Translation unavailable."
       } finally {
         _isAIBusy.value = false
+        delay(4000)
+        _aiStatusMessage.value = ""
+      }
+    }
+  }
+
+  fun runAIBackgroundRemoval(inputBitmap: Bitmap, onResult: (Bitmap, Bitmap) -> Unit) {
+    viewModelScope.launch {
+      _isAIBusy.value = true
+      _aiStatusMessage.value = "AI computing color clustering and edge alpha matting..."
+      try {
+        val cutoutRes = aiTools.removeBackground(inputBitmap)
+        val maskRes = aiTools.generateAlphaMask(inputBitmap)
+        val cutout = cutoutRes.getOrThrow()
+        val mask = maskRes.getOrThrow()
+        onResult(cutout, mask)
+        _aiStatusMessage.value = "Background removal complete!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "Background removal failed."
+      } finally {
+        _isAIBusy.value = false
+        delay(3000)
+        _aiStatusMessage.value = ""
+      }
+    }
+  }
+
+  fun runAINoiseReduction() {
+    viewModelScope.launch {
+      _isAIBusy.value = true
+      _aiStatusMessage.value = "AI Noise Reduction: Sampling noise floor & applying spectral suppression..."
+      try {
+        val timeline = timelineEngine.timeline.value
+        var audioFile: File? = null
+        val firstAudio = timeline.audioClips.firstOrNull()
+        if (firstAudio != null && firstAudio.uri.isNotBlank()) {
+          val candidate = File(firstAudio.uri)
+          if (candidate.exists() && candidate.length() > 0L) audioFile = candidate
+        }
+        if (audioFile == null && timeline.videoClips.isNotEmpty()) {
+          audioFile = audioEngine.extractAudioFromVideo(timeline.videoClips.first().uri)
+        }
+
+        if (audioFile == null || !audioFile.exists() || audioFile.length() == 0L) {
+          throw IllegalStateException("No audio source found on timeline to denoise. Please import a clip with audio.")
+        }
+
+        val denoisedResult = aiTools.reduceAudioNoise(audioFile)
+        val denoisedFile = denoisedResult.getOrThrow()
+
+        val newAudioClip = AudioClip(
+          id = UUID.randomUUID().toString(),
+          title = "Denoised Audio",
+          uri = denoisedFile.absolutePath,
+          timelineStartMs = 0L,
+          durationMs = timeline.totalDurationMs.coerceAtLeast(3000L),
+          volume = 1.0f
+        )
+        val updatedAudioClips = timeline.audioClips.toMutableList().apply { add(newAudioClip) }
+        timelineEngine.loadTimeline(timeline.copy(audioClips = updatedAudioClips))
+        _aiStatusMessage.value = "Noise reduction applied to timeline!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "Noise reduction failed."
+      } finally {
+        _isAIBusy.value = false
         delay(3500)
+        _aiStatusMessage.value = ""
+      }
+    }
+  }
+
+  fun runAITextToSpeech(text: String, pitch: Float = 1.0f, speed: Float = 1.0f) {
+    viewModelScope.launch {
+      _isAIBusy.value = true
+      _aiStatusMessage.value = "Synthesizing actual voice audio..."
+      try {
+        val result = aiTools.synthesizeSpeech(text, pitch, speed)
+        val file = result.getOrThrow()
+        val durationMs = ((text.split(" ").size / (2.5f * speed)) * 1000L).toLong().coerceIn(1500L, 30000L)
+        val newAudioClip = AudioClip(
+          id = UUID.randomUUID().toString(),
+          title = "AI Voice: ${text.take(20)}...",
+          uri = file.absolutePath,
+          timelineStartMs = timelineEngine.currentPositionMs.value,
+          durationMs = durationMs,
+          volume = 1.0f
+        )
+        val currentAudio = timelineEngine.timeline.value.audioClips.toMutableList().apply { add(newAudioClip) }
+        timelineEngine.loadTimeline(timelineEngine.timeline.value.copy(audioClips = currentAudio))
+        _aiStatusMessage.value = "AI Voice audio added to timeline audio track!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "Voice synthesis failed."
+      } finally {
+        _isAIBusy.value = false
+        delay(3000)
         _aiStatusMessage.value = ""
       }
     }
@@ -403,7 +501,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
       _isAIBusy.value = true
       _aiStatusMessage.value = "AI scanning visual motion and highlight moments..."
       try {
-        val highlights = aiTools.analyzeHighlights(timelineEngine.timeline.value)
+        val result = aiTools.analyzeHighlights(timelineEngine.timeline.value)
+        val highlights = result.getOrThrow()
         _aiHighlights.value = highlights
         _aiStatusMessage.value = "Found ${highlights.size} optimal scene moments!"
       } catch (e: Exception) {
@@ -420,13 +519,19 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch {
       _isAIBusy.value = true
       _aiStatusMessage.value = "AI Auto-Edit: Analyzing clips, beat synchronization & pacing..."
-      val clips = timelineEngine.timeline.value.videoClips
-      val editedTimeline = aiTools.autoEditMontage(clips)
-      timelineEngine.loadTimeline(editedTimeline)
-      _isAIBusy.value = false
-      _aiStatusMessage.value = "Montage generated with transitions & timing!"
-      delay(2000)
-      _aiStatusMessage.value = ""
+      try {
+        val clips = timelineEngine.timeline.value.videoClips
+        val result = aiTools.autoEditMontage(clips)
+        val editedTimeline = result.getOrThrow()
+        timelineEngine.loadTimeline(editedTimeline)
+        _aiStatusMessage.value = "Montage generated with transitions & timing!"
+      } catch (e: Exception) {
+        _aiStatusMessage.value = e.message ?: "Auto-edit failed."
+      } finally {
+        _isAIBusy.value = false
+        delay(2500)
+        _aiStatusMessage.value = ""
+      }
     }
   }
 

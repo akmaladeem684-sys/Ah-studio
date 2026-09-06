@@ -7,10 +7,12 @@ import android.opengl.GLES20
 import android.opengl.Matrix
 import android.util.Log
 import com.example.domain.model.*
+import com.example.engine.KeyframeInterpolator
 import com.example.engine.composition.ComposedFrame
 import com.example.engine.composition.ComposedOverlay
 import com.example.engine.composition.ComposedSticker
 import com.example.engine.composition.ComposedText
+import com.example.engine.text.TextLayerRenderer
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -164,15 +166,30 @@ class GpuCompositionRenderer(private val context: Context) {
     // Compute MVP transform
     Matrix.setIdentityM(mvpMatrix, 0)
     val clip = frame.activeClip
+    var keyframeBlur = 0f
+    var keyframeEffectParam = 0f
+    var finalAdjustments = adjustments
+    var finalOpacity = 1.0f
 
     if (clip != null) {
-      // Crop & aspect scale
-      val scaleX = if (clip.flipHorizontal) -clip.cropScale else clip.cropScale
-      val scaleY = if (clip.flipVertical) -clip.cropScale else clip.cropScale
+      val kf = frame.activeClipTransform ?: KeyframeInterpolator.interpolate(clip, frame.timelinePosMs - clip.timelineStartMs)
 
-      Matrix.translateM(mvpMatrix, 0, clip.cropOffsetX, clip.cropOffsetY, 0f)
-      Matrix.rotateM(mvpMatrix, 0, clip.rotationDegrees.toFloat(), 0f, 0f, 1f)
+      // Crop & aspect scale with keyframe scaleX & scaleY
+      val scaleX = (if (clip.flipHorizontal) -clip.cropScale else clip.cropScale) * kf.scaleX
+      val scaleY = (if (clip.flipVertical) -clip.cropScale else clip.cropScale) * kf.scaleY
+
+      Matrix.translateM(mvpMatrix, 0, clip.cropOffsetX + kf.posX, clip.cropOffsetY + kf.posY, 0f)
+      Matrix.rotateM(mvpMatrix, 0, (clip.rotationDegrees.toFloat() + kf.rotation) % 360f, 0f, 0f, 1f)
       Matrix.scaleM(mvpMatrix, 0, scaleX, scaleY, 1f)
+
+      finalOpacity *= kf.opacity
+      keyframeBlur = kf.blur
+      keyframeEffectParam = kf.effectParam
+      finalAdjustments = adjustments.copy(
+        brightness = (adjustments.brightness + kf.brightness).coerceIn(-1f, 1f),
+        contrast = (adjustments.contrast * kf.contrast).coerceAtLeast(0f),
+        saturation = (adjustments.saturation * kf.saturation).coerceAtLeast(0f)
+      )
     }
 
     // Texture Matrix (handling surface texture orientation or cropping)
@@ -183,12 +200,11 @@ class GpuCompositionRenderer(private val context: Context) {
     }
 
     // Transition effect if active on main clip
-    var opacity = 1.0f
     if (frame.activeTransition != null) {
       val tr = frame.activeTransition
       when (tr.type) {
         TransitionType.FADE -> {
-          opacity = (1.0f - tr.progress).coerceIn(0f, 1f)
+          finalOpacity = (finalOpacity * (1.0f - tr.progress)).coerceIn(0f, 1f)
         }
         TransitionType.SLIDE_LEFT -> {
           Matrix.translateM(mvpMatrix, 0, -tr.progress * 2.0f, 0f, 0f)
@@ -206,12 +222,14 @@ class GpuCompositionRenderer(private val context: Context) {
       program = program,
       textureId = textureId,
       isOes = isOes,
-      opacity = opacity,
-      adjustments = adjustments,
+      opacity = finalOpacity,
+      adjustments = finalAdjustments,
       filter = filter,
       chromaKey = ChromaKeySettings(enabled = false),
       viewportWidth = viewportWidth,
-      viewportHeight = viewportHeight
+      viewportHeight = viewportHeight,
+      blur = keyframeBlur,
+      effectParam = keyframeEffectParam
     )
 
     // Draw Quad
@@ -229,11 +247,10 @@ class GpuCompositionRenderer(private val context: Context) {
     GLES20.glUseProgram(program)
 
     Matrix.setIdentityM(mvpMatrix, 0)
-    // Map overlay position (-1..1), scale, and rotation
+    // Map overlay position (-1..1), scaleX & scaleY, and rotation
     Matrix.translateM(mvpMatrix, 0, overlay.posX, overlay.posY, 0f)
     Matrix.rotateM(mvpMatrix, 0, overlay.rotation, 0f, 0f, 1f)
-    val baseScale = overlay.scale * 0.5f
-    Matrix.scaleM(mvpMatrix, 0, baseScale, baseScale, 1f)
+    Matrix.scaleM(mvpMatrix, 0, overlay.scaleX * 0.5f, overlay.scaleY * 0.5f, 1f)
 
     Matrix.setIdentityM(texMatrix, 0)
 
@@ -245,16 +262,24 @@ class GpuCompositionRenderer(private val context: Context) {
       else -> GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
     }
 
+    val overlayAdj = VideoAdjustments(
+      brightness = overlay.brightness,
+      contrast = overlay.contrast,
+      saturation = overlay.saturation
+    )
+
     bindCommonUniforms(
       program = program,
       textureId = textureId,
       isOes = false,
       opacity = overlay.opacity,
-      adjustments = VideoAdjustments(),
+      adjustments = overlayAdj,
       filter = FilterSettings(),
       chromaKey = chromaKey,
       viewportWidth = viewportWidth,
-      viewportHeight = viewportHeight
+      viewportHeight = viewportHeight,
+      blur = overlay.blur,
+      effectParam = overlay.effectParam
     )
 
     drawQuad(program)
@@ -264,30 +289,28 @@ class GpuCompositionRenderer(private val context: Context) {
   }
 
   private fun renderTextClip(text: ComposedText, viewportWidth: Int, viewportHeight: Int) {
-    val cached = getOrCreateTextTexture(text.clip, viewportWidth)
-    if (cached == null || cached.texId == 0) return
+    val bitmap = TextLayerRenderer.renderToBitmap(
+      clip = text.clip,
+      currentPosMs = text.currentPosMs,
+      width = viewportWidth,
+      height = viewportHeight,
+      context = context
+    )
+    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, 0)
+    bitmap.recycle()
+    if (texId == 0) return
 
     val program = program2D
     GLES20.glUseProgram(program)
 
     Matrix.setIdentityM(mvpMatrix, 0)
-    // Convert text coordinates to GL coords (-1 to 1)
-    Matrix.translateM(mvpMatrix, 0, text.posX, -text.posY, 0f)
-    Matrix.rotateM(mvpMatrix, 0, -text.rotation, 0f, 0f, 1f)
-
-    val aspect = viewportWidth.toFloat() / max(1, viewportHeight)
-    val textAspect = cached.width.toFloat() / max(1, cached.height)
-    val scaleY = (cached.height.toFloat() / viewportHeight) * 2f * text.scale
-    val scaleX = scaleY * textAspect / aspect
-
-    Matrix.scaleM(mvpMatrix, 0, scaleX, scaleY, 1f)
     Matrix.setIdentityM(texMatrix, 0)
 
     bindCommonUniforms(
       program = program,
-      textureId = cached.texId,
+      textureId = texId,
       isOes = false,
-      opacity = text.opacity,
+      opacity = 1.0f,
       adjustments = VideoAdjustments(),
       filter = FilterSettings(),
       chromaKey = ChromaKeySettings(enabled = false),
@@ -296,6 +319,7 @@ class GpuCompositionRenderer(private val context: Context) {
     )
 
     drawQuad(program)
+    GLES20.glDeleteTextures(1, intArrayOf(texId), 0)
   }
 
   private fun renderStickerClip(sticker: ComposedSticker, viewportWidth: Int, viewportHeight: Int) {
@@ -341,16 +365,22 @@ class GpuCompositionRenderer(private val context: Context) {
     filter: FilterSettings,
     chromaKey: ChromaKeySettings,
     viewportWidth: Int,
-    viewportHeight: Int
+    viewportHeight: Int,
+    blur: Float = 0f,
+    effectParam: Float = 0f
   ) {
     val uMVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
     val uTexMatrixHandle = GLES20.glGetUniformLocation(program, "uTexMatrix")
     val uTextureHandle = GLES20.glGetUniformLocation(program, "uTexture")
     val uOpacityHandle = GLES20.glGetUniformLocation(program, "uOpacity")
+    val uBlurHandle = GLES20.glGetUniformLocation(program, "uBlur")
+    val uEffectParamHandle = GLES20.glGetUniformLocation(program, "uEffectParam")
 
     GLES20.glUniformMatrix4fv(uMVPMatrixHandle, 1, false, mvpMatrix, 0)
     GLES20.glUniformMatrix4fv(uTexMatrixHandle, 1, false, texMatrix, 0)
     GLES20.glUniform1f(uOpacityHandle, opacity)
+    if (uBlurHandle >= 0) GLES20.glUniform1f(uBlurHandle, blur)
+    if (uEffectParamHandle >= 0) GLES20.glUniform1f(uEffectParamHandle, effectParam)
 
     // Bind texture
     val target = if (isOes) GLES11Ext.GL_TEXTURE_EXTERNAL_OES else GLES20.GL_TEXTURE_2D

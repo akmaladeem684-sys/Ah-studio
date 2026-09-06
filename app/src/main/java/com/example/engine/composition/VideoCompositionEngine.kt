@@ -5,6 +5,7 @@ import android.graphics.*
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
 import com.example.engine.composition.gpu.GpuCompositionRenderer
+import com.example.engine.text.TextLayerRenderer
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -18,7 +19,8 @@ data class ComposedFrame(
   val activeStickers: List<ComposedSticker>,
   val activeTransition: ComposedTransition?,
   val colorMatrix: ColorMatrix,
-  val colorFilter: ColorMatrixColorFilter
+  val colorFilter: ColorMatrixColorFilter,
+  val activeClipTransform: com.example.engine.InterpolatedClipTransform? = null
 )
 
 data class ComposedOverlay(
@@ -26,11 +28,40 @@ data class ComposedOverlay(
   val sourcePosMs: Long,
   val posX: Float,
   val posY: Float,
-  val scale: Float,
+  val scaleX: Float,
+  val scaleY: Float,
   val rotation: Float,
   val opacity: Float,
-  val blendMode: String
-)
+  val blendMode: String,
+  val blur: Float = 0f,
+  val brightness: Float = 0f,
+  val contrast: Float = 1f,
+  val saturation: Float = 1f,
+  val effectParam: Float = 0f
+) {
+  val scale: Float get() = (scaleX + scaleY) / 2f
+
+  constructor(
+    clip: VideoClip,
+    sourcePosMs: Long,
+    posX: Float,
+    posY: Float,
+    scale: Float,
+    rotation: Float,
+    opacity: Float,
+    blendMode: String
+  ) : this(
+    clip = clip,
+    sourcePosMs = sourcePosMs,
+    posX = posX,
+    posY = posY,
+    scaleX = scale,
+    scaleY = scale,
+    rotation = rotation,
+    opacity = opacity,
+    blendMode = blendMode
+  )
+}
 
 data class ComposedText(
   val clip: TextClip,
@@ -38,7 +69,8 @@ data class ComposedText(
   val posY: Float,
   val scale: Float,
   val rotation: Float,
-  val opacity: Float
+  val opacity: Float,
+  val currentPosMs: Long = 0L
 )
 
 data class ComposedSticker(
@@ -149,10 +181,16 @@ class VideoCompositionEngine(private val context: Context) {
           sourcePosMs = clip.timelineToSourceMs(posMs),
           posX = kf.posX,
           posY = kf.posY,
-          scale = kf.scale,
+          scaleX = kf.scaleX,
+          scaleY = kf.scaleY,
           rotation = kf.rotation,
           opacity = kf.opacity,
-          blendMode = clip.blendMode
+          blendMode = clip.blendMode,
+          blur = kf.blur,
+          brightness = kf.brightness,
+          contrast = kf.contrast,
+          saturation = kf.saturation,
+          effectParam = kf.effectParam
         )
       }
     } else emptyList()
@@ -162,29 +200,15 @@ class VideoCompositionEngine(private val context: Context) {
       timeline.textClips.filter {
         posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
       }.map { clip ->
-        val rel = posMs - clip.timelineStartMs
-        var textScale = clip.scale
-        var textOpacity = clip.opacity
-        var textPosY = clip.posY
-
-        // Text intro animation
-        if (rel < clip.animDurationMs) {
-          val animProgress = (rel.toFloat() / clip.animDurationMs).coerceIn(0f, 1f)
-          when (clip.animationType) {
-            "Fade" -> textOpacity *= animProgress
-            "Pop" -> textScale *= (animProgress * 1.15f).coerceAtMost(1f)
-            "Slide" -> textPosY += (1f - animProgress) * 0.2f
-            "Zoom" -> textScale *= (0.3f + 0.7f * animProgress)
-          }
-        }
-
+        val state = TextLayerRenderer.evaluateAnimation(clip, posMs)
         ComposedText(
           clip = clip,
-          posX = clip.posX,
-          posY = textPosY,
-          scale = textScale,
-          rotation = clip.rotation,
-          opacity = textOpacity
+          posX = state.posX,
+          posY = state.posY,
+          scale = state.scale,
+          rotation = state.rotation,
+          opacity = state.opacity,
+          currentPosMs = posMs
         )
       }
     } else emptyList()
@@ -209,6 +233,11 @@ class VideoCompositionEngine(private val context: Context) {
     val colorMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter)
     val colorFilter = ColorMatrixColorFilter(colorMatrix)
 
+    val activeClipTransform = if (activeClip != null) {
+      val rel = posMs - activeClip.timelineStartMs
+      KeyframeInterpolator.interpolate(activeClip, rel)
+    } else null
+
     return ComposedFrame(
       timelinePosMs = posMs,
       activeClip = activeClip,
@@ -218,7 +247,8 @@ class VideoCompositionEngine(private val context: Context) {
       activeStickers = stickers,
       activeTransition = activeTransition,
       colorMatrix = colorMatrix,
-      colorFilter = colorFilter
+      colorFilter = colorFilter,
+      activeClipTransform = activeClipTransform
     )
   }
 
@@ -253,17 +283,18 @@ class VideoCompositionEngine(private val context: Context) {
 
       if (clip != null) {
         val rel = frame.timelinePosMs - clip.timelineStartMs
-        val kf = KeyframeInterpolator.interpolate(clip, rel)
+        val kf = frame.activeClipTransform ?: KeyframeInterpolator.interpolate(clip, rel)
         matrix.postScale(
           if (clip.flipHorizontal) -1f else 1f,
           if (clip.flipVertical) -1f else 1f
         )
         matrix.postRotate((clip.rotationDegrees + kf.rotation) % 360)
-        matrix.postScale(baseScale * clip.cropScale * kf.scale, baseScale * clip.cropScale * kf.scale)
+        matrix.postScale(baseScale * clip.cropScale * kf.scaleX, baseScale * clip.cropScale * kf.scaleY)
         matrix.postTranslate(
           (canvasWidth / 2f) + (clip.cropOffsetX + kf.posX) * (canvasWidth / 2f),
           (canvasHeight / 2f) + (clip.cropOffsetY + kf.posY) * (canvasHeight / 2f)
         )
+        paint.alpha = (kf.opacity * 255).toInt().coerceIn(0, 255)
       } else {
         matrix.postScale(baseScale, baseScale)
         matrix.postTranslate(canvasWidth / 2f, canvasHeight / 2f)
@@ -315,8 +346,9 @@ class VideoCompositionEngine(private val context: Context) {
         val overlayMatrix = Matrix()
         overlayMatrix.postTranslate(-overlayBitmap.width / 2f, -overlayBitmap.height / 2f)
         overlayMatrix.postRotate(composedOverlay.rotation)
-        val overlayScale = (canvasWidth.toFloat() / overlayBitmap.width) * composedOverlay.scale * 0.5f
-        overlayMatrix.postScale(overlayScale, overlayScale)
+        val overlayScaleX = (canvasWidth.toFloat() / overlayBitmap.width) * composedOverlay.scaleX * 0.5f
+        val overlayScaleY = (canvasWidth.toFloat() / overlayBitmap.width) * composedOverlay.scaleY * 0.5f
+        overlayMatrix.postScale(overlayScaleX, overlayScaleY)
 
         val targetX = (canvasWidth / 2f) + (composedOverlay.posX * canvasWidth / 2f)
         val targetY = (canvasHeight / 2f) + (composedOverlay.posY * canvasHeight / 2f)
@@ -350,67 +382,14 @@ class VideoCompositionEngine(private val context: Context) {
   }
 
   private fun drawTextClip(canvas: Canvas, composedText: ComposedText, width: Int, height: Int) {
-    val clip = composedText.clip
-    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      textSize = (clip.fontSizeSp * (width / 400f)) * composedText.scale
-      isFakeBoldText = clip.fontWeight >= 700
-      color = clip.textColor.toInt()
-      alpha = (composedText.opacity * 255).toInt().coerceIn(0, 255)
-      textAlign = Paint.Align.CENTER
-    }
-
-    val centerX = (width / 2f) + (composedText.posX * width / 2f)
-    val centerY = (height / 2f) + (composedText.posY * height / 2f)
-
-    canvas.save()
-    canvas.translate(centerX, centerY)
-    canvas.rotate(composedText.rotation)
-
-    val textBounds = Rect()
-    textPaint.getTextBounds(clip.text, 0, clip.text.length, textBounds)
-    val pad = 16f
-
-    // Draw Background Rect
-    if (clip.hasBackground) {
-      val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = clip.backgroundColor.toInt()
-        alpha = (composedText.opacity * Color.alpha(clip.backgroundColor.toInt()) / 255f * 255).toInt().coerceIn(0, 255)
-      }
-      val rect = RectF(
-        textBounds.left - pad,
-        textBounds.top - pad,
-        textBounds.right + pad,
-        textBounds.bottom + pad
-      )
-      canvas.drawRoundRect(rect, 12f, 12f, bgPaint)
-    }
-
-    // Draw Stroke
-    if (clip.strokeWidth > 0f) {
-      val strokePaint = Paint(textPaint).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = clip.strokeWidth * (width / 400f)
-        color = clip.strokeColor.toInt()
-        alpha = (composedText.opacity * 255).toInt().coerceIn(0, 255)
-      }
-      canvas.drawText(clip.text, 0f, 0f, strokePaint)
-    }
-
-    // Draw Gradient
-    if (clip.hasGradient) {
-      val shader = LinearGradient(
-        textBounds.left.toFloat(), 0f,
-        textBounds.right.toFloat(), 0f,
-        clip.gradientColorStart.toInt(),
-        clip.gradientColorEnd.toInt(),
-        Shader.TileMode.CLAMP
-      )
-      textPaint.shader = shader
-    }
-
-    // Draw Text Fill
-    canvas.drawText(clip.text, 0f, 0f, textPaint)
-    canvas.restore()
+    TextLayerRenderer.draw(
+      canvas = canvas,
+      clip = composedText.clip,
+      currentPosMs = composedText.currentPosMs,
+      width = width,
+      height = height,
+      context = context
+    )
   }
 
   private fun drawStickerClip(canvas: Canvas, sticker: ComposedSticker, width: Int, height: Int) {
