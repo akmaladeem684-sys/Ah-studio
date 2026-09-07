@@ -54,6 +54,7 @@ class GpuCompositionRenderer(private val context: Context) {
   private var program2D = 0
   private var programOes = 0
   private var programTransition = 0
+  private var programEffect = 0
 
   // Cached Text & Sticker textures: Key -> GlTextureInfo(textureId, width, height, hash)
   private data class CachedTexture(val texId: Int, val width: Int, val height: Int, val hash: Int)
@@ -78,6 +79,7 @@ class GpuCompositionRenderer(private val context: Context) {
     program2D = GlShaderUtil.createProgram(GpuShaders.VERTEX_SHADER, GpuShaders.buildFragmentShader(isOes = false))
     programOes = GlShaderUtil.createProgram(GpuShaders.VERTEX_SHADER, GpuShaders.buildFragmentShader(isOes = true))
     programTransition = GlShaderUtil.createProgram(GpuShaders.VERTEX_SHADER, GpuShaders.TRANSITION_FRAGMENT_SHADER)
+    programEffect = GlShaderUtil.createProgram(GpuShaders.VERTEX_SHADER, GpuShaders.EFFECT_FRAGMENT_SHADER)
 
     isInitialized = true
   }
@@ -85,7 +87,7 @@ class GpuCompositionRenderer(private val context: Context) {
   /**
    * Main GPU rendering method:
    * Composites main clip, PIP overlays, text layers, stickers, transitions, color adjustments,
-   * and chroma key directly into the currently bound OpenGL framebuffer / window surface.
+   * chroma key, and multi-pass visual effects directly via OpenGL ES.
    */
   fun render(
     frame: ComposedFrame,
@@ -103,8 +105,18 @@ class GpuCompositionRenderer(private val context: Context) {
       initGl()
     }
 
+    val hasEffects = frame.activeEffects.isNotEmpty()
+    if (hasEffects) {
+      fboA.setup(viewportWidth, viewportHeight)
+      fboA.bind()
+    }
+
     GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-    GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
+    if (chromaKey.enabled && chromaKey.backgroundType == "Transparent") {
+      GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+    } else {
+      GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
+    }
     GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
     // Enable standard alpha blending
@@ -121,7 +133,8 @@ class GpuCompositionRenderer(private val context: Context) {
         viewportWidth = viewportWidth,
         viewportHeight = viewportHeight,
         adjustments = timelineAdjustments,
-        filter = timelineFilter
+        filter = timelineFilter,
+        chromaKey = chromaKey
       )
     }
 
@@ -148,6 +161,49 @@ class GpuCompositionRenderer(private val context: Context) {
     for (sticker in frame.activeStickers) {
       renderStickerClip(sticker, viewportWidth, viewportHeight)
     }
+
+    // 5. Apply Active GPU Visual Effects (Multi-pass ping-pong)
+    if (hasEffects) {
+      fboA.unbind()
+      fboB.setup(viewportWidth, viewportHeight)
+
+      var currentInputTex = fboA.getTextureId()
+      var currentOutputFbo = fboB
+
+      for (i in frame.activeEffects.indices) {
+        val effect = frame.activeEffects[i]
+        val isLast = (i == frame.activeEffects.size - 1)
+
+        if (isLast) {
+          // Render directly to destination framebuffer
+          GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+          GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+          applyEffect(
+            effectType = effect.effectType,
+            intensity = effect.intensity,
+            timeSec = effect.timeInEffectMs / 1000f,
+            inputTexId = currentInputTex,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight
+          )
+        } else {
+          currentOutputFbo.bind()
+          GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+          GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+          applyEffect(
+            effectType = effect.effectType,
+            intensity = effect.intensity,
+            timeSec = effect.timeInEffectMs / 1000f,
+            inputTexId = currentInputTex,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight
+          )
+          currentOutputFbo.unbind()
+          currentInputTex = currentOutputFbo.getTextureId()
+          currentOutputFbo = if (currentOutputFbo == fboB) fboA else fboB
+        }
+      }
+    }
   }
 
   private fun renderMainClip(
@@ -158,7 +214,8 @@ class GpuCompositionRenderer(private val context: Context) {
     viewportWidth: Int,
     viewportHeight: Int,
     adjustments: VideoAdjustments,
-    filter: FilterSettings
+    filter: FilterSettings,
+    chromaKey: ChromaKeySettings = ChromaKeySettings()
   ) {
     val program = if (isOes) programOes else program2D
     GLES20.glUseProgram(program)
@@ -225,7 +282,7 @@ class GpuCompositionRenderer(private val context: Context) {
       opacity = finalOpacity,
       adjustments = finalAdjustments,
       filter = filter,
-      chromaKey = ChromaKeySettings(enabled = false),
+      chromaKey = chromaKey,
       viewportWidth = viewportWidth,
       viewportHeight = viewportHeight,
       blur = keyframeBlur,
@@ -425,10 +482,23 @@ class GpuCompositionRenderer(private val context: Context) {
         val b = android.graphics.Color.blue(color) / 255f
 
         GLES20.glUniform1i(uChromaEnabledHandle, 1)
-        GLES20.glUniform3f(GLES20.glGetUniformLocation(program, "uKeyColor"), r, g, b)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaThreshold"), chromaKey.intensity * 0.8f)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaSmoothness"), max(0.01f, chromaKey.edgeAdjustment * 0.4f))
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaSpill"), chromaKey.spillReduction)
+        val keyLoc = GLES20.glGetUniformLocation(program, "uChromaKeyColor").let { if (it >= 0) it else GLES20.glGetUniformLocation(program, "uKeyColor") }
+        if (keyLoc >= 0) {
+          GLES20.glUniform3f(keyLoc, r, g, b)
+        }
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaSimilarity"), chromaKey.similarity)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaSmoothness"), max(0.001f, chromaKey.smoothness))
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaSpill"), chromaKey.spillSuppression)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uChromaEdge"), chromaKey.edgeControl)
+
+        val bgType = if (chromaKey.backgroundType == "SolidColor") 1 else 0
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uChromaBgType"), bgType)
+        val bgColor = chromaKey.backgroundColor.toInt()
+        val bgR = android.graphics.Color.red(bgColor) / 255f
+        val bgG = android.graphics.Color.green(bgColor) / 255f
+        val bgB = android.graphics.Color.blue(bgColor) / 255f
+        val bgA = android.graphics.Color.alpha(bgColor) / 255f
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(program, "uChromaBgColor"), bgR, bgG, bgB, bgA)
       } else {
         GLES20.glUniform1i(uChromaEnabledHandle, 0)
       }
@@ -595,8 +665,57 @@ class GpuCompositionRenderer(private val context: Context) {
       GLES20.glDeleteProgram(programTransition)
       programTransition = 0
     }
+    if (programEffect != 0) {
+      GLES20.glDeleteProgram(programEffect)
+      programEffect = 0
+    }
 
     isInitialized = false
     Log.d(TAG, "GpuCompositionRenderer resources cleanly released")
+  }
+
+  private fun applyEffect(
+    effectType: EffectType,
+    intensity: Float,
+    timeSec: Float,
+    inputTexId: Int,
+    viewportWidth: Int,
+    viewportHeight: Int
+  ) {
+    if (programEffect == 0) return
+    GLES20.glUseProgram(programEffect)
+
+    val uTextureHandle = GLES20.glGetUniformLocation(programEffect, "uTexture")
+    val uEffectTypeHandle = GLES20.glGetUniformLocation(programEffect, "uEffectType")
+    val uIntensityHandle = GLES20.glGetUniformLocation(programEffect, "uIntensity")
+    val uTimeHandle = GLES20.glGetUniformLocation(programEffect, "uTime")
+    val uTexelSizeHandle = GLES20.glGetUniformLocation(programEffect, "uTexelSize")
+
+    val glEffectType = when (effectType) {
+      EffectType.BLUR -> GpuShaders.EFFECT_BLUR
+      EffectType.GLOW -> GpuShaders.EFFECT_GLOW
+      EffectType.MOTION_BLUR -> GpuShaders.EFFECT_MOTION_BLUR
+      EffectType.SHAKE -> GpuShaders.EFFECT_SHAKE
+      EffectType.ZOOM -> GpuShaders.EFFECT_ZOOM
+      EffectType.SPIN -> GpuShaders.EFFECT_SPIN
+      EffectType.FLASH -> GpuShaders.EFFECT_FLASH
+      EffectType.GLITCH -> GpuShaders.EFFECT_GLITCH
+      EffectType.RGB_SPLIT -> GpuShaders.EFFECT_RGB_SPLIT
+      EffectType.DISTORTION, EffectType.WAVE, EffectType.RIPPLE -> GpuShaders.EFFECT_DISTORTION
+      EffectType.LENS_FLARE -> GpuShaders.EFFECT_LENS_FLARE
+      EffectType.LIGHT_LEAK -> GpuShaders.EFFECT_LIGHT_LEAK
+      else -> GpuShaders.EFFECT_BLUR
+    }
+
+    if (uEffectTypeHandle >= 0) GLES20.glUniform1i(uEffectTypeHandle, glEffectType)
+    if (uIntensityHandle >= 0) GLES20.glUniform1f(uIntensityHandle, intensity)
+    if (uTimeHandle >= 0) GLES20.glUniform1f(uTimeHandle, timeSec)
+    if (uTexelSizeHandle >= 0) GLES20.glUniform2f(uTexelSizeHandle, 1.0f / max(1, viewportWidth), 1.0f / max(1, viewportHeight))
+
+    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, inputTexId)
+    if (uTextureHandle >= 0) GLES20.glUniform1i(uTextureHandle, 0)
+
+    drawQuad(programEffect)
   }
 }

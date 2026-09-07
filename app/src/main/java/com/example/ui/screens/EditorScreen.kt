@@ -83,9 +83,17 @@ fun EditorScreen(
   val isMagnetic by viewModel.timelineEngine.isMagneticEnabled.collectAsState()
   val clipboardClips by viewModel.timelineEngine.clipboardClips.collectAsState()
   val selectedKeyframeIds by viewModel.timelineEngine.selectedKeyframeIds.collectAsState()
+  val saveState by viewModel.saveState.collectAsState()
+  val missingMediaList by viewModel.missingMediaList.collectAsState()
+  val activeResolution by viewModel.activeResolution.collectAsState()
+  val activeFps by viewModel.activeFps.collectAsState()
+  val activeSampleRate by viewModel.activeSampleRate.collectAsState()
+  val activeCanvasColor by viewModel.activeCanvasColor.collectAsState()
 
   var showRenameDialog by remember { mutableStateOf(false) }
   var showSpeedDialog by remember { mutableStateOf(false) }
+  var showProjectSettingsDialog by remember { mutableStateOf(false) }
+  var showRelinkMediaDialog by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
 
   val replaceMediaPickerLauncher = rememberLauncherForActivityResult(
@@ -110,6 +118,7 @@ fun EditorScreen(
     topBar = {
       EditorTopBar(
         projectName = projectName,
+        saveState = saveState,
         canUndo = canUndo,
         canRedo = canRedo,
         isSnapping = isSnapping,
@@ -118,6 +127,8 @@ fun EditorScreen(
           viewModel.navigateTo(AppScreen.HOME)
         },
         onRenameClick = { showRenameDialog = true },
+        onSettingsClick = { showProjectSettingsDialog = true },
+        onManualSaveClick = { viewModel.manualSaveProject() },
         onUndoClick = { viewModel.timelineEngine.undo() },
         onRedoClick = { viewModel.timelineEngine.redo() },
         onToggleSnapping = { viewModel.timelineEngine.toggleSnapping() },
@@ -216,6 +227,45 @@ fun EditorScreen(
         .fillMaxSize()
         .padding(padding)
     ) {
+      // Missing Media Warning Bar
+      if (missingMediaList.isNotEmpty()) {
+        Surface(
+          color = AmberAccent.copy(alpha = 0.2f),
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showRelinkMediaDialog = true }
+            .testTag("missing_media_alert_banner")
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+              Icon(Icons.Default.Warning, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "${missingMediaList.size} missing media clip${if (missingMediaList.size == 1) "" else "s"} detected",
+                style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+              )
+            }
+            Button(
+              onClick = { showRelinkMediaDialog = true },
+              colors = ButtonDefaults.buttonColors(containerColor = AmberAccent, contentColor = Color.Black),
+              shape = RoundedCornerShape(6.dp),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+              modifier = Modifier
+                .height(26.dp)
+                .testTag("relink_media_banner_button")
+            ) {
+              Text("Relink", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+          }
+        }
+      }
+
       // 1. Video Preview Player (Aspect ratio preserved)
       Box(
         modifier = Modifier
@@ -417,16 +467,47 @@ fun EditorScreen(
       }
     )
   }
+
+  // Relink Missing Media Dialog
+  if (showRelinkMediaDialog) {
+    com.example.ui.components.RelinkMediaDialog(
+      missingItems = missingMediaList,
+      onDismiss = { showRelinkMediaDialog = false },
+      onRelink = { clipId, newUri ->
+        viewModel.relinkMedia(clipId, newUri)
+      }
+    )
+  }
+
+  // Project Settings Dialog
+  if (showProjectSettingsDialog) {
+    com.example.ui.components.ProjectSettingsDialog(
+      projectName = projectName,
+      currentAspectRatio = aspectRatio,
+      currentResolution = activeResolution,
+      currentFps = activeFps,
+      currentSampleRate = activeSampleRate,
+      currentCanvasColor = activeCanvasColor,
+      totalDurationMs = timeline.totalDurationMs,
+      onDismiss = { showProjectSettingsDialog = false },
+      onSaveSettings = { aspect, res, fps, sampleRate, canvasColor ->
+        viewModel.updateProjectSettings(aspect, res, fps, sampleRate, canvasColor)
+      }
+    )
+  }
 }
 
 @Composable
 private fun EditorTopBar(
   projectName: String,
+  saveState: com.example.ui.ProjectSaveState,
   canUndo: Boolean,
   canRedo: Boolean,
   isSnapping: Boolean,
   onBackClick: () -> Unit,
   onRenameClick: () -> Unit,
+  onSettingsClick: () -> Unit,
+  onManualSaveClick: () -> Unit,
   onUndoClick: () -> Unit,
   onRedoClick: () -> Unit,
   onToggleSnapping: () -> Unit,
@@ -461,9 +542,54 @@ private fun EditorTopBar(
         Spacer(modifier = Modifier.width(4.dp))
         Icon(Icons.Default.Edit, contentDescription = "Rename", tint = TextTertiary, modifier = Modifier.size(14.dp))
       }
+
+      Spacer(modifier = Modifier.width(6.dp))
+
+      // Save Status Indicator & Quick Save Button
+      Surface(
+        onClick = onManualSaveClick,
+        shape = RoundedCornerShape(8.dp),
+        color = StudioSurfaceVariant,
+        modifier = Modifier.testTag("editor_save_status_button")
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          when (saveState.status) {
+            com.example.ui.ProjectSaveStatus.SAVED -> {
+              Icon(Icons.Default.CheckCircle, contentDescription = "Saved", tint = CyanAccent, modifier = Modifier.size(12.dp))
+              Spacer(modifier = Modifier.width(3.dp))
+              Text("Saved", style = MaterialTheme.typography.labelSmall.copy(color = TextTertiary, fontSize = 10.sp))
+            }
+            com.example.ui.ProjectSaveStatus.SAVING -> {
+              CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = CyanAccent)
+              Spacer(modifier = Modifier.width(3.dp))
+              Text("Saving...", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp))
+            }
+            com.example.ui.ProjectSaveStatus.UNSAVED -> {
+              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(AmberAccent))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Save", style = MaterialTheme.typography.labelSmall.copy(color = AmberAccent, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+            }
+          }
+        }
+      }
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
+      // Project Settings button
+      IconButton(
+        onClick = onSettingsClick,
+        modifier = Modifier.testTag("editor_settings_button")
+      ) {
+        Icon(
+          Icons.Default.Tune,
+          contentDescription = "Project Settings",
+          tint = TextSecondary
+        )
+      }
+
       // Snapping indicator
       IconButton(
         onClick = onToggleSnapping,

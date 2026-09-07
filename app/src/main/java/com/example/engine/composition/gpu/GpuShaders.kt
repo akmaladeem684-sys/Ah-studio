@@ -64,12 +64,14 @@ object GpuShaders {
       
       // Chroma Key
       uniform int uChromaEnabled;
-      uniform vec3 uKeyColor;
       uniform vec3 uChromaKeyColor;
-      uniform float uChromaThreshold;
+      #define uKeyColor uChromaKeyColor
       uniform float uChromaSimilarity;
       uniform float uChromaSmoothness;
       uniform float uChromaSpill;
+      uniform float uChromaEdge;
+      uniform int uChromaBgType; // 0=Transparent, 1=SolidColor
+      uniform vec4 uChromaBgColor;
       
       // Transitions
       uniform int uTransitionType;
@@ -125,19 +127,43 @@ object GpuShaders {
           color.rgb = vec3(r, g, b);
         }
         
-        // 1. Chroma Key removal
+        // 1. Chroma Key removal (Similarity, Smoothness, Spill suppression, Edge control, Backgrounds)
         if (uChromaEnabled == 1) {
           float dist = distance(color.rgb, uKeyColor);
-          if (dist < uChromaThreshold) {
-            discard;
-          } else if (dist < uChromaThreshold + uChromaSmoothness) {
-            float edgeAlpha = (dist - uChromaThreshold) / max(0.001, uChromaSmoothness);
-            color.a *= edgeAlpha;
-            if (uChromaSpill > 0.0) {
-              float maxOther = max(color.r, color.b);
-              if (color.g > maxOther) {
-                color.g = mix(color.g, maxOther, uChromaSpill);
+          float thresh = uChromaSimilarity + (uChromaEdge * 0.1);
+          float feather = max(0.001, uChromaSmoothness);
+          float alphaFactor = 1.0;
+          if (dist < thresh) {
+            alphaFactor = 0.0;
+          } else if (dist < thresh + feather) {
+            alphaFactor = (dist - thresh) / feather;
+          }
+          
+          if (alphaFactor < 1.0 && uChromaSpill > 0.0) {
+            float maxOther = max(color.r, color.b);
+            if (color.g > maxOther && uKeyColor.g > uKeyColor.r) {
+              color.g = mix(color.g, maxOther, uChromaSpill);
+            } else {
+              float keyInfluence = max(0.0, 1.0 - (dist / max(0.001, thresh + feather)));
+              vec3 keyNorm = normalize(uKeyColor + vec3(0.0001));
+              float proj = dot(color.rgb, keyNorm);
+              if (proj > 0.0) {
+                color.rgb = mix(color.rgb, color.rgb - proj * keyNorm * keyInfluence, uChromaSpill * 0.7);
               }
+            }
+          }
+          
+          if (alphaFactor <= 0.0) {
+            if (uChromaBgType == 1) {
+              color = uChromaBgColor;
+            } else {
+              discard;
+            }
+          } else if (alphaFactor < 1.0) {
+            if (uChromaBgType == 1) {
+              color = mix(uChromaBgColor, color, alphaFactor);
+            } else {
+              color.a *= alphaFactor;
             }
           }
         }
@@ -271,6 +297,176 @@ object GpuShaders {
         vec4 to = texture2D(uTextureTo, p);
         gl_FragColor = mix(from, to, pr);
       }
+    }
+  """
+
+  const val EFFECT_BLUR = 0
+  const val EFFECT_GLOW = 1
+  const val EFFECT_MOTION_BLUR = 2
+  const val EFFECT_SHAKE = 3
+  const val EFFECT_ZOOM = 4
+  const val EFFECT_SPIN = 5
+  const val EFFECT_FLASH = 6
+  const val EFFECT_GLITCH = 7
+  const val EFFECT_RGB_SPLIT = 8
+  const val EFFECT_DISTORTION = 9
+  const val EFFECT_LENS_FLARE = 10
+  const val EFFECT_LIGHT_LEAK = 11
+
+  val EFFECT_FRAGMENT_SHADER = """
+    precision mediump float;
+    varying vec2 vTextureCoord;
+    uniform sampler2D uTexture;
+    uniform int uEffectType;
+    uniform float uIntensity; // 0.0 to 1.0
+    uniform float uTime;      // elapsed time in seconds
+    uniform vec2 uTexelSize;  // 1.0 / (width, height)
+
+    void main() {
+      vec2 uv = vTextureCoord;
+      float intensity = clamp(uIntensity, 0.0, 1.0);
+      
+      if (uEffectType == $EFFECT_BLUR) {
+        float rad = intensity * 14.0 * uTexelSize.x;
+        vec4 sum = vec4(0.0);
+        sum += texture2D(uTexture, clamp(uv + vec2(-rad * 1.5, -rad * 1.5), 0.0, 1.0)) * 0.05;
+        sum += texture2D(uTexture, clamp(uv + vec2(0.0, -rad), 0.0, 1.0)) * 0.12;
+        sum += texture2D(uTexture, clamp(uv + vec2(rad * 1.5, -rad * 1.5), 0.0, 1.0)) * 0.05;
+        sum += texture2D(uTexture, clamp(uv + vec2(-rad, 0.0), 0.0, 1.0)) * 0.12;
+        sum += texture2D(uTexture, uv) * 0.32;
+        sum += texture2D(uTexture, clamp(uv + vec2(rad, 0.0), 0.0, 1.0)) * 0.12;
+        sum += texture2D(uTexture, clamp(uv + vec2(-rad * 1.5, rad * 1.5), 0.0, 1.0)) * 0.05;
+        sum += texture2D(uTexture, clamp(uv + vec2(0.0, rad), 0.0, 1.0)) * 0.12;
+        sum += texture2D(uTexture, clamp(uv + vec2(rad * 1.5, rad * 1.5), 0.0, 1.0)) * 0.05;
+        gl_FragColor = sum;
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_GLOW) {
+        vec4 baseColor = texture2D(uTexture, uv);
+        float rad = intensity * 12.0 * uTexelSize.x;
+        vec4 bloom = vec4(0.0);
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(-rad, -rad), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(rad, -rad), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(-rad, rad), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(rad, rad), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(0.0, -rad * 1.5), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(0.0, rad * 1.5), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(-rad * 1.5, 0.0), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        bloom += max(texture2D(uTexture, clamp(uv + vec2(rad * 1.5, 0.0), 0.0, 1.0)) - 0.45, vec4(0.0)) * 0.125;
+        vec3 glowColor = bloom.rgb * vec3(1.2, 1.1, 1.3) * (intensity * 2.8);
+        gl_FragColor = vec4(baseColor.rgb + glowColor, baseColor.a);
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_MOTION_BLUR) {
+        vec2 dir = vec2(cos(uTime * 2.0), sin(uTime * 2.0) * 0.6) * (intensity * 0.035);
+        vec4 sum = vec4(0.0);
+        for (int i = -4; i <= 4; i++) {
+          vec2 offset = dir * (float(i) / 4.0);
+          sum += texture2D(uTexture, clamp(uv + offset, 0.0, 1.0));
+        }
+        gl_FragColor = sum / 9.0;
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_SHAKE) {
+        vec2 shakeOffset = vec2(
+          sin(uTime * 42.0) * 0.6 + sin(uTime * 85.0) * 0.4,
+          cos(uTime * 50.0) * 0.6 + cos(uTime * 95.0) * 0.4
+        ) * (intensity * 0.04);
+        gl_FragColor = texture2D(uTexture, clamp(uv + shakeOffset, 0.0, 1.0));
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_ZOOM) {
+        float zoom = 1.0 + (sin(uTime * 7.0) * 0.5 + 0.5) * (intensity * 0.35);
+        vec2 centered = (uv - 0.5) / zoom + 0.5;
+        gl_FragColor = texture2D(uTexture, clamp(centered, 0.0, 1.0));
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_SPIN) {
+        float angle = sin(uTime * 3.5) * (intensity * 0.4);
+        float s = sin(angle);
+        float c = cos(angle);
+        vec2 centered = uv - 0.5;
+        vec2 rotated = vec2(c * centered.x - s * centered.y, s * centered.x + c * centered.y) + 0.5;
+        gl_FragColor = texture2D(uTexture, clamp(rotated, 0.0, 1.0));
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_FLASH) {
+        float flashPhase = fract(uTime * 3.0);
+        float flashStrength = pow(1.0 - flashPhase, 3.0) * intensity;
+        vec4 col = texture2D(uTexture, uv);
+        gl_FragColor = vec4(mix(col.rgb, vec3(1.0), flashStrength), col.a);
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_GLITCH) {
+        float sliceY = floor(uv.y * 32.0);
+        float sliceNoise = fract(sin(dot(vec2(sliceY, floor(uTime * 14.0)), vec2(12.9898, 78.233))) * 43758.5453);
+        float glitchShift = 0.0;
+        if (sliceNoise > 0.62) {
+          glitchShift = (sliceNoise - 0.62) * 0.18 * intensity;
+        }
+        vec2 uvR = clamp(uv + vec2(glitchShift + 0.015 * intensity, 0.0), 0.0, 1.0);
+        vec2 uvG = clamp(uv + vec2(glitchShift, 0.0), 0.0, 1.0);
+        vec2 uvB = clamp(uv + vec2(glitchShift - 0.015 * intensity, 0.0), 0.0, 1.0);
+        float r = texture2D(uTexture, uvR).r;
+        float g = texture2D(uTexture, uvG).g;
+        float b = texture2D(uTexture, uvB).b;
+        float a = texture2D(uTexture, uvG).a;
+        gl_FragColor = vec4(r, g, b, a);
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_RGB_SPLIT) {
+        vec2 offset = vec2(intensity * 0.032, 0.0);
+        float r = texture2D(uTexture, clamp(uv + offset, 0.0, 1.0)).r;
+        float g = texture2D(uTexture, uv).g;
+        float b = texture2D(uTexture, clamp(uv - offset, 0.0, 1.0)).b;
+        float a = texture2D(uTexture, uv).a;
+        gl_FragColor = vec4(r, g, b, a);
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_DISTORTION) {
+        vec2 wave = vec2(
+          sin(uv.y * 28.0 + uTime * 6.0),
+          cos(uv.x * 28.0 + uTime * 6.0)
+        ) * (0.028 * intensity);
+        gl_FragColor = texture2D(uTexture, clamp(uv + wave, 0.0, 1.0));
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_LENS_FLARE) {
+        vec4 base = texture2D(uTexture, uv);
+        vec2 flareCenter = vec2(0.42 + sin(uTime * 0.9) * 0.18, 0.36 + cos(uTime * 0.7) * 0.12);
+        float dist = distance(uv, flareCenter);
+        float star = pow(max(0.0, 1.0 - dist * 3.2), 2.0);
+        float streak = pow(max(0.0, 1.0 - abs(uv.y - flareCenter.y) * 28.0), 4.0) *
+                       pow(max(0.0, 1.0 - abs(uv.x - flareCenter.x) * 1.6), 1.5);
+        float halo = smoothstep(0.32, 0.36, dist) * smoothstep(0.40, 0.36, dist) * 0.7;
+        vec3 flareCol = (vec3(1.0, 0.88, 0.55) * (star + streak * 1.6) + vec3(0.45, 0.75, 1.0) * halo) * (intensity * 1.4);
+        gl_FragColor = vec4(base.rgb + flareCol, base.a);
+        return;
+      }
+      
+      if (uEffectType == $EFFECT_LIGHT_LEAK) {
+        vec4 base = texture2D(uTexture, uv);
+        float leak1 = smoothstep(0.75, 0.05, distance(uv, vec2(0.12 + sin(uTime * 0.75) * 0.08, 0.12)));
+        float leak2 = smoothstep(0.85, 0.15, distance(uv, vec2(0.88, 0.82 + cos(uTime * 0.85) * 0.08)));
+        vec3 leakColor1 = vec3(1.0, 0.62, 0.25) * leak1 * 1.3;
+        vec3 leakColor2 = vec3(1.0, 0.25, 0.55) * leak2 * 1.0;
+        vec3 totalLeak = (leakColor1 + leakColor2) * intensity;
+        gl_FragColor = vec4(base.rgb + totalLeak, base.a);
+        return;
+      }
+      
+      // Default
+      gl_FragColor = texture2D(uTexture, uv);
     }
   """
 }

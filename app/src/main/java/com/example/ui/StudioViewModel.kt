@@ -28,6 +28,21 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.example.data.local.CrashRecoveryEntity
+import com.example.engine.media.MediaRelinkManager
+
+enum class ProjectSaveStatus {
+  SAVED,
+  SAVING,
+  UNSAVED
+}
+
+data class ProjectSaveState(
+  val status: ProjectSaveStatus = ProjectSaveStatus.SAVED,
+  val lastSavedTimeMs: Long = System.currentTimeMillis()
+)
 
 enum class AppScreen {
   HOME,
@@ -112,6 +127,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   private val _activeFps = MutableStateFlow(FrameRate.FPS_30)
   val activeFps: StateFlow<FrameRate> = _activeFps.asStateFlow()
 
+  private val _activeSampleRate = MutableStateFlow(48000)
+  val activeSampleRate: StateFlow<Int> = _activeSampleRate.asStateFlow()
+
+  private val _activeCanvasColor = MutableStateFlow(0xFF000000)
+  val activeCanvasColor: StateFlow<Long> = _activeCanvasColor.asStateFlow()
+
+  // Save State & Missing Media Tracking
+  private val _saveState = MutableStateFlow(ProjectSaveState())
+  val saveState: StateFlow<ProjectSaveState> = _saveState.asStateFlow()
+
+  private val _missingMediaList = MutableStateFlow<List<MissingMediaItem>>(emptyList())
+  val missingMediaList: StateFlow<List<MissingMediaItem>> = _missingMediaList.asStateFlow()
+
+  val activeRecoverySession: StateFlow<CrashRecoveryEntity?> = repository.activeRecoverySession
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
   // Active Bottom Sheet/Tool in Editor
   private val _activeToolbarTab = MutableStateFlow<EditorToolbarTab?>(null)
   val activeToolbarTab: StateFlow<EditorToolbarTab?> = _activeToolbarTab.asStateFlow()
@@ -135,10 +166,20 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
       repository.createSampleProjectIfEmpty()
     }
 
-    // Sync Timeline changes with Playback Engine
+    // Sync Timeline changes with Playback Engine, mark unsaved, and persist recovery snapshot
     viewModelScope.launch {
       timelineEngine.timeline.collectLatest { timeline ->
         playbackEngine.updateTimeline(timeline)
+        if (_activeProjectId.value.isNotBlank() && _currentScreen.value == AppScreen.EDITOR) {
+          _saveState.value = _saveState.value.copy(status = ProjectSaveStatus.UNSAVED)
+          // Debounce crash recovery snapshot so every keystroke or trim is immediately protected
+          delay(1200L)
+          repository.saveCrashRecoverySession(
+            projectId = _activeProjectId.value,
+            projectName = _activeProjectName.value,
+            timeline = timeline
+          )
+        }
       }
     }
 
@@ -190,6 +231,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     _activeAspectRatio.value = aspectRatio
     _activeResolution.value = resolution
     _activeFps.value = fps
+    _activeSampleRate.value = 48000
+    _activeCanvasColor.value = 0xFF000000
 
     val initialTimeline = if (initialMediaClips.isNotEmpty()) {
       Timeline(videoClips = initialMediaClips)
@@ -209,6 +252,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     timelineEngine.loadTimeline(initialTimeline)
     saveCurrentProject()
     _currentScreen.value = AppScreen.EDITOR
+    checkMissingMedia()
   }
 
   fun createProjectWithMedia(
@@ -255,10 +299,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     _activeAspectRatio.value = AspectRatio.values().find { it.label == project.aspectRatio } ?: AspectRatio.RATIO_9_16
     _activeResolution.value = Resolution.values().find { it.label == project.resolution } ?: Resolution.RES_1080P
     _activeFps.value = FrameRate.values().find { it.fps == project.fps } ?: FrameRate.FPS_30
+    _activeSampleRate.value = project.sampleRate
+    _activeCanvasColor.value = project.canvasColor
 
     val loadedTimeline = TimelineSerializer.fromJson(project.timelineJson)
     timelineEngine.loadTimeline(loadedTimeline)
+    _saveState.value = ProjectSaveState(ProjectSaveStatus.SAVED, project.lastEditedTime)
     _currentScreen.value = AppScreen.EDITOR
+    checkMissingMedia()
   }
 
   fun applyTemplate(template: VideoTemplate) {
@@ -268,27 +316,93 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     _activeAspectRatio.value = template.aspectRatio
     _activeResolution.value = Resolution.RES_1080P
     _activeFps.value = FrameRate.FPS_30
+    _activeSampleRate.value = 48000
+    _activeCanvasColor.value = 0xFF000000
 
     timelineEngine.loadTimeline(template.createTimeline())
     saveCurrentProject()
     _currentScreen.value = AppScreen.EDITOR
+    checkMissingMedia()
   }
 
-  fun saveCurrentProject() {
+  fun saveCurrentProject(isManual: Boolean = false) {
     val id = _activeProjectId.value
     if (id.isBlank()) return
     viewModelScope.launch {
+      _saveState.value = _saveState.value.copy(status = ProjectSaveStatus.SAVING)
+      val currentTimeline = timelineEngine.timeline.value
+      val missingList = MediaRelinkManager.detectMissingMedia(getApplication(), currentTimeline)
+      _missingMediaList.value = missingList
+
       repository.saveProject(
         id = id,
         name = _activeProjectName.value,
-        durationMs = timelineEngine.timeline.value.totalDurationMs,
+        durationMs = currentTimeline.totalDurationMs,
         thumbnailPath = "",
         aspectRatio = _activeAspectRatio.value.label,
         resolution = _activeResolution.value.label,
         fps = _activeFps.value.fps,
-        timeline = timelineEngine.timeline.value,
-        isDraft = false
+        timeline = currentTimeline,
+        isDraft = false,
+        sampleRate = _activeSampleRate.value,
+        canvasColor = _activeCanvasColor.value,
+        hasMissingMedia = missingList.isNotEmpty()
       )
+      _saveState.value = ProjectSaveState(ProjectSaveStatus.SAVED, System.currentTimeMillis())
+    }
+  }
+
+  fun manualSaveProject() {
+    saveCurrentProject(isManual = true)
+  }
+
+  fun restoreCrashRecoverySession() {
+    viewModelScope.launch {
+      val session: CrashRecoveryEntity = repository.getActiveRecoverySession() ?: return@launch
+      _activeProjectId.value = session.projectId.ifBlank { UUID.randomUUID().toString() }
+      _activeProjectName.value = session.projectName.ifBlank { "Recovered Project" }
+      val recoveredTimeline = TimelineSerializer.fromJson(session.timelineJson)
+      timelineEngine.loadTimeline(recoveredTimeline)
+      _saveState.value = ProjectSaveState(ProjectSaveStatus.UNSAVED, session.timestamp)
+      _currentScreen.value = AppScreen.EDITOR
+      checkMissingMedia()
+    }
+  }
+
+  fun discardCrashRecoverySession() {
+    viewModelScope.launch {
+      repository.clearCrashRecoverySession()
+    }
+  }
+
+  fun restorePreviousProject() {
+    viewModelScope.launch {
+      val mostRecent = allProjects.value.firstOrNull()
+      if (mostRecent != null) {
+        loadProject(mostRecent)
+      }
+    }
+  }
+
+  fun checkMissingMedia() {
+    viewModelScope.launch(Dispatchers.IO) {
+      val missing = MediaRelinkManager.detectMissingMedia(getApplication(), timelineEngine.timeline.value)
+      _missingMediaList.value = missing
+      if (_activeProjectId.value.isNotBlank()) {
+        repository.updateMissingMediaStatus(_activeProjectId.value, missing.isNotEmpty())
+      }
+    }
+  }
+
+  fun relinkMedia(clipId: String, newUri: String) {
+    viewModelScope.launch(Dispatchers.IO) {
+      val currentTimeline = timelineEngine.timeline.value
+      val updated = MediaRelinkManager.relinkClip(getApplication(), currentTimeline, clipId, newUri)
+      withContext(Dispatchers.Main) {
+        timelineEngine.loadTimeline(updated)
+        saveCurrentProject(isManual = true)
+        checkMissingMedia()
+      }
     }
   }
 
@@ -319,10 +433,20 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
   }
 
-  fun updateProjectSettings(aspectRatio: AspectRatio, resolution: Resolution, fps: FrameRate) {
+  fun updateProjectSettings(
+    aspectRatio: AspectRatio,
+    resolution: Resolution,
+    fps: FrameRate,
+    sampleRate: Int = _activeSampleRate.value,
+    canvasColor: Long = _activeCanvasColor.value
+  ) {
     _activeAspectRatio.value = aspectRatio
     _activeResolution.value = resolution
     _activeFps.value = fps
+    _activeSampleRate.value = sampleRate
+    _activeCanvasColor.value = canvasColor
+    // Update timeline canvas background color as well
+    timelineEngine.setCanvasBackgroundColor(canvasColor)
     saveCurrentProject()
   }
 

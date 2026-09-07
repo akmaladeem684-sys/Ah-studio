@@ -29,6 +29,24 @@ interface ProjectDao {
 
   @Query("UPDATE projects SET name = :newName, lastEditedTime = :time WHERE id = :id")
   suspend fun renameProject(id: String, newName: String, time: Long = System.currentTimeMillis())
+
+  @Query("UPDATE projects SET hasMissingMedia = :hasMissing WHERE id = :id")
+  suspend fun updateMissingMediaStatus(id: String, hasMissing: Boolean)
+}
+
+@Dao
+interface CrashRecoveryDao {
+  @Query("SELECT * FROM crash_recovery WHERE id = 'active_session' LIMIT 1")
+  suspend fun getActiveSession(): CrashRecoveryEntity?
+
+  @Query("SELECT * FROM crash_recovery WHERE id = 'active_session' LIMIT 1")
+  fun getActiveSessionFlow(): Flow<CrashRecoveryEntity?>
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun saveSession(session: CrashRecoveryEntity)
+
+  @Query("DELETE FROM crash_recovery WHERE id = 'active_session'")
+  suspend fun clearSession()
 }
 
 @Dao

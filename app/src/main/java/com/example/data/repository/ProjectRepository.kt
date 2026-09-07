@@ -1,10 +1,6 @@
 package com.example.data.repository
 
-import com.example.data.local.AppDatabase
-import com.example.data.local.ExportedVideoEntity
-import com.example.data.local.ProjectDao
-import com.example.data.local.ProjectEntity
-import com.example.data.local.TimelineSerializer
+import com.example.data.local.*
 import com.example.domain.model.*
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
@@ -12,13 +8,42 @@ import java.util.UUID
 class ProjectRepository(private val database: AppDatabase) {
   private val projectDao: ProjectDao = database.projectDao()
   private val exportedVideoDao = database.exportedVideoDao()
+  private val crashRecoveryDao = database.crashRecoveryDao()
 
   val allProjects: Flow<List<ProjectEntity>> = projectDao.getAllProjects()
   val drafts: Flow<List<ProjectEntity>> = projectDao.getDrafts()
   val exportedVideos: Flow<List<ExportedVideoEntity>> = exportedVideoDao.getAllExportedVideos()
+  val activeRecoverySession: Flow<CrashRecoveryEntity?> = crashRecoveryDao.getActiveSessionFlow()
 
   suspend fun getProjectById(id: String): ProjectEntity? {
     return projectDao.getProjectById(id)
+  }
+
+  suspend fun getActiveRecoverySession(): CrashRecoveryEntity? {
+    return crashRecoveryDao.getActiveSession()
+  }
+
+  suspend fun saveCrashRecoverySession(
+    projectId: String,
+    projectName: String,
+    timeline: Timeline,
+    settingsJson: String = "{}"
+  ) {
+    val timelineJson = TimelineSerializer.toJson(timeline)
+    val entity = CrashRecoveryEntity(
+      id = "active_session",
+      projectId = projectId,
+      projectName = projectName,
+      timestamp = System.currentTimeMillis(),
+      timelineJson = timelineJson,
+      settingsJson = settingsJson,
+      isDirty = true
+    )
+    crashRecoveryDao.saveSession(entity)
+  }
+
+  suspend fun clearCrashRecoverySession() {
+    crashRecoveryDao.clearSession()
   }
 
   suspend fun saveProject(
@@ -30,7 +55,11 @@ class ProjectRepository(private val database: AppDatabase) {
     resolution: String,
     fps: Int,
     timeline: Timeline,
-    isDraft: Boolean = true
+    isDraft: Boolean = true,
+    sampleRate: Int = 48000,
+    canvasColor: Long = 0xFF000000,
+    hasMissingMedia: Boolean = false,
+    extraMetadataJson: String = "{}"
   ): ProjectEntity {
     val entity = ProjectEntity(
       id = id,
@@ -42,10 +71,20 @@ class ProjectRepository(private val database: AppDatabase) {
       resolution = resolution,
       fps = fps,
       timelineJson = TimelineSerializer.toJson(timeline),
-      isDraft = isDraft
+      isDraft = isDraft,
+      sampleRate = sampleRate,
+      canvasColor = canvasColor,
+      hasMissingMedia = hasMissingMedia,
+      extraMetadataJson = extraMetadataJson
     )
     projectDao.insertProject(entity)
+    // Clear the active dirty recovery session because user project is saved
+    crashRecoveryDao.clearSession()
     return entity
+  }
+
+  suspend fun updateMissingMediaStatus(id: String, hasMissing: Boolean) {
+    projectDao.updateMissingMediaStatus(id, hasMissing)
   }
 
   suspend fun duplicateProject(id: String): ProjectEntity? {
@@ -65,6 +104,10 @@ class ProjectRepository(private val database: AppDatabase) {
 
   suspend fun deleteProject(id: String) {
     projectDao.deleteProjectById(id)
+    val active = crashRecoveryDao.getActiveSession()
+    if (active?.projectId == id) {
+      crashRecoveryDao.clearSession()
+    }
   }
 
   suspend fun recordExport(

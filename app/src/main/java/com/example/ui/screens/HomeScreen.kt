@@ -45,6 +45,7 @@ fun HomeScreen(
   modifier: Modifier = Modifier
 ) {
   val projects by viewModel.allProjects.collectAsState()
+  val activeRecovery by viewModel.activeRecoverySession.collectAsState()
   var searchQuery by remember { mutableStateOf("") }
   var showNewProjectDialog by remember { mutableStateOf(false) }
   var showRenameDialog by remember { mutableStateOf<ProjectEntity?>(null) }
@@ -107,6 +108,77 @@ fun HomeScreen(
         .padding(horizontal = 16.dp),
       verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+      // Crash Recovery Alert Banner
+      activeRecovery?.let { recovery ->
+        item {
+          Card(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(18.dp))
+              .border(1.dp, AmberAccent.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+              .testTag("crash_recovery_banner"),
+            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant)
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                  modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(AmberAccent.copy(alpha = 0.2f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(Icons.Default.Restore, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(22.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = "Timeline Recovered After Crash",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                      fontWeight = FontWeight.Bold,
+                      color = TextPrimary,
+                      fontSize = 15.sp
+                    )
+                  )
+                  Text(
+                    text = "Unsaved edits in \"${recovery.projectName}\" were safely preserved.",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                      color = TextSecondary,
+                      fontSize = 12.sp
+                    )
+                  )
+                }
+              }
+              Spacer(modifier = Modifier.height(12.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                TextButton(
+                  onClick = { viewModel.discardCrashRecoverySession() },
+                  modifier = Modifier.testTag("dismiss_recovery_button")
+                ) {
+                  Text("Discard", color = TextTertiary, fontSize = 13.sp)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                  onClick = { viewModel.restoreCrashRecoverySession() },
+                  colors = ButtonDefaults.buttonColors(containerColor = AmberAccent, contentColor = Color.Black),
+                  shape = RoundedCornerShape(10.dp),
+                  contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                  modifier = Modifier.testTag("restore_recovery_button")
+                ) {
+                  Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Restore Timeline", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Hero Card: Start Creating
       item {
         Card(
@@ -191,6 +263,7 @@ fun HomeScreen(
                   )
                 }
                 QuickActionChip(icon = Icons.Default.CameraAlt, label = "Camera") { showNewProjectDialog = true }
+                QuickActionChip(icon = Icons.Default.History, label = "Restore") { viewModel.restorePreviousProject() }
                 QuickActionChip(icon = Icons.Default.AutoFixHigh, label = "AI Edit") { viewModel.navigateTo(AppScreen.AI_SUITE) }
               }
             }
@@ -529,6 +602,29 @@ fun ProjectItemCard(
             fontSize = 11.sp
           )
         )
+        if (project.hasMissingMedia) {
+          Spacer(modifier = Modifier.height(4.dp))
+          Surface(
+            color = AmberAccent.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(4.dp)
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(Icons.Default.Warning, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(11.dp))
+              Spacer(modifier = Modifier.width(3.dp))
+              Text(
+                text = "Missing Media",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  color = AmberAccent,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold
+                )
+              )
+            }
+          }
+        }
       }
 
       // Action Menu

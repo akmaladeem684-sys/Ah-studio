@@ -10,6 +10,14 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+data class ComposedEffect(
+  val clip: EffectClip,
+  val effectType: EffectType,
+  val intensity: Float,
+  val timeInEffectMs: Long,
+  val progress: Float
+)
+
 data class ComposedFrame(
   val timelinePosMs: Long,
   val activeClip: VideoClip?,
@@ -18,6 +26,7 @@ data class ComposedFrame(
   val activeTexts: List<ComposedText>,
   val activeStickers: List<ComposedSticker>,
   val activeTransition: ComposedTransition?,
+  val activeEffects: List<ComposedEffect> = emptyList(),
   val colorMatrix: ColorMatrix,
   val colorFilter: ColorMatrixColorFilter,
   val activeClipTransform: com.example.engine.InterpolatedClipTransform? = null
@@ -229,6 +238,24 @@ class VideoCompositionEngine(private val context: Context) {
       }
     } else emptyList()
 
+    // Visual Effects with Keyframes
+    val isEffectHidden = timeline.trackSettings[TrackType.EFFECT]?.isHidden == true
+    val activeEffects = if (!isEffectHidden) {
+      timeline.effectClips.filter {
+        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+      }.map { clip ->
+        val relTime = posMs - clip.timelineStartMs
+        val intensity = KeyframeInterpolator.interpolateEffectIntensity(clip, relTime)
+        ComposedEffect(
+          clip = clip,
+          effectType = clip.effectType,
+          intensity = intensity,
+          timeInEffectMs = relTime,
+          progress = (relTime.toFloat() / clip.durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+        )
+      }
+    } else emptyList()
+
     // Adjustments & Filters
     val colorMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter)
     val colorFilter = ColorMatrixColorFilter(colorMatrix)
@@ -246,6 +273,7 @@ class VideoCompositionEngine(private val context: Context) {
       activeTexts = texts,
       activeStickers = stickers,
       activeTransition = activeTransition,
+      activeEffects = activeEffects,
       colorMatrix = colorMatrix,
       colorFilter = colorFilter,
       activeClipTransform = activeClipTransform
@@ -378,6 +406,72 @@ class VideoCompositionEngine(private val context: Context) {
     // 5. Draw Stickers
     for (sticker in frame.activeStickers) {
       drawStickerClip(canvas, sticker, canvasWidth, canvasHeight)
+    }
+
+    // 6. Apply Active Visual Effects (Flash, Glow, Glitch, Light Leak, Lens Flare, RGB Split)
+    for (effect in frame.activeEffects) {
+      drawVisualEffect(canvas, effect, canvasWidth, canvasHeight)
+    }
+  }
+
+  private fun drawVisualEffect(canvas: Canvas, effect: ComposedEffect, width: Int, height: Int) {
+    val intensity = effect.intensity
+    if (intensity <= 0.01f) return
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    when (effect.effectType) {
+      EffectType.FLASH -> {
+        val flashPhase = ((effect.timeInEffectMs % 400L).toFloat() / 400f)
+        val flashAlpha = ((1f - flashPhase) * (1f - flashPhase) * intensity * 220f).toInt().coerceIn(0, 255)
+        p.color = Color.WHITE
+        p.alpha = flashAlpha
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+      }
+      EffectType.GLOW -> {
+        p.color = Color.CYAN
+        p.alpha = (intensity * 45f).toInt().coerceIn(0, 255)
+        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+      }
+      EffectType.LIGHT_LEAK -> {
+        val shader = RadialGradient(
+          width * 0.15f, height * 0.15f, width * 0.7f,
+          intArrayOf(Color.argb((intensity * 160).toInt().coerceIn(0, 255), 255, 140, 50), Color.TRANSPARENT),
+          null, Shader.TileMode.CLAMP
+        )
+        p.shader = shader
+        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
+      }
+      EffectType.LENS_FLARE -> {
+        val centerX = width * 0.4f
+        val centerY = height * 0.35f
+        p.color = Color.argb((intensity * 180).toInt().coerceIn(0, 255), 255, 230, 160)
+        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+        canvas.drawCircle(centerX, centerY, width * 0.12f, p)
+        // Anamorphic horizontal streak
+        val streakPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.argb((intensity * 120).toInt().coerceIn(0, 255), 180, 220, 255)
+          xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+        }
+        canvas.drawRect(0f, centerY - 3f, width.toFloat(), centerY + 3f, streakPaint)
+      }
+      EffectType.RGB_SPLIT, EffectType.GLITCH -> {
+        val splitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, 0f, width.toFloat(), 0f,
+            intArrayOf(
+              Color.argb((intensity * 50).toInt().coerceIn(0, 255), 255, 0, 50),
+              Color.TRANSPARENT,
+              Color.argb((intensity * 50).toInt().coerceIn(0, 255), 0, 100, 255)
+            ),
+            null, Shader.TileMode.CLAMP
+          )
+          xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+        }
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), splitPaint)
+      }
+      else -> {}
     }
   }
 

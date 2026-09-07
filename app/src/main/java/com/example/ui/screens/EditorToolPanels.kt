@@ -194,6 +194,50 @@ fun AdjustToolPanel(
       }
       item {
         AdjustmentSlider(
+          label = "Tint",
+          value = currentAdjustments.tint,
+          valueRange = -0.5f..0.5f,
+          onValueChange = {
+            currentAdjustments = currentAdjustments.copy(tint = it)
+            viewModel.timelineEngine.updateAdjustments(currentAdjustments)
+          }
+        )
+      }
+      item {
+        AdjustmentSlider(
+          label = "Highlights",
+          value = currentAdjustments.highlights,
+          valueRange = -1.0f..1.0f,
+          onValueChange = {
+            currentAdjustments = currentAdjustments.copy(highlights = it)
+            viewModel.timelineEngine.updateAdjustments(currentAdjustments)
+          }
+        )
+      }
+      item {
+        AdjustmentSlider(
+          label = "Shadows",
+          value = currentAdjustments.shadows,
+          valueRange = -1.0f..1.0f,
+          onValueChange = {
+            currentAdjustments = currentAdjustments.copy(shadows = it)
+            viewModel.timelineEngine.updateAdjustments(currentAdjustments)
+          }
+        )
+      }
+      item {
+        AdjustmentSlider(
+          label = "Sharpness",
+          value = currentAdjustments.sharpness,
+          valueRange = 0f..2.0f,
+          onValueChange = {
+            currentAdjustments = currentAdjustments.copy(sharpness = it)
+            viewModel.timelineEngine.updateAdjustments(currentAdjustments)
+          }
+        )
+      }
+      item {
+        AdjustmentSlider(
           label = "Vignette",
           value = currentAdjustments.vignette,
           valueRange = 0f..1.0f,
@@ -414,6 +458,11 @@ fun EffectsToolPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
+  val timeline by viewModel.timelineEngine.timeline.collectAsState()
+  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
+  val selectedEffectId = (selectedElement as? SelectedTrackElement.Effect)?.clipId
+  val activeEffectClip = timeline.effectClips.find { it.id == selectedEffectId } ?: timeline.effectClips.lastOrNull()
+
   var selectedCategory by remember { mutableStateOf("All") }
   val categories = listOf("All", "Basic", "Motion", "Light", "Distortion")
 
@@ -466,7 +515,8 @@ fun EffectsToolPanel(
             .size(width = 110.dp, height = 80.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable {
-              viewModel.timelineEngine.addEffectClip(effect)
+              val newClip = viewModel.timelineEngine.addEffectClip(effect)
+              viewModel.timelineEngine.selectElement(SelectedTrackElement.Effect(newClip.id))
             },
           colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
           border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, CyanAccent.copy(alpha = 0.5f))))
@@ -484,6 +534,109 @@ fun EffectsToolPanel(
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 11.sp),
               maxLines = 1
             )
+          }
+        }
+      }
+    }
+
+    // Active Effect Inspector
+    if (activeEffectClip != null) {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, PurpleAccent.copy(alpha = 0.5f))))
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Box(
+                modifier = Modifier
+                  .size(10.dp)
+                  .clip(CircleShape)
+                  .background(PurpleAccent)
+              )
+              Text(
+                text = "${activeEffectClip.effectType.displayName} Effect",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+              )
+              Text(
+                text = "(${activeEffectClip.effectType.category})",
+                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+              )
+            }
+            IconButton(
+              onClick = { viewModel.timelineEngine.deleteEffectClip(activeEffectClip.id) },
+              modifier = Modifier.size(28.dp)
+            ) {
+              Icon(Icons.Default.Delete, contentDescription = "Delete effect", tint = RedAccent, modifier = Modifier.size(18.dp))
+            }
+          }
+
+          // Intensity Slider
+          Column {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text("Effect Intensity", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+              Text("${(activeEffectClip.intensity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
+            }
+            Slider(
+              value = activeEffectClip.intensity,
+              valueRange = 0.0f..1.0f,
+              onValueChange = {
+                viewModel.timelineEngine.updateEffectIntensity(activeEffectClip.id, it)
+              },
+              colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
+            )
+          }
+
+          // Duration Controls
+          Column {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text("Timeline Duration", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+              Text(String.format(java.util.Locale.US, "%.1fs", activeEffectClip.durationMs / 1000f), style = MaterialTheme.typography.bodySmall.copy(color = AmberAccent, fontWeight = FontWeight.Bold))
+            }
+            Slider(
+              value = (activeEffectClip.durationMs / 1000f).coerceIn(0.5f, 15f),
+              valueRange = 0.5f..15f,
+              onValueChange = {
+                viewModel.timelineEngine.updateEffectClip(activeEffectClip.copy(durationMs = (it * 1000).toLong()))
+              },
+              colors = SliderDefaults.colors(thumbColor = AmberAccent, activeTrackColor = AmberAccent)
+            )
+          }
+
+          // Keyframe Support Row
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "Keyframes: ${activeEffectClip.keyframes.size}",
+              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Button(
+                onClick = {
+                  viewModel.timelineEngine.selectElement(SelectedTrackElement.Effect(activeEffectClip.id))
+                  viewModel.timelineEngine.addEffectKeyframe(activeEffectClip.id)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White),
+                shape = RoundedCornerShape(8.dp)
+              ) {
+                Icon(Icons.Default.Diamond, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Add Keyframe", fontSize = 11.sp)
+              }
+            }
           }
         }
       }
@@ -816,16 +969,186 @@ fun ChromaKeyPanel(
     }
 
     if (chroma.enabled) {
-      Column {
-        Text("Keying Intensity: ${(chroma.intensity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-        Slider(
-          value = chroma.intensity,
-          onValueChange = {
-            chroma = chroma.copy(intensity = it)
-            viewModel.timelineEngine.updateChromaKey(chroma)
-          },
-          colors = SliderDefaults.colors(thumbColor = GreenAccent, activeTrackColor = GreenAccent)
-        )
+      LazyColumn(
+        modifier = Modifier.fillMaxWidth().height(260.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        // 1. Color Selection
+        item {
+          Text("Key Color", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+          Spacer(modifier = Modifier.height(4.dp))
+          val presetColors = listOf(
+            0xFF00FF00L to "Green",
+            0xFF0000FFL to "Blue",
+            0xFFFF00FFL to "Magenta",
+            0xFFFF0000L to "Red",
+            0xFF000000L to "Black",
+            0xFFFFFFFFL to "White"
+          )
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            presetColors.forEach { (colorVal, label) ->
+              val isSelected = chroma.targetColor == colorVal
+              Box(
+                modifier = Modifier
+                  .size(36.dp)
+                  .clip(CircleShape)
+                  .background(Color(colorVal))
+                  .border(
+                    width = if (isSelected) 3.dp else 1.dp,
+                    color = if (isSelected) CyanAccent else StudioBorder,
+                    shape = CircleShape
+                  )
+                  .clickable {
+                    chroma = chroma.copy(targetColor = colorVal)
+                    viewModel.timelineEngine.updateChromaKey(chroma)
+                  },
+                contentAlignment = Alignment.Center
+              ) {
+                if (isSelected) {
+                  Icon(
+                    Icons.Default.Check,
+                    contentDescription = label,
+                    tint = if (colorVal == 0xFFFFFFFFL) Color.Black else Color.White,
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        // 2. Similarity Slider
+        item {
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Similarity", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+            Text("${(chroma.similarity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary))
+          }
+          Slider(
+            value = chroma.similarity,
+            valueRange = 0.05f..0.95f,
+            onValueChange = {
+              chroma = chroma.copy(similarity = it, intensity = it)
+              viewModel.timelineEngine.updateChromaKey(chroma)
+            },
+            colors = SliderDefaults.colors(thumbColor = GreenAccent, activeTrackColor = GreenAccent)
+          )
+        }
+
+        // 3. Smoothness Slider
+        item {
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Smoothness", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+            Text("${(chroma.smoothness * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary))
+          }
+          Slider(
+            value = chroma.smoothness,
+            valueRange = 0.01f..0.50f,
+            onValueChange = {
+              chroma = chroma.copy(smoothness = it)
+              viewModel.timelineEngine.updateChromaKey(chroma)
+            },
+            colors = SliderDefaults.colors(thumbColor = GreenAccent, activeTrackColor = GreenAccent)
+          )
+        }
+
+        // 4. Spill Suppression Slider
+        item {
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Spill Suppression", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+            Text("${(chroma.spillSuppression * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary))
+          }
+          Slider(
+            value = chroma.spillSuppression,
+            valueRange = 0.0f..1.0f,
+            onValueChange = {
+              chroma = chroma.copy(spillSuppression = it, spillReduction = it)
+              viewModel.timelineEngine.updateChromaKey(chroma)
+            },
+            colors = SliderDefaults.colors(thumbColor = GreenAccent, activeTrackColor = GreenAccent)
+          )
+        }
+
+        // 5. Edge Control Slider
+        item {
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Edge Control", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+            Text(String.format("%.2f", chroma.edgeControl), style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary))
+          }
+          Slider(
+            value = chroma.edgeControl,
+            valueRange = -0.5f..0.5f,
+            onValueChange = {
+              chroma = chroma.copy(edgeControl = it)
+              viewModel.timelineEngine.updateChromaKey(chroma)
+            },
+            colors = SliderDefaults.colors(thumbColor = GreenAccent, activeTrackColor = GreenAccent)
+          )
+        }
+
+        // 6. Background Type Selection
+        item {
+          Text("Background Replacement", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+          Spacer(modifier = Modifier.height(4.dp))
+          val bgTypes = listOf("Transparent", "SolidColor", "Image")
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            bgTypes.forEach { type ->
+              FilterChip(
+                selected = chroma.backgroundType == type,
+                onClick = {
+                  chroma = chroma.copy(backgroundType = type)
+                  viewModel.timelineEngine.updateChromaKey(chroma)
+                },
+                label = {
+                  Text(when (type) {
+                    "Transparent" -> "Transparent"
+                    "SolidColor" -> "Solid Color"
+                    else -> "Video / Image"
+                  })
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                  selectedContainerColor = CyanAccent,
+                  selectedLabelColor = Color.Black,
+                  containerColor = StudioSurfaceVariant,
+                  labelColor = TextPrimary
+                )
+              )
+            }
+          }
+        }
+
+        if (chroma.backgroundType == "SolidColor") {
+          item {
+            Text("Solid Background Color", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+            Spacer(modifier = Modifier.height(4.dp))
+            val solidPalette = listOf(
+              0xFF000000L to "Black",
+              0xFFFFFFFFL to "White",
+              0xFF1E3A8AL to "Navy",
+              0xFF7C3AEDL to "Purple",
+              0xFFEF4444L to "Coral"
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              solidPalette.forEach { (colorVal, name) ->
+                val isSelected = chroma.backgroundColor == colorVal
+                Box(
+                  modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color(colorVal))
+                    .border(
+                      width = if (isSelected) 3.dp else 1.dp,
+                      color = if (isSelected) AmberAccent else StudioBorder,
+                      shape = CircleShape
+                    )
+                    .clickable {
+                      chroma = chroma.copy(backgroundColor = colorVal)
+                      viewModel.timelineEngine.updateChromaKey(chroma)
+                    }
+                )
+              }
+            }
+          }
+        }
       }
     }
   }

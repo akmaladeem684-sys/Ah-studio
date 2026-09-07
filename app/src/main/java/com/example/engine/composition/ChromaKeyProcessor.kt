@@ -27,9 +27,11 @@ object ChromaKeyProcessor {
     val pixels = IntArray(width * height)
     source.getPixels(pixels, 0, width, 0, 0, width, height)
 
-    val threshold = settings.intensity * 255f * 1.5f
-    val smoothing = max(1f, settings.edgeAdjustment * 100f)
-    val spill = settings.spillReduction.coerceIn(0f, 1f)
+    val threshold = (settings.similarity + settings.edgeControl * 0.1f).coerceIn(0.01f, 1.0f) * 255f * 1.5f
+    val smoothing = max(1f, settings.smoothness * 255f * 0.8f)
+    val spill = settings.spillSuppression.coerceIn(0f, 1f)
+    val isSolidBg = settings.backgroundType == "SolidColor"
+    val bgColor = settings.backgroundColor.toInt()
 
     for (i in pixels.indices) {
       val pixel = pixels[i]
@@ -48,27 +50,35 @@ object ChromaKeyProcessor {
       ).toFloat()
 
       if (dist < threshold) {
-        // Full transparent
-        pixels[i] = 0
+        pixels[i] = if (isSolidBg) bgColor else 0
       } else if (dist < threshold + smoothing) {
         // Feather edge
         val alphaFactor = (dist - threshold) / smoothing
         val newAlpha = (a * alphaFactor).toInt().coerceIn(0, 255)
 
-        // Spill suppression: if green screen, clamp green to average of red & blue
-        if (spill > 0f && targetG > targetR && targetG > targetB) {
+        // Spill suppression
+        if (spill > 0f) {
           val maxOther = max(r, b)
-          if (g > maxOther) {
+          if (targetG > targetR && targetG > targetB && g > maxOther) {
             g = (g * (1f - spill) + maxOther * spill).toInt().coerceIn(0, 255)
+          } else if (targetB > targetR && targetB > targetG && b > max(r, g)) {
+            b = (b * (1f - spill) + max(r, g) * spill).toInt().coerceIn(0, 255)
           }
         }
-        pixels[i] = Color.argb(newAlpha, r, g, b)
+        val keyedPixel = Color.argb(newAlpha, r, g, b)
+        pixels[i] = if (isSolidBg) {
+          blendColors(bgColor, keyedPixel)
+        } else {
+          keyedPixel
+        }
       } else {
-        // Spill suppression on edges
-        if (spill > 0f && targetG > targetR && targetG > targetB && g > max(r, b)) {
+        // Spill suppression on fringes
+        if (spill > 0f) {
           val maxOther = max(r, b)
-          val despilledG = (g * (1f - spill * 0.5f) + maxOther * (spill * 0.5f)).toInt().coerceIn(0, 255)
-          pixels[i] = Color.argb(a, r, despilledG, b)
+          if (targetG > targetR && targetG > targetB && g > maxOther) {
+            val despilledG = (g * (1f - spill * 0.6f) + maxOther * (spill * 0.6f)).toInt().coerceIn(0, 255)
+            pixels[i] = Color.argb(a, r, despilledG, b)
+          }
         }
       }
     }
@@ -76,5 +86,16 @@ object ChromaKeyProcessor {
     val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     output.setPixels(pixels, 0, width, 0, 0, width, height)
     return output
+  }
+
+  private fun blendColors(bg: Int, fg: Int): Int {
+    val fgA = Color.alpha(fg) / 255f
+    if (fgA >= 1f) return fg
+    if (fgA <= 0f) return bg
+    val invA = 1f - fgA
+    val r = (Color.red(fg) * fgA + Color.red(bg) * invA).toInt().coerceIn(0, 255)
+    val g = (Color.green(fg) * fgA + Color.green(bg) * invA).toInt().coerceIn(0, 255)
+    val b = (Color.blue(fg) * fgA + Color.blue(bg) * invA).toInt().coerceIn(0, 255)
+    return Color.argb(255, r, g, b)
   }
 }

@@ -138,6 +138,7 @@ fun KeyframeAnimationPanel(
             is SelectedTrackElement.Video -> "Main Video Clip"
             is SelectedTrackElement.Overlay -> "PIP Overlay Clip"
             is SelectedTrackElement.Audio -> "Audio Track"
+            is SelectedTrackElement.Effect -> "Visual Effect Clip"
             else -> "No clip selected"
           }
           Text(

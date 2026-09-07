@@ -1825,7 +1825,7 @@ class TimelineEngine {
 
   // --- Effect Operations ---
 
-  fun addEffectClip(effectType: EffectType) {
+  fun addEffectClip(effectType: EffectType): EffectClip {
     recordHistory()
     val newEffect = EffectClip(
       effectType = effectType,
@@ -1837,6 +1837,55 @@ class TimelineEngine {
     list.add(newEffect)
     _timeline.value = _timeline.value.copy(effectClips = list)
     _selectedElement.value = SelectedTrackElement.Effect(newEffect.id)
+    return newEffect
+  }
+
+  fun updateEffectIntensity(effectId: String, intensity: Float) {
+    val list = _timeline.value.effectClips.map {
+      if (it.id == effectId) it.copy(intensity = intensity.coerceIn(0f, 1f)) else it
+    }
+    _timeline.value = _timeline.value.copy(effectClips = list)
+  }
+
+  fun updateEffectClip(updated: EffectClip) {
+    val list = _timeline.value.effectClips.map {
+      if (it.id == updated.id) updated else it
+    }
+    _timeline.value = _timeline.value.copy(effectClips = list)
+  }
+
+  fun deleteEffectClip(effectId: String) {
+    recordHistory()
+    val list = _timeline.value.effectClips.filter { it.id != effectId }
+    _timeline.value = _timeline.value.copy(effectClips = list)
+    if ((_selectedElement.value as? SelectedTrackElement.Effect)?.clipId == effectId) {
+      _selectedElement.value = SelectedTrackElement.None
+    }
+  }
+
+  fun addEffectKeyframe(effectId: String, keyframe: ClipKeyframe? = null) {
+    recordHistory()
+    val list = _timeline.value.effectClips.map {
+      if (it.id == effectId) {
+        val relTime = (_currentPositionMs.value - it.timelineStartMs).coerceIn(0L, it.durationMs)
+        val kf = keyframe ?: ClipKeyframe(timeMs = relTime, effectParam = it.intensity)
+        val existing = it.keyframes.filter { k -> k.timeMs != kf.timeMs }.toMutableList()
+        existing.add(kf)
+        existing.sortBy { k -> k.timeMs }
+        it.copy(keyframes = existing)
+      } else it
+    }
+    _timeline.value = _timeline.value.copy(effectClips = list)
+  }
+
+  fun removeEffectKeyframe(effectId: String, keyframeId: String) {
+    recordHistory()
+    val list = _timeline.value.effectClips.map {
+      if (it.id == effectId) {
+        it.copy(keyframes = it.keyframes.filter { kf -> kf.id != keyframeId })
+      } else it
+    }
+    _timeline.value = _timeline.value.copy(effectClips = list)
   }
 
   // --- Transitions ---
@@ -1890,6 +1939,10 @@ class TimelineEngine {
         val clip = _timeline.value.audioClips.find { it.id == selected.clipId }
         clip?.let { it.id to it.keyframes }
       }
+      is SelectedTrackElement.Effect -> {
+        val clip = _timeline.value.effectClips.find { it.id == selected.clipId }
+        clip?.let { it.id to it.keyframes }
+      }
       else -> null
     }
   }
@@ -1907,6 +1960,10 @@ class TimelineEngine {
       }
       is SelectedTrackElement.Audio -> {
         val c = _timeline.value.audioClips.find { it.id == selected.clipId } ?: return null
+        c.timelineStartMs to c.keyframes
+      }
+      is SelectedTrackElement.Effect -> {
+        val c = _timeline.value.effectClips.find { it.id == selected.clipId } ?: return null
         c.timelineStartMs to c.keyframes
       }
       else -> return null
@@ -1998,6 +2055,25 @@ class TimelineEngine {
         _timeline.value = _timeline.value.copy(audioClips = list)
         newlyAddedId?.let { selectKeyframe(it) }
       }
+      is SelectedTrackElement.Effect -> {
+        recordHistory()
+        var newlyAddedId: String? = null
+        val list = _timeline.value.effectClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val relTime = (_currentPositionMs.value - clip.timelineStartMs).coerceIn(0L, clip.durationMs)
+            val existing = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 50L }
+            val currentIntensity = KeyframeInterpolator.interpolateEffectIntensity(clip, relTime)
+            val newKf = customKeyframe?.copy(timeMs = relTime) ?: ClipKeyframe(
+              timeMs = relTime,
+              effectParam = currentIntensity
+            )
+            newlyAddedId = newKf.id
+            clip.copy(keyframes = (existing + newKf).sortedBy { it.timeMs })
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(effectClips = list)
+        newlyAddedId?.let { selectKeyframe(it) }
+      }
       else -> {}
     }
   }
@@ -2049,6 +2125,20 @@ class TimelineEngine {
           } else clip
         }
         _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      is SelectedTrackElement.Effect -> {
+        val list = _timeline.value.effectClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = if (selectedIds.isNotEmpty()) {
+              clip.keyframes.filterNot { it.id in selectedIds }
+            } else {
+              val relTime = _currentPositionMs.value - clip.timelineStartMs
+              clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - relTime) < 200L }
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(effectClips = list)
       }
       else -> {}
     }
@@ -2103,6 +2193,18 @@ class TimelineEngine {
         }
         _timeline.value = _timeline.value.copy(audioClips = list)
       }
+      is SelectedTrackElement.Effect -> {
+        val list = _timeline.value.effectClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val clampedTime = newTimeMs.coerceIn(0L, clip.durationMs)
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) kf.copy(timeMs = clampedTime) else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(effectClips = list)
+      }
       else -> {}
     }
   }
@@ -2152,6 +2254,19 @@ class TimelineEngine {
         }
         _timeline.value = _timeline.value.copy(audioClips = list)
       }
+      is SelectedTrackElement.Effect -> {
+        val list = _timeline.value.effectClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id in selectedIds) {
+                kf.copy(timeMs = (kf.timeMs + deltaMs).coerceIn(0L, clip.durationMs))
+              } else kf
+            }.sortedBy { it.timeMs }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(effectClips = list)
+      }
       else -> {}
     }
   }
@@ -2191,6 +2306,17 @@ class TimelineEngine {
           } else clip
         }
         _timeline.value = _timeline.value.copy(audioClips = list)
+      }
+      is SelectedTrackElement.Effect -> {
+        val list = _timeline.value.effectClips.map { clip ->
+          if (clip.id == selected.clipId) {
+            val updated = clip.keyframes.map { kf ->
+              if (kf.id == keyframeId) transform(kf) else kf
+            }
+            clip.copy(keyframes = updated)
+          } else clip
+        }
+        _timeline.value = _timeline.value.copy(effectClips = list)
       }
       else -> {}
     }
@@ -2352,5 +2478,10 @@ class TimelineEngine {
     val next = keyframes.firstOrNull { it.timeMs > currentRelTime + 50L } ?: keyframes.last()
     setPosition(clipStart + next.timeMs)
     selectKeyframe(next.id)
+  }
+
+  fun setCanvasBackgroundColor(color: Long) {
+    recordHistory()
+    _timeline.value = _timeline.value.copy(canvasBackgroundColor = color)
   }
 }

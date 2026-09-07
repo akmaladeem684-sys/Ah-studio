@@ -2,6 +2,7 @@ package com.example.engine
 
 import com.example.domain.model.AudioClip
 import com.example.domain.model.ClipKeyframe
+import com.example.domain.model.EffectClip
 import com.example.domain.model.KeyframeInterpolation
 import com.example.domain.model.VideoClip
 import kotlin.math.abs
@@ -210,5 +211,38 @@ object KeyframeInterpolator {
 
   fun lerp(start: Float, end: Float, fraction: Float): Float {
     return start + (end - start) * fraction
+  }
+
+  fun interpolateEffectIntensity(clip: EffectClip, relTimeMs: Long): Float {
+    if (clip.keyframes.isEmpty()) return clip.intensity
+    val keyframes = clip.keyframes.sortedBy { it.timeMs }
+    if (relTimeMs <= keyframes.first().timeMs) {
+      val first = keyframes.first()
+      val v = if (first.effectParam > 0f) first.effectParam else first.opacity
+      return (v * clip.intensity).coerceIn(0f, 1f)
+    }
+    if (relTimeMs >= keyframes.last().timeMs) {
+      val last = keyframes.last()
+      val v = if (last.effectParam > 0f) last.effectParam else last.opacity
+      return (v * clip.intensity).coerceIn(0f, 1f)
+    }
+
+    var before = keyframes.first()
+    var after = keyframes.last()
+    for (i in 0 until keyframes.size - 1) {
+      if (relTimeMs >= keyframes[i].timeMs && relTimeMs <= keyframes[i + 1].timeMs) {
+        before = keyframes[i]
+        after = keyframes[i + 1]
+        break
+      }
+    }
+
+    val range = (after.timeMs - before.timeMs).toFloat().coerceAtLeast(1f)
+    val rawT = ((relTimeMs - before.timeMs) / range).coerceIn(0f, 1f)
+    val factor = computeFactor(before.interpolation, before.customCurvePoints, rawT)
+    val vBefore = if (before.effectParam > 0f) before.effectParam else before.opacity
+    val vAfter = if (after.effectParam > 0f) after.effectParam else after.opacity
+    val interpolatedVal = lerp(vBefore, vAfter, factor)
+    return (interpolatedVal * clip.intensity).coerceIn(0f, 1f)
   }
 }

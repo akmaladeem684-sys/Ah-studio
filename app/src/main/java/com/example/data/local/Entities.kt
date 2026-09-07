@@ -14,7 +14,23 @@ data class ProjectEntity(
   val resolution: String = "1080p",
   val fps: Int = 30,
   val timelineJson: String,
-  val isDraft: Boolean = true
+  val isDraft: Boolean = true,
+  // Migrated fields with default values for backward compatibility
+  val sampleRate: Int = 48000,
+  val canvasColor: Long = 0xFF000000,
+  val hasMissingMedia: Boolean = false,
+  val extraMetadataJson: String = "{}"
+)
+
+@Entity(tableName = "crash_recovery")
+data class CrashRecoveryEntity(
+  @PrimaryKey val id: String = "active_session",
+  val projectId: String,
+  val projectName: String,
+  val timestamp: Long,
+  val timelineJson: String,
+  val settingsJson: String = "{}",
+  val isDirty: Boolean = true
 )
 
 @Entity(tableName = "exported_videos")

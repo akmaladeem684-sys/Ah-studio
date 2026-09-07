@@ -193,24 +193,27 @@ data class StickerClip(
 )
 
 enum class EffectType(val category: String, val displayName: String) {
-  // Basic
+  // Blur & Glow
   BLUR("Basic", "Blur"),
-  SHARPEN("Basic", "Sharpen"),
   GLOW("Basic", "Glow"),
+  MOTION_BLUR("Motion", "Motion Blur"),
+  // Motion
+  SHAKE("Motion", "Shake"),
+  ZOOM("Motion", "Zoom"),
+  SPIN("Motion", "Spin"),
+  // Light
+  FLASH("Light", "Flash"),
+  LENS_FLARE("Light", "Lens Flare"),
+  LIGHT_LEAK("Light", "Light Leak"),
+  // Distortion & Glitch
+  GLITCH("Distortion", "Glitch"),
+  RGB_SPLIT("Distortion", "RGB Split"),
+  DISTORTION("Distortion", "Distortion"),
+  // Additional presets
+  SHARPEN("Basic", "Sharpen"),
   NOISE("Basic", "Noise"),
   VIGNETTE("Basic", "Vignette"),
-  // Motion
-  SHAKE("Motion", "Camera Shake"),
-  ZOOM("Motion", "Pulsing Zoom"),
-  SPIN("Motion", "Slow Spin"),
   CAMERA_MOVEMENT("Motion", "Wander Pan"),
-  // Light
-  FLASH("Light", "Strobe Flash"),
-  LENS_FLARE("Light", "Lens Flare"),
-  LIGHT_LEAK("Light", "Warm Light Leak"),
-  // Distortion
-  RGB_SPLIT("Distortion", "RGB Glitch Split"),
-  GLITCH("Distortion", "Digital Distortion"),
   WAVE("Distortion", "Wave Ripple"),
   RIPPLE("Distortion", "Shockwave")
 }
@@ -220,7 +223,8 @@ data class EffectClip(
   val effectType: EffectType = EffectType.GLOW,
   val timelineStartMs: Long = 0L,
   val durationMs: Long = 3000L,
-  val intensity: Float = 0.8f
+  val intensity: Float = 0.8f,
+  val keyframes: List<ClipKeyframe> = emptyList()
 )
 
 enum class TransitionType(val displayName: String) {
@@ -285,14 +289,18 @@ data class FilterSettings(
 
 data class ChromaKeySettings(
   val enabled: Boolean = false,
-  val targetColor: Long = 0xFF00FF00, // Green Screen
-  val intensity: Float = 0.5f,
-  val shadow: Float = 0.3f,
-  val edgeAdjustment: Float = 0.2f,
-  val spillReduction: Float = 0.4f,
-  val backgroundType: String = "SolidColor", // "SolidColor", "Image"
+  val targetColor: Long = 0xFF00FF00, // Green Screen default
+  val similarity: Float = 0.4f,       // Similarity / distance threshold (0.0 to 1.0)
+  val smoothness: Float = 0.15f,      // Smoothness / feathering (0.0 to 1.0)
+  val spillSuppression: Float = 0.5f, // Spill suppression (0.0 to 1.0)
+  val edgeControl: Float = 0.0f,      // Edge control: choke/expand (-1.0 to 1.0)
+  val backgroundType: String = "SolidColor", // "SolidColor", "Image", "Video", "Transparent"
   val backgroundColor: Long = 0xFF000000,
-  val backgroundUri: String? = null
+  val backgroundUri: String? = null,
+  val intensity: Float = similarity,
+  val shadow: Float = 0.3f,
+  val edgeAdjustment: Float = smoothness,
+  val spillReduction: Float = spillSuppression
 )
 
 enum class TrackType {
