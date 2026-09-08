@@ -45,6 +45,7 @@ fun TimelineActionToolbar(
   onReplaceMedia: () -> Unit,
   onToggleMultiSelect: () -> Unit,
   onToggleMagnetic: () -> Unit,
+  onNextPeak: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val scrollState = rememberScrollState()
@@ -93,6 +94,18 @@ fun TimelineActionToolbar(
         testTag = "action_trim_right",
         onClick = onTrimRight
       )
+
+      if (onNextPeak != null) {
+        // Audio Beat / Peak alignment jump
+        TimelineActionButton(
+          icon = Icons.Default.GraphicEq,
+          label = "Peak Snap",
+          enabled = true,
+          accentColor = AmberAccent,
+          testTag = "action_next_peak",
+          onClick = onNextPeak
+        )
+      }
 
       VerticalDivider(
         color = StudioBorder,

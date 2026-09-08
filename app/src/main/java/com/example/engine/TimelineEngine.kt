@@ -270,6 +270,21 @@ class TimelineEngine {
         snapPoints.add(it.timelineStartMs + it.durationMs)
       }
     }
+    // Prominent audio peak beat snap points to assist cutting on beats
+    _timeline.value.audioClips.forEach { clip ->
+      if (clip.id !in ignoreClipIds && !clip.isMuted && clip.durationMs > 0L) {
+        val fullWave = com.example.engine.audio.AudioWaveformManager.getOrGenerateWaveform(
+          clip.id, clip.uri, clip.title, clip.durationMs, clip.waveformData
+        )
+        val trimmed = com.example.engine.audio.AudioWaveformManager.sliceForTrim(
+          fullWave, clip.sourceStartMs, clip.sourceEndMs, clip.durationMs
+        )
+        val analysis = com.example.engine.audio.AudioWaveformManager.analyzeWaveform(trimmed, clip.durationMs)
+        analysis.prominentPeaks.forEach { peak ->
+          snapPoints.add(clip.timelineStartMs + peak.timeMs)
+        }
+      }
+    }
     val closest = snapPoints.minByOrNull { kotlin.math.abs(it - candidatePosMs) } ?: candidatePosMs
     return if (kotlin.math.abs(closest - candidatePosMs) <= thresholdMs) {
       _snapIndicatorMs.value = closest
@@ -278,6 +293,54 @@ class TimelineEngine {
       _snapIndicatorMs.value = null
       SnapResult(candidatePosMs, false, null)
     }
+  }
+
+  fun jumpToNextAudioPeak(): Boolean {
+    val current = _currentPositionMs.value
+    val allPeaks = mutableListOf<Long>()
+    _timeline.value.audioClips.forEach { clip ->
+      if (!clip.isMuted && clip.durationMs > 0L) {
+        val fullWave = com.example.engine.audio.AudioWaveformManager.getOrGenerateWaveform(
+          clip.id, clip.uri, clip.title, clip.durationMs, clip.waveformData
+        )
+        val trimmed = com.example.engine.audio.AudioWaveformManager.sliceForTrim(
+          fullWave, clip.sourceStartMs, clip.sourceEndMs, clip.durationMs
+        )
+        val analysis = com.example.engine.audio.AudioWaveformManager.analyzeWaveform(trimmed, clip.durationMs)
+        analysis.peaks.forEach { peak ->
+          allPeaks.add(clip.timelineStartMs + peak.timeMs)
+        }
+      }
+    }
+    val next = allPeaks.filter { it > current + 35L }.minOrNull()
+    return if (next != null) {
+      setPosition(next)
+      true
+    } else false
+  }
+
+  fun jumpToPrevAudioPeak(): Boolean {
+    val current = _currentPositionMs.value
+    val allPeaks = mutableListOf<Long>()
+    _timeline.value.audioClips.forEach { clip ->
+      if (!clip.isMuted && clip.durationMs > 0L) {
+        val fullWave = com.example.engine.audio.AudioWaveformManager.getOrGenerateWaveform(
+          clip.id, clip.uri, clip.title, clip.durationMs, clip.waveformData
+        )
+        val trimmed = com.example.engine.audio.AudioWaveformManager.sliceForTrim(
+          fullWave, clip.sourceStartMs, clip.sourceEndMs, clip.durationMs
+        )
+        val analysis = com.example.engine.audio.AudioWaveformManager.analyzeWaveform(trimmed, clip.durationMs)
+        analysis.peaks.forEach { peak ->
+          allPeaks.add(clip.timelineStartMs + peak.timeMs)
+        }
+      }
+    }
+    val prev = allPeaks.filter { it < current - 35L }.maxOrNull()
+    return if (prev != null) {
+      setPosition(prev)
+      true
+    } else false
   }
 
   fun clearSnapIndicator() {
@@ -536,69 +599,7 @@ class TimelineEngine {
   }
 
   fun splitSelectedClipAtPlayhead(): Boolean {
-    val selected = _selectedElement.value
-    if (selected is SelectedTrackElement.Video) {
-      val clipIndex = _timeline.value.videoClips.indexOfFirst { it.id == selected.clipId }
-      if (clipIndex != -1) {
-        val clip = _timeline.value.videoClips[clipIndex]
-        val playhead = _currentPositionMs.value
-        if (playhead > clip.timelineStartMs + 100L && playhead < clip.timelineStartMs + clip.durationMs - 100L) {
-          recordHistory()
-          val firstDuration = playhead - clip.timelineStartMs
-          val secondDuration = clip.durationMs - firstDuration
-
-          val clip1 = clip.copy(
-            durationMs = firstDuration,
-            sourceEndMs = clip.sourceStartMs + (firstDuration * clip.speed).toLong()
-          )
-          val clip2 = clip.copy(
-            id = UUID.randomUUID().toString(),
-            timelineStartMs = playhead,
-            durationMs = secondDuration,
-            sourceStartMs = clip1.sourceEndMs,
-            sourceEndMs = clip.sourceEndMs
-          )
-
-          val newList = _timeline.value.videoClips.toMutableList()
-          newList[clipIndex] = clip1
-          newList.add(clipIndex + 1, clip2)
-          _timeline.value = _timeline.value.copy(videoClips = newList)
-          _selectedElement.value = SelectedTrackElement.Video(clip2.id)
-          return true
-        }
-      }
-    } else if (selected is SelectedTrackElement.Overlay) {
-      val clipIndex = _timeline.value.overlayClips.indexOfFirst { it.id == selected.clipId }
-      if (clipIndex != -1) {
-        val clip = _timeline.value.overlayClips[clipIndex]
-        val playhead = _currentPositionMs.value
-        if (playhead > clip.timelineStartMs + 100L && playhead < clip.timelineStartMs + clip.durationMs - 100L) {
-          recordHistory()
-          val firstDuration = playhead - clip.timelineStartMs
-          val secondDuration = clip.durationMs - firstDuration
-
-          val clip1 = clip.copy(
-            durationMs = firstDuration,
-            sourceEndMs = clip.sourceStartMs + (firstDuration * clip.speed).toLong()
-          )
-          val clip2 = clip.copy(
-            id = UUID.randomUUID().toString(),
-            timelineStartMs = playhead,
-            durationMs = secondDuration,
-            sourceStartMs = clip1.sourceEndMs,
-            sourceEndMs = clip.sourceEndMs
-          )
-
-          val newList = _timeline.value.overlayClips.toMutableList()
-          newList[clipIndex] = clip1
-          newList.add(clipIndex + 1, clip2)
-          _timeline.value = _timeline.value.copy(overlayClips = newList)
-          _selectedElement.value = SelectedTrackElement.Overlay(clip2.id)
-          return true
-        }
-      }
-    }
-    return false
+    return splitAtPlayhead()
   }
 
   // --- Track Controls ---

@@ -27,16 +27,24 @@ class ProjectRepository(private val database: AppDatabase) {
     projectId: String,
     projectName: String,
     timeline: Timeline,
+    settings: ProjectSettings = ProjectSettings(),
     settingsJson: String = "{}"
   ) {
-    val timelineJson = TimelineSerializer.toJson(timeline)
+    val projectPackage = TimelineSerializer.buildProjectPackage(
+      projectId = projectId,
+      projectName = projectName,
+      settings = settings,
+      timeline = timeline,
+      isDraft = true
+    )
+    val packageJson = TimelineSerializer.toPackageJson(projectPackage)
     val entity = CrashRecoveryEntity(
       id = "active_session",
       projectId = projectId,
       projectName = projectName,
       timestamp = System.currentTimeMillis(),
-      timelineJson = timelineJson,
-      settingsJson = settingsJson,
+      timelineJson = packageJson,
+      settingsJson = if (settingsJson.isBlank() || settingsJson == "{}") TimelineSerializer.settingsToJson(settings) else settingsJson,
       isDirty = true
     )
     crashRecoveryDao.saveSession(entity)
@@ -61,6 +69,23 @@ class ProjectRepository(private val database: AppDatabase) {
     hasMissingMedia: Boolean = false,
     extraMetadataJson: String = "{}"
   ): ProjectEntity {
+    val projectSettings = ProjectSettings(
+      aspectRatio = AspectRatio.values().find { it.label == aspectRatio } ?: AspectRatio.RATIO_9_16,
+      resolution = Resolution.values().find { it.label == resolution } ?: Resolution.RES_1080P,
+      fps = FrameRate.values().find { it.fps == fps } ?: FrameRate.FPS_30,
+      sampleRateHz = sampleRate,
+      canvasBackgroundColor = canvasColor,
+      totalDurationMs = durationMs
+    )
+    val projectPackage = TimelineSerializer.buildProjectPackage(
+      projectId = id,
+      projectName = name,
+      settings = projectSettings,
+      timeline = timeline,
+      isDraft = isDraft
+    )
+    val packageJson = TimelineSerializer.toPackageJson(projectPackage)
+
     val entity = ProjectEntity(
       id = id,
       name = name,
@@ -70,7 +95,7 @@ class ProjectRepository(private val database: AppDatabase) {
       aspectRatio = aspectRatio,
       resolution = resolution,
       fps = fps,
-      timelineJson = TimelineSerializer.toJson(timeline),
+      timelineJson = packageJson,
       isDraft = isDraft,
       sampleRate = sampleRate,
       canvasColor = canvasColor,

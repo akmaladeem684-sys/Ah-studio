@@ -1203,6 +1203,120 @@ fun CanvasPanel(
 }
 
 @Composable
+fun CaptionsToolPanel(
+  viewModel: StudioViewModel,
+  modifier: Modifier = Modifier
+) {
+  val timeline by viewModel.timelineEngine.timeline.collectAsState()
+  val currentPos by viewModel.timelineEngine.currentPositionMs.collectAsState()
+  val textClips = timeline.textClips
+
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .background(StudioSurface)
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.ClosedCaption, contentDescription = null, tint = CyanAccent)
+        Text(
+          text = "Auto Captions & Subtitles",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+        )
+      }
+      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+      }
+    }
+
+    Text(
+      text = "Generate synchronized subtitle captions automatically from dialogue or create manual caption cards.",
+      style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+      Button(
+        onClick = { viewModel.runAIAutoCaptions() },
+        modifier = Modifier
+          .weight(1f)
+          .height(44.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+        shape = RoundedCornerShape(10.dp)
+      ) {
+        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("AI Auto-Captions", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+      }
+
+      OutlinedButton(
+        onClick = {
+          viewModel.timelineEngine.addTextClip(
+            text = "Subtitle Caption",
+            timelineStartMs = currentPos,
+            durationMs = 2500L
+          )
+        },
+        modifier = Modifier
+          .weight(1f)
+          .height(44.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, CyanAccent))),
+        shape = RoundedCornerShape(10.dp)
+      ) {
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = CyanAccent)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Add Manual Subtitle", fontSize = 12.sp)
+      }
+    }
+
+    if (textClips.isNotEmpty()) {
+      Text(
+        text = "Subtitles on Timeline (${textClips.size})",
+        style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
+      )
+      LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        items(textClips) { clip ->
+          Card(
+            modifier = Modifier
+              .widthIn(min = 100.dp, max = 160.dp)
+              .clip(RoundedCornerShape(8.dp))
+              .clickable {
+                viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(clip.id))
+                viewModel.timelineEngine.seekTo(clip.timelineStartMs)
+              },
+            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant)
+          ) {
+            Column(modifier = Modifier.padding(8.dp)) {
+              Text(
+                text = clip.text,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
+                maxLines = 1
+              )
+              Text(
+                text = formatDuration(clip.timelineStartMs),
+                style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp)
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
 private fun EditorActionTile(
   icon: ImageVector,
   label: String,

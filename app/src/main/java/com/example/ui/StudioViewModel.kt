@@ -69,7 +69,8 @@ enum class EditorToolbarTab {
   CHROMA,
   AI,
   CANVAS,
-  KEYFRAME
+  KEYFRAME,
+  CAPTIONS
 }
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
@@ -174,10 +175,19 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
           _saveState.value = _saveState.value.copy(status = ProjectSaveStatus.UNSAVED)
           // Debounce crash recovery snapshot so every keystroke or trim is immediately protected
           delay(1200L)
+          val currentSettings = ProjectSettings(
+            aspectRatio = _activeAspectRatio.value,
+            resolution = _activeResolution.value,
+            fps = _activeFps.value,
+            sampleRateHz = _activeSampleRate.value,
+            canvasBackgroundColor = _activeCanvasColor.value,
+            totalDurationMs = timeline.totalDurationMs
+          )
           repository.saveCrashRecoverySession(
             projectId = _activeProjectId.value,
             projectName = _activeProjectName.value,
-            timeline = timeline
+            timeline = timeline,
+            settings = currentSettings
           )
         }
       }
@@ -302,24 +312,37 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     _activeSampleRate.value = project.sampleRate
     _activeCanvasColor.value = project.canvasColor
 
-    val loadedTimeline = TimelineSerializer.fromJson(project.timelineJson)
+    val pkg = TimelineSerializer.fromPackageJson(project.timelineJson)
+    val loadedTimeline = pkg?.timeline ?: TimelineSerializer.fromJson(project.timelineJson)
+    if (pkg != null && pkg.settings.sampleRateHz > 0) {
+      _activeSampleRate.value = pkg.settings.sampleRateHz
+      _activeCanvasColor.value = pkg.settings.canvasBackgroundColor
+      _activeAspectRatio.value = pkg.settings.aspectRatio
+      _activeResolution.value = pkg.settings.resolution
+      _activeFps.value = pkg.settings.fps
+    }
     timelineEngine.loadTimeline(loadedTimeline)
     _saveState.value = ProjectSaveState(ProjectSaveStatus.SAVED, project.lastEditedTime)
     _currentScreen.value = AppScreen.EDITOR
     checkMissingMedia()
   }
 
-  fun applyTemplate(template: VideoTemplate) {
+  fun applyTemplate(
+    template: VideoTemplate,
+    mediaReplacements: Map<String, String> = emptyMap(),
+    textReplacements: Map<String, String> = emptyMap()
+  ) {
     val projectId = UUID.randomUUID().toString()
     _activeProjectId.value = projectId
     _activeProjectName.value = "${template.title} Project"
     _activeAspectRatio.value = template.aspectRatio
-    _activeResolution.value = Resolution.RES_1080P
-    _activeFps.value = FrameRate.FPS_30
+    _activeResolution.value = template.resolution
+    _activeFps.value = template.fps
     _activeSampleRate.value = 48000
     _activeCanvasColor.value = 0xFF000000
 
-    timelineEngine.loadTimeline(template.createTimeline())
+    val generatedTimeline = template.createTimeline(mediaReplacements, textReplacements)
+    timelineEngine.loadTimeline(generatedTimeline)
     saveCurrentProject()
     _currentScreen.value = AppScreen.EDITOR
     checkMissingMedia()
@@ -361,8 +384,18 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
       val session: CrashRecoveryEntity = repository.getActiveRecoverySession() ?: return@launch
       _activeProjectId.value = session.projectId.ifBlank { UUID.randomUUID().toString() }
       _activeProjectName.value = session.projectName.ifBlank { "Recovered Project" }
-      val recoveredTimeline = TimelineSerializer.fromJson(session.timelineJson)
-      timelineEngine.loadTimeline(recoveredTimeline)
+      val pkg = TimelineSerializer.fromPackageJson(session.timelineJson)
+      if (pkg != null && (pkg.timeline.videoClips.isNotEmpty() || pkg.timeline.audioClips.isNotEmpty() || pkg.timeline.textClips.isNotEmpty())) {
+        _activeAspectRatio.value = pkg.settings.aspectRatio
+        _activeResolution.value = pkg.settings.resolution
+        _activeFps.value = pkg.settings.fps
+        _activeSampleRate.value = pkg.settings.sampleRateHz
+        _activeCanvasColor.value = pkg.settings.canvasBackgroundColor
+        timelineEngine.loadTimeline(pkg.timeline)
+      } else {
+        val recoveredTimeline = TimelineSerializer.fromJson(session.timelineJson)
+        timelineEngine.loadTimeline(recoveredTimeline)
+      }
       _saveState.value = ProjectSaveState(ProjectSaveStatus.UNSAVED, session.timestamp)
       _currentScreen.value = AppScreen.EDITOR
       checkMissingMedia()

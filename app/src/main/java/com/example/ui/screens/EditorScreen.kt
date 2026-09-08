@@ -41,6 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -369,7 +371,8 @@ fun EditorScreen(
           }
         },
         onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
-        onToggleMagnetic = { viewModel.timelineEngine.toggleMagneticMovement() }
+        onToggleMagnetic = { viewModel.timelineEngine.toggleMagneticMovement() },
+        onNextPeak = { viewModel.timelineEngine.jumpToNextAudioPeak() }
       )
 
       // 4. Professional Multi-Track Timeline Canvas

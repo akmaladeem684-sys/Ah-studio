@@ -277,4 +277,206 @@ class ProjectManagementRobolectricTest {
     val afterRelinkMissing = MediaRelinkManager.detectMissingMedia(context, relinkedTimeline)
     assertEquals(0, afterRelinkMissing.size)
   }
+
+  @Test
+  fun `test comprehensive project serialization with captions stickers effects filters transitions and chroma`() {
+    val wordCaptions = listOf(
+      WordTiming("Welcome", 0L, 500L),
+      WordTiming("to", 500L, 200L),
+      WordTiming("AH", 700L, 400L),
+      WordTiming("Studio", 1100L, 600L)
+    )
+
+    val keyframes = listOf(
+      ClipKeyframe(id = "kf_scale", timeMs = 0L, posX = 0.1f, posY = 0.2f, scale = 1.0f, rotation = 0f, opacity = 1.0f),
+      ClipKeyframe(id = "kf_end", timeMs = 3000L, posX = 0.5f, posY = -0.1f, scale = 1.5f, rotation = 45f, opacity = 0.9f)
+    )
+
+    val complexTimeline = Timeline(
+      videoClips = listOf(
+        VideoClip(
+          id = "vid_main",
+          uri = "file:///storage/video.mp4",
+          name = "Main Video Clip",
+          timelineStartMs = 0L,
+          durationMs = 4000L,
+          sourceStartMs = 500L,
+          sourceEndMs = 4500L,
+          speed = 1.5f,
+          volume = 0.9f,
+          isMuted = false,
+          isReversed = false,
+          keyframes = keyframes
+        )
+      ),
+      overlayClips = listOf(
+        VideoClip(
+          id = "overlay_pip",
+          uri = "file:///storage/pip.mp4",
+          name = "PIP Overlay",
+          timelineStartMs = 1000L,
+          durationMs = 2500L,
+          sourceStartMs = 0L,
+          sourceEndMs = 2500L,
+          opacity = 0.85f
+        )
+      ),
+      audioClips = listOf(
+        AudioClip(
+          id = "audio_bgm",
+          uri = "file:///storage/bgm.mp3",
+          title = "Background Score",
+          timelineStartMs = 0L,
+          durationMs = 5000L,
+          sourceStartMs = 1000L,
+          sourceEndMs = 6000L,
+          volume = 0.75f,
+          speed = 1.0f,
+          fadeInMs = 600L,
+          fadeOutMs = 800L,
+          gainDb = 2.5f
+        )
+      ),
+      textClips = listOf(
+        TextClip(
+          id = "caption_1",
+          text = "Welcome to AH Studio",
+          timelineStartMs = 0L,
+          durationMs = 3000L,
+          fontFamily = "Roboto",
+          fontSizeSp = 26f,
+          textColor = 0xFFFFFFFF,
+          hasGradient = true,
+          gradientColorStart = 0xFF00E5FF,
+          gradientColorEnd = 0xFF8B5CF6,
+          strokeWidth = 2f,
+          strokeColor = 0xFF000000,
+          animationType = "Pop",
+          subtitleStyle = "HighlightWord",
+          words = wordCaptions
+        )
+      ),
+      stickerClips = listOf(
+        StickerClip(
+          id = "sticker_fire",
+          emojiOrAsset = "🔥",
+          timelineStartMs = 1200L,
+          durationMs = 2000L,
+          posX = 0.4f,
+          posY = -0.3f,
+          scale = 1.4f,
+          rotation = 12f,
+          opacity = 1f
+        )
+      ),
+      effectClips = listOf(
+        EffectClip(
+          id = "effect_glitch",
+          effectType = EffectType.GLITCH,
+          timelineStartMs = 2000L,
+          durationMs = 1500L,
+          intensity = 0.85f
+        )
+      ),
+      transitions = listOf(
+        Transition(
+          id = "trans_wipe",
+          clipIndexBefore = 0,
+          type = TransitionType.WIPE,
+          durationMs = 450L
+        )
+      ),
+      adjustments = VideoAdjustments(
+        brightness = 0.1f,
+        contrast = 1.2f,
+        saturation = 1.15f,
+        temperature = 0.05f,
+        vignette = 0.2f
+      ),
+      filter = FilterSettings(
+        type = FilterType.CINEMATIC,
+        intensity = 0.9f
+      ),
+      chromaKey = ChromaKeySettings(
+        enabled = true,
+        targetColor = 0xFF00FF00,
+        similarity = 0.42f,
+        smoothness = 0.18f,
+        spillSuppression = 0.6f,
+        backgroundType = "SolidColor",
+        backgroundColor = 0xFF000000
+      ),
+      canvasBackgroundColor = 0xFF121212,
+      aspectRatio = AspectRatio.RATIO_16_9
+    )
+
+    val settings = ProjectSettings(
+      aspectRatio = AspectRatio.RATIO_16_9,
+      resolution = Resolution.RES_4K,
+      fps = FrameRate.FPS_60,
+      sampleRateHz = 48000,
+      canvasBackgroundColor = 0xFF121212
+    )
+
+    val pkg = TimelineSerializer.buildProjectPackage(
+      projectId = "proj_full_feature",
+      projectName = "4K Cinematic Master",
+      settings = settings,
+      timeline = complexTimeline,
+      isDraft = false
+    )
+
+    val json = TimelineSerializer.toPackageJson(pkg)
+    assertNotNull(json)
+
+    // Deserialize back into ProjectPackage
+    val restoredPkg = TimelineSerializer.fromPackageJson(json)
+    assertNotNull(restoredPkg)
+    assertEquals("proj_full_feature", restoredPkg?.projectId)
+    assertEquals("4K Cinematic Master", restoredPkg?.projectName)
+    assertEquals(AspectRatio.RATIO_16_9, restoredPkg?.settings?.aspectRatio)
+    assertEquals(Resolution.RES_4K, restoredPkg?.settings?.resolution)
+    assertEquals(FrameRate.FPS_60, restoredPkg?.settings?.fps)
+    assertEquals(48000, restoredPkg?.settings?.sampleRateHz)
+
+    // Verify timeline tracks
+    val t = restoredPkg!!.timeline
+    assertEquals(1, t.videoClips.size)
+    assertEquals(500L, t.videoClips.first().sourceStartMs)
+    assertEquals(4500L, t.videoClips.first().sourceEndMs)
+    assertEquals(1.5f, t.videoClips.first().speed, 0.01f)
+    assertEquals(2, t.videoClips.first().keyframes.size)
+
+    assertEquals(1, t.overlayClips.size)
+    assertEquals("overlay_pip", t.overlayClips.first().id)
+
+    assertEquals(1, t.audioClips.size)
+    assertEquals(600L, t.audioClips.first().fadeInMs)
+    assertEquals(800L, t.audioClips.first().fadeOutMs)
+    assertEquals(2.5f, t.audioClips.first().gainDb, 0.01f)
+
+    assertEquals(1, t.textClips.size)
+    assertEquals(4, t.textClips.first().words.size)
+    assertEquals("Welcome", t.textClips.first().words.first().word)
+
+    assertEquals(1, t.stickerClips.size)
+    assertEquals("🔥", t.stickerClips.first().emojiOrAsset)
+
+    assertEquals(1, t.effectClips.size)
+    assertEquals(EffectType.GLITCH, t.effectClips.first().effectType)
+
+    assertEquals(1, t.transitions.size)
+    assertEquals(TransitionType.WIPE, t.transitions.first().type)
+
+    assertEquals(0.1f, t.adjustments.brightness, 0.01f)
+    assertEquals(FilterType.CINEMATIC, t.filter.type)
+    assertTrue(t.chromaKey.enabled)
+    assertEquals(0.42f, t.chromaKey.similarity, 0.01f)
+
+    // Verify media references and source metadata extracted
+    assertEquals(3, restoredPkg.mediaReferences.size) // video, overlay, audio
+    assertTrue(restoredPkg.mediaReferences.any { it.clipId == "vid_main" && it.mediaType == "VIDEO" })
+    assertTrue(restoredPkg.mediaReferences.any { it.clipId == "audio_bgm" && it.mediaType == "AUDIO" })
+    assertEquals(3, restoredPkg.sourceMetadata.size)
+  }
 }

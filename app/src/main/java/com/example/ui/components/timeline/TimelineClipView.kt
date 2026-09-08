@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.ClipKeyframe
+import com.example.engine.audio.AudioWaveformManager
 import com.example.ui.components.formatDurationShort
 import com.example.ui.theme.*
 
@@ -48,6 +49,12 @@ fun TimelineClipView(
   isReversed: Boolean = false,
   isFreeze: Boolean = false,
   waveformData: List<Float> = emptyList(),
+  sourceStartMs: Long = 0L,
+  sourceEndMs: Long = durationMs,
+  hasAudio: Boolean = false,
+  isMuted: Boolean = false,
+  currentPlayheadMs: Long? = null,
+  waveformStyle: WaveformStyle = WaveformStyle.MIRRORED_BARS,
   keyframes: List<ClipKeyframe> = emptyList(),
   selectedKeyframeIds: Set<String> = emptySet(),
   onSelectKeyframe: ((String) -> Unit)? = null,
@@ -61,6 +68,38 @@ fun TimelineClipView(
 ) {
   val startPx = (timelineStartMs / msPerPixel).dp
   val widthPx = (durationMs / msPerPixel).dp.coerceAtLeast(28.dp)
+
+  // Waveform analysis & dynamic slicing for trimmed clips
+  val effectiveWaveform = remember(clipId, waveformData, durationMs, sourceStartMs, sourceEndMs, hasAudio) {
+    if (waveformData.isNotEmpty()) {
+      AudioWaveformManager.sliceForTrim(waveformData, sourceStartMs, sourceEndMs, durationMs)
+    } else if (hasAudio) {
+      val full = AudioWaveformManager.getOrGenerateWaveform(clipId, clipId, title, durationMs)
+      AudioWaveformManager.sliceForTrim(full, sourceStartMs, sourceEndMs, durationMs)
+    } else {
+      emptyList()
+    }
+  }
+
+  val waveformAnalysis = remember(effectiveWaveform, durationMs) {
+    if (effectiveWaveform.isNotEmpty()) {
+      AudioWaveformManager.analyzeWaveform(effectiveWaveform, durationMs)
+    } else null
+  }
+
+  val relPlayheadMs = remember(currentPlayheadMs, timelineStartMs, durationMs) {
+    currentPlayheadMs?.let { ph ->
+      if (ph in timelineStartMs..(timelineStartMs + durationMs)) {
+        ph - timelineStartMs
+      } else null
+    }
+  }
+
+  val isPlayheadOnPeak = remember(relPlayheadMs, waveformAnalysis) {
+    if (relPlayheadMs != null && waveformAnalysis != null) {
+      AudioWaveformManager.findNearestPeak(relPlayheadMs, waveformAnalysis.peaks, snapThresholdMs = 80L) != null
+    } else false
+  }
 
   // Accumulated drag distances to ensure precision and prevent accidental displacement
   var dragAccumulatorX by remember { mutableFloatStateOf(0f) }
@@ -89,6 +128,24 @@ fun TimelineClipView(
       )
       .testTag("clip_$clipId")
   ) {
+    // 1. Audio Waveform Canvas Layer (renders full clip width & height)
+    if (effectiveWaveform.isNotEmpty()) {
+      AudioWaveformCanvas(
+        waveformData = effectiveWaveform,
+        peaks = waveformAnalysis?.peaks ?: emptyList(),
+        clipDurationMs = durationMs,
+        playheadPosMs = relPlayheadMs,
+        trackColor = trackColor,
+        peakColor = AmberAccent,
+        crestColor = CyanAccent,
+        style = waveformStyle,
+        showPeakGuides = true,
+        showCenterLine = true,
+        isMuted = isMuted,
+        modifier = Modifier.fillMaxSize()
+      )
+    }
+
     // Body gesture detector: tap to select, long-press for multi-select, drag to move
     Box(
       modifier = Modifier
@@ -119,17 +176,20 @@ fun TimelineClipView(
             )
           }
         }
-        .padding(horizontal = if (isSelected) 10.dp else 6.dp, vertical = 2.dp)
+        .padding(horizontal = if (isSelected) 8.dp else 4.dp, vertical = 2.dp)
     ) {
       Row(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        // Left info: title + badges
+        // Left info: title + badges with semi-transparent contrast pill
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.weight(1f, fill = false)
+          modifier = Modifier
+            .weight(1f, fill = false)
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp)
         ) {
           if (isMultiSelected) {
             Box(
@@ -165,7 +225,7 @@ fun TimelineClipView(
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(3.dp))
-                .background(Color.Black.copy(alpha = 0.4f))
+                .background(Color.Black.copy(alpha = 0.5f))
                 .padding(horizontal = 3.dp, vertical = 1.dp)
             ) {
               Text(
@@ -184,7 +244,7 @@ fun TimelineClipView(
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(3.dp))
-                .background(Color.Black.copy(alpha = 0.4f))
+                .background(Color.Black.copy(alpha = 0.5f))
                 .padding(horizontal = 3.dp, vertical = 1.dp)
             ) {
               Text(
@@ -203,7 +263,7 @@ fun TimelineClipView(
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(3.dp))
-                .background(Color.Black.copy(alpha = 0.4f))
+                .background(Color.Black.copy(alpha = 0.5f))
                 .padding(horizontal = 3.dp, vertical = 1.dp)
             ) {
               Text(
@@ -212,37 +272,59 @@ fun TimelineClipView(
               )
             }
           }
-        }
 
-        // Waveform preview for audio
-        if (waveformData.isNotEmpty()) {
-          Row(
-            modifier = Modifier
-              .weight(1f)
-              .height(18.dp)
-              .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(1.5.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            waveformData.take(30).forEach { amp ->
-              Box(
-                modifier = Modifier
-                  .width(1.5.dp)
-                  .height((amp * 16).dp.coerceAtLeast(2.dp))
-                  .background(Color.White.copy(alpha = 0.75f))
+          // Peak badge when waveform analysis found audio peaks
+          if (waveformAnalysis != null && waveformAnalysis.peaks.isNotEmpty() && isSelected) {
+            Spacer(modifier = Modifier.width(3.dp))
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(3.dp))
+                .background(AmberAccent.copy(alpha = 0.25f))
+                .border(0.5.dp, AmberAccent.copy(alpha = 0.6f), RoundedCornerShape(3.dp))
+                .padding(horizontal = 3.dp, vertical = 1.dp)
+            ) {
+              Text(
+                text = "⚡ ${waveformAnalysis.peaks.size}p",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 8.sp,
+                  color = AmberAccent,
+                  fontWeight = FontWeight.Bold
+                )
               )
             }
           }
         }
 
-        // Right info: Duration
+        // Center / Right beat snap notification
+        if (isPlayheadOnPeak) {
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(3.dp))
+              .background(AmberAccent.copy(alpha = 0.85f))
+              .padding(horizontal = 4.dp, vertical = 1.dp)
+          ) {
+            Text(
+              text = "🎯 BEAT SNAP",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+              )
+            )
+          }
+        }
+
+        // Right info: Duration in clean dark chip
         Text(
           text = formatDurationShort(durationMs),
           style = MaterialTheme.typography.labelSmall.copy(
             fontSize = 9.sp,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = 0.9f)
-          )
+            color = Color.White.copy(alpha = 0.95f)
+          ),
+          modifier = Modifier
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp)
         )
       }
 
