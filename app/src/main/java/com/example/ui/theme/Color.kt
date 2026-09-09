@@ -2,26 +2,29 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// AH Video Studio Dark Palette
-val StudioBlack = Color(0xFF070A10)
-val StudioDarkBg = Color(0xFF0D121D)
-val StudioSurface = Color(0xFF141C2B)
-val StudioSurfaceVariant = Color(0xFF1C273B)
-val StudioBorder = Color(0xFF2B3A55)
+// AH Video Studio Sky Blue + White Palette
+val StudioBlack = Color(0xFF0F172A)
+val StudioDarkBg = Color(0xFFF8FAFC) // Very light neutral background
+val StudioSurface = Color(0xFFFFFFFF) // Pure white surface
+val StudioSurfaceVariant = Color(0xFFF1F5F9) // Light neutral surface / toolbar
+val StudioBorder = Color(0xFFE2E8F0) // Clean light border
 
-// Accent Colors
-val CyanAccent = Color(0xFF00E5FF)
-val CyanAccentDark = Color(0xFF00B0FF)
+// Sky Blue Accent Palette
+val SkyBlue = Color(0xFF0284C7) // Sky Blue 600
+val SkyBlueLight = Color(0xFF38BDF8) // Sky Blue 400
+val SkyBlueContainer = Color(0xFFE0F2FE) // Sky Blue 100
+val CyanAccent = Color(0xFF0284C7) // Sky Blue primary accent
+val CyanAccentDark = Color(0xFF0369A1) // Sky Blue dark accent
 val PurpleAccent = Color(0xFF8B5CF6)
 val PinkAccent = Color(0xFFEC4899)
 val AmberAccent = Color(0xFFF59E0B)
 val GreenAccent = Color(0xFF10B981)
 val RedAccent = Color(0xFFEF4444)
 
-// Text Colors
-val TextPrimary = Color(0xFFF1F5F9)
-val TextSecondary = Color(0xFF94A3B8)
-val TextTertiary = Color(0xFF64748B)
+// Text Colors (Dark text on white/light surfaces)
+val TextPrimary = Color(0xFF0F172A) // Dark slate primary text
+val TextSecondary = Color(0xFF475569) // Slate secondary text
+val TextTertiary = Color(0xFF94A3B8) // Muted slate tertiary text
 
 // Track Colors
 val VideoTrackColor = Color(0xFF0284C7)

@@ -5,6 +5,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -22,13 +23,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -51,14 +55,22 @@ import android.widget.FrameLayout
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
 import com.example.engine.SelectedTrackElement
+import com.example.engine.export.ExportState
 import com.example.engine.text.TextLayerRenderer
 import com.example.ui.AppScreen
 import com.example.ui.EditorToolbarTab
+import android.content.res.Configuration
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.zIndex
 import com.example.ui.StudioViewModel
 import com.example.ui.components.KeyframeAnimationPanel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.formatDurationShort
 import com.example.ui.components.timeline.*
+import com.example.ui.components.timeline.LayersDrawer
 import com.example.ui.theme.*
 import kotlin.math.sin
 
@@ -91,6 +103,11 @@ fun EditorScreen(
   val activeFps by viewModel.activeFps.collectAsState()
   val activeSampleRate by viewModel.activeSampleRate.collectAsState()
   val activeCanvasColor by viewModel.activeCanvasColor.collectAsState()
+  val exportState by viewModel.videoExporter.exportState.collectAsState()
+
+  val configuration = LocalConfiguration.current
+  val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+  var isLayersOpen by remember { mutableStateOf(false) }
 
   var showRenameDialog by remember { mutableStateOf(false) }
   var showSpeedDialog by remember { mutableStateOf(false) }
@@ -113,34 +130,30 @@ fun EditorScreen(
     }
   }
 
-  Scaffold(
-    modifier = modifier
-      .fillMaxSize()
-      .background(StudioDarkBg),
-    containerColor = StudioDarkBg,
-    topBar = {
-      EditorTopBar(
-        projectName = projectName,
-        saveState = saveState,
-        canUndo = canUndo,
-        canRedo = canRedo,
-        isSnapping = isSnapping,
-        onBackClick = {
-          viewModel.saveCurrentProject()
-          viewModel.navigateTo(AppScreen.HOME)
-        },
-        onRenameClick = { showRenameDialog = true },
-        onSettingsClick = { showProjectSettingsDialog = true },
-        onManualSaveClick = { viewModel.manualSaveProject() },
-        onUndoClick = { viewModel.timelineEngine.undo() },
-        onRedoClick = { viewModel.timelineEngine.redo() },
-        onToggleSnapping = { viewModel.timelineEngine.toggleSnapping() },
-        onExportClick = {
-          viewModel.saveCurrentProject()
-          viewModel.navigateTo(AppScreen.EXPORT)
-        }
-      )
-    },
+  Box(modifier = modifier.fillMaxSize()) {
+    Scaffold(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(StudioDarkBg),
+      containerColor = StudioDarkBg,
+      topBar = {
+        EditorTopBar(
+          activeResolution = activeResolution,
+          exportState = exportState,
+          onBackClick = {
+            viewModel.saveCurrentProject()
+            viewModel.navigateTo(AppScreen.HOME)
+          },
+          onSearchClick = { showProjectSettingsDialog = true },
+          onResolutionSelect = { res ->
+            viewModel.updateProjectSettings(aspectRatio, res, activeFps, activeSampleRate, activeCanvasColor)
+          },
+          onExportClick = {
+            viewModel.saveCurrentProject()
+            viewModel.navigateTo(AppScreen.EXPORT)
+          }
+        )
+      },
     bottomBar = {
       Column(modifier = Modifier.fillMaxWidth()) {
         // Active Sub-Tool Panel (if opened)
@@ -171,47 +184,9 @@ fun EditorScreen(
             EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
             EditorToolbarTab.KEYFRAME -> KeyframeAnimationPanel(viewModel)
             EditorToolbarTab.CAPTIONS -> CaptionsToolPanel(viewModel)
-            EditorToolbarTab.AI -> {
-              // Quick AI trigger
-              Column(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .background(StudioSurface)
-                  .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Text("AI Tools", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-                  IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-                  }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                  Button(
-                    onClick = {
-                      viewModel.runAIAutoCaptions()
-                      viewModel.setActiveToolbarTab(null)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
-                  ) {
-                    Text("Auto Captions")
-                  }
-                  Button(
-                    onClick = {
-                      viewModel.runAIAutoEdit()
-                      viewModel.setActiveToolbarTab(null)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White)
-                  ) {
-                    Text("Auto Edit Reel")
-                  }
-                }
-              }
-            }
+            EditorToolbarTab.AI -> GenerateMediaToolPanel(viewModel)
+            EditorToolbarTab.AI_AVATAR -> AIAvatarToolPanel(viewModel)
+            EditorToolbarTab.BACKGROUND -> BackgroundToolPanel(viewModel)
             null -> {}
           }
         }
@@ -270,12 +245,13 @@ fun EditorScreen(
         }
       }
 
-      // 1. Video Preview Player (Aspect ratio preserved)
+      // 1. VIDEO PREVIEW CONTAINER (60-65% of screen height, full width 100%)
       Box(
         modifier = Modifier
           .fillMaxWidth()
           .weight(1f)
-          .padding(8.dp),
+          .background(Color.Black)
+          .testTag("video_preview_container"),
         contentAlignment = Alignment.Center
       ) {
         VideoPreviewSurface(
@@ -286,167 +262,67 @@ fun EditorScreen(
           onSelectElement = { viewModel.timelineEngine.selectElement(it) },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = true },
-          modifier = Modifier.fillMaxSize()
+          modifier = Modifier
+            .fillMaxSize()
+            .testTag("video_preview")
         )
+
+        // Center 80dp Play/Pause Button
+        IconButton(
+          onClick = { viewModel.timelineEngine.togglePlayPause() },
+          modifier = Modifier
+            .size(80.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(2.dp, CyanAccent, CircleShape)
+            .testTag("play_button")
+        ) {
+          Icon(
+            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+            contentDescription = if (isPlaying) "Pause" else "Play",
+            tint = Color.White,
+            modifier = Modifier.size(44.dp)
+          )
+        }
       }
 
-      // 2. Timeline Control Toolbar (Play/Pause, Step, Split, Delete, Keyframe)
-      TimelineControlsBar(
-        isPlaying = isPlaying,
+      // 2. TIMELINE WITH TIMESTAMPS: 40-50dp (45dp)
+      TimelineTimestampsRow(
         currentPosMs = currentPosMs,
-        totalDurationMs = timeline.totalDurationMs,
-        zoom = timelineZoom,
-        onTogglePlay = { viewModel.timelineEngine.togglePlayPause() },
-        onStop = { viewModel.timelineEngine.stop() },
-        onStepBack = { viewModel.timelineEngine.stepBackwardOneFrame() },
-        onStepForward = { viewModel.timelineEngine.stepForwardOneFrame() },
-        onSplit = { viewModel.timelineEngine.splitSelectedClipAtPlayhead() },
-        onDelete = { viewModel.timelineEngine.deleteSelected() },
-        onAddKeyframe = {
-          viewModel.timelineEngine.addKeyframeToSelectedClip()
-          viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME)
-        },
-        onAddMedia = { viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA) },
-        onZoomChange = { viewModel.timelineEngine.setZoom(it) },
-        onToggleFullscreen = { isFullscreenPreview = true }
+        totalDurationMs = timeline.totalDurationMs
       )
 
-      // 3. Timeline Quick Action Toolbar
-      TimelineActionToolbar(
-        hasSelection = selectedElement !is SelectedTrackElement.None || selectedClipIds.isNotEmpty(),
-        isMultiSelectMode = isMultiSelectMode,
-        selectedCount = selectedClipIds.size,
-        canPaste = clipboardClips.isNotEmpty(),
-        isMagnetic = isMagnetic,
-        onSplit = { viewModel.timelineEngine.splitAtPlayhead() },
-        onTrimLeft = {
-          val activeClipId = (selectedElement as? SelectedTrackElement.Video)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Overlay)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Audio)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Text)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Sticker)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Effect)?.clipId
-            ?: selectedClipIds.firstOrNull()
-          if (activeClipId != null) {
-            viewModel.timelineEngine.trimClipLeft(activeClipId, currentPosMs)
-          }
-        },
-        onTrimRight = {
-          val activeClipId = (selectedElement as? SelectedTrackElement.Video)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Overlay)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Audio)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Text)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Sticker)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Effect)?.clipId
-            ?: selectedClipIds.firstOrNull()
-          if (activeClipId != null) {
-            val clipStart = when (val el = viewModel.timelineEngine.findTrackElementForClip(activeClipId)) {
-              is SelectedTrackElement.Video -> timeline.videoClips.find { c -> c.id == activeClipId }?.timelineStartMs
-              is SelectedTrackElement.Overlay -> timeline.overlayClips.find { c -> c.id == activeClipId }?.timelineStartMs
-              is SelectedTrackElement.Audio -> timeline.audioClips.find { c -> c.id == activeClipId }?.timelineStartMs
-              is SelectedTrackElement.Text -> timeline.textClips.find { c -> c.id == activeClipId }?.timelineStartMs
-              is SelectedTrackElement.Sticker -> timeline.stickerClips.find { c -> c.id == activeClipId }?.timelineStartMs
-              is SelectedTrackElement.Effect -> timeline.effectClips.find { c -> c.id == activeClipId }?.timelineStartMs
-              else -> null
-            } ?: 0L
-            val newDuration = (currentPosMs - clipStart).coerceAtLeast(100L)
-            viewModel.timelineEngine.trimClipRight(activeClipId, newDuration)
-          }
-        },
-        onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
-        onNormalDelete = { viewModel.timelineEngine.normalDelete() },
-        onDuplicate = { viewModel.timelineEngine.duplicateClips() },
-        onCopy = { viewModel.timelineEngine.copySelectedClips() },
-        onPaste = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
-        onSpeedClick = { showSpeedDialog = true },
-        onReverse = { viewModel.timelineEngine.toggleReverseSelectedClip() },
-        onFreezeFrame = { viewModel.timelineEngine.freezeFrameAtPlayhead() },
-        onReplaceMedia = {
-          val activeClipId = (selectedElement as? SelectedTrackElement.Video)?.clipId
-            ?: (selectedElement as? SelectedTrackElement.Overlay)?.clipId
-            ?: selectedClipIds.firstOrNull()
-          if (activeClipId != null) {
-            pendingReplaceClipId = activeClipId
-            replaceMediaPickerLauncher.launch(
-              PickVisualMediaRequest(
-                ActivityResultContracts.PickVisualMedia.ImageAndVideo
-              )
-            )
-          }
-        },
-        onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
-        onToggleMagnetic = { viewModel.timelineEngine.toggleMagneticMovement() },
-        onNextPeak = { viewModel.timelineEngine.jumpToNextAudioPeak() }
-      )
-
-      // 4. Professional Multi-Track Timeline Canvas
-      MultiTrackTimeline(
+      // 3. FILM STRIP THUMBNAILS: 80-100dp (90dp)
+      FilmstripThumbnailsRow(
         timeline = timeline,
         currentPosMs = currentPosMs,
-        zoom = timelineZoom,
-        selectedElement = selectedElement,
-        selectedClipIds = selectedClipIds,
-        isMultiSelectMode = isMultiSelectMode,
-        snapIndicatorMs = snapIndicatorMs,
         onSeek = { viewModel.timelineEngine.setPosition(it) },
-        onSelectElement = { viewModel.timelineEngine.selectElement(it) },
-        onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
-        onZoomChange = { viewModel.timelineEngine.setZoom(it) },
-        onMoveClip = { clipId, deltaMs ->
-          val currentStart = when (viewModel.timelineEngine.findTrackElementForClip(clipId)) {
-            is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Audio -> timeline.audioClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Text -> timeline.textClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Sticker -> timeline.stickerClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Effect -> timeline.effectClips.find { it.id == clipId }?.timelineStartMs
-            else -> null
-          } ?: 0L
-          viewModel.timelineEngine.moveClip(clipId, currentStart + deltaMs)
+        onScrollLeft = {
+          val newPos = (currentPosMs - 1500L).coerceAtLeast(0L)
+          viewModel.timelineEngine.setPosition(newPos)
         },
-        onTrimClipLeft = { clipId, deltaMs ->
-          val currentStart = when (viewModel.timelineEngine.findTrackElementForClip(clipId)) {
-            is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Audio -> timeline.audioClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Text -> timeline.textClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Sticker -> timeline.stickerClips.find { it.id == clipId }?.timelineStartMs
-            is SelectedTrackElement.Effect -> timeline.effectClips.find { it.id == clipId }?.timelineStartMs
-            else -> null
-          } ?: 0L
-          viewModel.timelineEngine.trimClipLeft(clipId, currentStart + deltaMs)
-        },
-        onTrimClipRight = { clipId, deltaMs ->
-          val currentDur = when (viewModel.timelineEngine.findTrackElementForClip(clipId)) {
-            is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == clipId }?.durationMs
-            is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == clipId }?.durationMs
-            is SelectedTrackElement.Audio -> timeline.audioClips.find { it.id == clipId }?.durationMs
-            is SelectedTrackElement.Text -> timeline.textClips.find { it.id == clipId }?.durationMs
-            is SelectedTrackElement.Sticker -> timeline.stickerClips.find { it.id == clipId }?.durationMs
-            is SelectedTrackElement.Effect -> timeline.effectClips.find { it.id == clipId }?.durationMs
-            else -> null
-          } ?: 1000L
-          viewModel.timelineEngine.trimClipRight(clipId, currentDur + deltaMs)
-        },
-        onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
-        onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
-        onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
-        onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
-        onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
-        selectedKeyframeIds = selectedKeyframeIds,
-        onSelectKeyframe = { kfId ->
-          viewModel.timelineEngine.selectKeyframe(kfId)
-          viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME)
-        },
-        onMoveKeyframe = { kfId, newTimeMs ->
-          viewModel.timelineEngine.moveKeyframe(kfId, newTimeMs)
-        },
+        onAddMedia = {
+          viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA)
+        }
+      )
+
+      // 4. AUDIO WAVEFORM VISUALIZATION: 70-80dp (75dp)
+      AudioWaveformView(
+        timeline = timeline,
+        currentPosMs = currentPosMs,
+        isPlaying = isPlaying,
+        onSeek = { viewModel.timelineEngine.setPosition(it) }
+      )
+
+      // HIDDEN SIDEBAR (Old layers panel - keep code but hide: 0% width, takes no space)
+      Box(
         modifier = Modifier
-          .fillMaxWidth()
-          .weight(1.1f)
+          .size(0.dp)
+          .testTag("layers_panel")
       )
     }
   }
+}
 
   // Speed Dialog
   if (showSpeedDialog) {
@@ -609,150 +485,161 @@ fun EditorScreen(
 
 @Composable
 private fun EditorTopBar(
-  projectName: String,
-  saveState: com.example.ui.ProjectSaveState,
-  canUndo: Boolean,
-  canRedo: Boolean,
-  isSnapping: Boolean,
+  activeResolution: Resolution,
+  exportState: ExportState,
   onBackClick: () -> Unit,
-  onRenameClick: () -> Unit,
-  onSettingsClick: () -> Unit,
-  onManualSaveClick: () -> Unit,
-  onUndoClick: () -> Unit,
-  onRedoClick: () -> Unit,
-  onToggleSnapping: () -> Unit,
+  onSearchClick: () -> Unit,
+  onResolutionSelect: (Resolution) -> Unit,
   onExportClick: () -> Unit
 ) {
+  var showResolutionMenu by remember { mutableStateOf(false) }
+
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .background(StudioDarkBg)
-      .padding(horizontal = 8.dp, vertical = 6.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.SpaceBetween
+      .height(56.dp)
+      .background(Color.Black)
+      .padding(horizontal = 16.dp),
+    verticalAlignment = Alignment.CenterVertically
   ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      IconButton(
-        onClick = onBackClick,
-        modifier = Modifier.testTag("editor_back_button")
-      ) {
-        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
-      }
-      Row(
-        modifier = Modifier
-          .clickable(onClick = onRenameClick)
-          .padding(horizontal = 4.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Text(
-          text = projectName,
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp),
-          maxLines = 1
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Icon(Icons.Default.Edit, contentDescription = "Rename", tint = TextTertiary, modifier = Modifier.size(14.dp))
-      }
+    // Left: Close (X) + Search
+    IconButton(
+      onClick = onBackClick,
+      modifier = Modifier
+        .size(48.dp)
+        .testTag("close_btn")
+    ) {
+      Icon(
+        imageVector = Icons.Default.Close,
+        contentDescription = "Close",
+        tint = Color.White,
+        modifier = Modifier.size(24.dp)
+      )
+    }
 
-      Spacer(modifier = Modifier.width(6.dp))
+    IconButton(
+      onClick = onSearchClick,
+      modifier = Modifier
+        .size(48.dp)
+        .testTag("search_btn")
+    ) {
+      Icon(
+        imageVector = Icons.Default.Search,
+        contentDescription = "Search",
+        tint = Color.White,
+        modifier = Modifier.size(24.dp)
+      )
+    }
 
-      // Save Status Indicator & Quick Save Button
+    // Center: Empty Spacer
+    Spacer(modifier = Modifier.weight(1f))
+
+    // Right: "AI UHD" Dropdown
+    Box {
       Surface(
-        onClick = onManualSaveClick,
+        onClick = { showResolutionMenu = true },
         shape = RoundedCornerShape(8.dp),
-        color = StudioSurfaceVariant,
-        modifier = Modifier.testTag("editor_save_status_button")
+        color = Color(0xFF1E293B),
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+        modifier = Modifier
+          .height(38.dp)
+          .testTag("quality_spinner")
       ) {
         Row(
-          modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-          verticalAlignment = Alignment.CenterVertically
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-          when (saveState.status) {
-            com.example.ui.ProjectSaveStatus.SAVED -> {
-              Icon(Icons.Default.CheckCircle, contentDescription = "Saved", tint = CyanAccent, modifier = Modifier.size(12.dp))
-              Spacer(modifier = Modifier.width(3.dp))
-              Text("Saved", style = MaterialTheme.typography.labelSmall.copy(color = TextTertiary, fontSize = 10.sp))
+          Text(
+            text = "AI UHD",
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              fontSize = 12.sp
+            )
+          )
+          Icon(
+            imageVector = Icons.Default.ArrowDropDown,
+            contentDescription = "Quality Options",
+            tint = Color.White,
+            modifier = Modifier.size(16.dp)
+          )
+        }
+      }
+
+      DropdownMenu(
+        expanded = showResolutionMenu,
+        onDismissRequest = { showResolutionMenu = false },
+        modifier = Modifier.background(StudioSurface)
+      ) {
+        listOf(
+          Resolution.RES_4K to "AI UHD (4K 2160p)",
+          Resolution.RES_2K to "2K QHD (1440p)",
+          Resolution.RES_1080P to "1080p FHD",
+          Resolution.RES_720P to "720p HD",
+          Resolution.RES_480P to "480p SD"
+        ).forEach { (res, label) ->
+          DropdownMenuItem(
+            text = {
+              Text(
+                text = label,
+                color = if (res == activeResolution) CyanAccent else TextPrimary,
+                fontWeight = if (res == activeResolution) FontWeight.Bold else FontWeight.Normal
+              )
+            },
+            onClick = {
+              onResolutionSelect(res)
+              showResolutionMenu = false
             }
-            com.example.ui.ProjectSaveStatus.SAVING -> {
-              CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = CyanAccent)
-              Spacer(modifier = Modifier.width(3.dp))
-              Text("Saving...", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp))
-            }
-            com.example.ui.ProjectSaveStatus.UNSAVED -> {
-              Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(AmberAccent))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Save", style = MaterialTheme.typography.labelSmall.copy(color = AmberAccent, fontWeight = FontWeight.Bold, fontSize = 10.sp))
-            }
-          }
+          )
         }
       }
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      // Project Settings button
-      IconButton(
-        onClick = onSettingsClick,
-        modifier = Modifier.testTag("editor_settings_button")
-      ) {
-        Icon(
-          Icons.Default.Tune,
-          contentDescription = "Project Settings",
-          tint = TextSecondary
+    // Right: Cyan "Export" Button
+    val isRendering = exportState is ExportState.Rendering
+    Button(
+      onClick = onExportClick,
+      enabled = !isRendering,
+      colors = ButtonDefaults.buttonColors(
+        containerColor = CyanAccent,
+        contentColor = Color.Black,
+        disabledContainerColor = CyanAccent.copy(alpha = 0.6f),
+        disabledContentColor = Color.Black
+      ),
+      shape = RoundedCornerShape(8.dp),
+      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+      modifier = Modifier
+        .height(38.dp)
+        .padding(start = 12.dp)
+        .testTag("export_btn")
+    ) {
+      if (isRendering) {
+        val progress = (exportState as ExportState.Rendering).progressPercent
+        CircularProgressIndicator(
+          progress = { progress },
+          modifier = Modifier.size(14.dp),
+          strokeWidth = 2.dp,
+          color = Color.Black
         )
-      }
-
-      // Snapping indicator
-      IconButton(
-        onClick = onToggleSnapping,
-        modifier = Modifier.testTag("editor_snapping_button")
-      ) {
-        Icon(
-          Icons.Default.Adjust,
-          contentDescription = "Snapping",
-          tint = if (isSnapping) CyanAccent else TextTertiary
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "${(progress * 100).toInt()}%",
+          style = MaterialTheme.typography.labelSmall.copy(
+            fontWeight = FontWeight.Bold,
+            color = Color.Black,
+            fontSize = 12.sp
+          )
         )
-      }
-
-      // Undo
-      IconButton(
-        onClick = onUndoClick,
-        enabled = canUndo,
-        modifier = Modifier.testTag("editor_undo_button")
-      ) {
-        Icon(
-          Icons.AutoMirrored.Filled.Undo,
-          contentDescription = "Undo",
-          tint = if (canUndo) TextPrimary else TextTertiary.copy(alpha = 0.4f)
+      } else {
+        Text(
+          text = "Export",
+          style = MaterialTheme.typography.labelMedium.copy(
+            fontWeight = FontWeight.Bold,
+            color = Color.Black,
+            fontSize = 13.sp
+          )
         )
-      }
-
-      // Redo
-      IconButton(
-        onClick = onRedoClick,
-        enabled = canRedo,
-        modifier = Modifier.testTag("editor_redo_button")
-      ) {
-        Icon(
-          Icons.AutoMirrored.Filled.Redo,
-          contentDescription = "Redo",
-          tint = if (canRedo) TextPrimary else TextTertiary.copy(alpha = 0.4f)
-        )
-      }
-
-      Spacer(modifier = Modifier.width(4.dp))
-
-      // Export Button
-      Button(
-        onClick = onExportClick,
-        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-        shape = RoundedCornerShape(16.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-        modifier = Modifier
-          .height(34.dp)
-          .testTag("editor_export_button")
-      ) {
-        Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Export", fontWeight = FontWeight.Bold, fontSize = 13.sp)
       }
     }
   }
@@ -1067,6 +954,33 @@ fun VideoPreviewSurface(
           }
         }
       }
+
+      // Bottom-left Feedback pill badge (matching reference image)
+      Row(
+        modifier = Modifier
+          .align(Alignment.BottomStart)
+          .padding(8.dp)
+          .clip(RoundedCornerShape(12.dp))
+          .background(Color.Black.copy(alpha = 0.6f))
+          .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+      ) {
+        Icon(
+          Icons.Default.Feedback,
+          contentDescription = "Feedback",
+          tint = Color.White,
+          modifier = Modifier.size(12.dp)
+        )
+        Text(
+          text = "Feedback",
+          style = MaterialTheme.typography.labelSmall.copy(
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            fontSize = 10.sp
+          )
+        )
+      }
     }
   }
 }
@@ -1077,10 +991,16 @@ private fun TimelineControlsBar(
   currentPosMs: Long,
   totalDurationMs: Long,
   zoom: Float,
+  canUndo: Boolean,
+  canRedo: Boolean,
+  isSnapping: Boolean,
   onTogglePlay: () -> Unit,
   onStop: () -> Unit,
   onStepBack: () -> Unit,
   onStepForward: () -> Unit,
+  onUndoClick: () -> Unit,
+  onRedoClick: () -> Unit,
+  onToggleSnapping: () -> Unit,
   onSplit: () -> Unit,
   onDelete: () -> Unit,
   onAddKeyframe: () -> Unit,
@@ -1092,16 +1012,63 @@ private fun TimelineControlsBar(
     modifier = Modifier
       .fillMaxWidth()
       .background(StudioSurface)
-      .padding(horizontal = 12.dp, vertical = 6.dp),
+      .drawBehind {
+        drawLine(
+          color = StudioBorder,
+          start = Offset(0f, size.height),
+          end = Offset(size.width, size.height),
+          strokeWidth = 1.dp.toPx()
+        )
+      }
+      .padding(horizontal = 8.dp, vertical = 4.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.SpaceBetween
   ) {
-    // Left: Playback controls
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    // Left: Fullscreen icon & Timecode (e.g., 00:07 / 00:29)
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+      if (onToggleFullscreen != null) {
+        IconButton(
+          onClick = onToggleFullscreen,
+          modifier = Modifier
+            .size(32.dp)
+            .testTag("timeline_fullscreen_button")
+        ) {
+          Icon(
+            Icons.Default.Fullscreen,
+            contentDescription = "Fullscreen",
+            tint = TextPrimary,
+            modifier = Modifier.size(20.dp)
+          )
+        }
+      }
+
+      Text(
+        text = "${formatDurationShort(currentPosMs)} / ${formatDurationShort(totalDurationMs)}",
+        style = MaterialTheme.typography.labelMedium.copy(
+          color = TextPrimary,
+          fontWeight = FontWeight.Bold,
+          fontSize = 12.sp
+        ),
+        modifier = Modifier.testTag("timeline_timecode_display")
+      )
+    }
+
+    // Center: Frame Step Back, Prominent Sky Blue Play/Pause, Frame Step Forward
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      IconButton(onClick = onStepBack, modifier = Modifier.size(30.dp)) {
+        Icon(Icons.Default.SkipPrevious, contentDescription = "-1 Frame", tint = TextSecondary, modifier = Modifier.size(18.dp))
+      }
+
       IconButton(
         onClick = onTogglePlay,
         modifier = Modifier
-          .size(40.dp)
+          .size(38.dp)
           .clip(CircleShape)
           .background(CyanAccent)
           .testTag("timeline_play_pause")
@@ -1109,60 +1076,392 @@ private fun TimelineControlsBar(
         Icon(
           if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
           contentDescription = "Play/Pause",
-          tint = Color.Black
+          tint = Color.White,
+          modifier = Modifier.size(22.dp)
         )
       }
 
-      Spacer(modifier = Modifier.width(8.dp))
-
-      IconButton(onClick = onStop, modifier = Modifier.size(36.dp)) {
-        Icon(Icons.Default.Stop, contentDescription = "Stop", tint = TextSecondary)
-      }
-
-      IconButton(onClick = onStepBack, modifier = Modifier.size(36.dp)) {
-        Icon(Icons.Default.SkipPrevious, contentDescription = "-1 Frame", tint = TextSecondary)
-      }
-
-      IconButton(onClick = onStepForward, modifier = Modifier.size(36.dp)) {
-        Icon(Icons.Default.SkipNext, contentDescription = "+1 Frame", tint = TextSecondary)
-      }
-
-      IconButton(
-        onClick = onAddMedia,
-        modifier = Modifier
-          .size(36.dp)
-          .testTag("timeline_add_media")
-      ) {
-        Icon(Icons.Default.AddCircleOutline, contentDescription = "Add Media", tint = CyanAccent)
+      IconButton(onClick = onStepForward, modifier = Modifier.size(30.dp)) {
+        Icon(Icons.Default.SkipNext, contentDescription = "+1 Frame", tint = TextSecondary, modifier = Modifier.size(18.dp))
       }
     }
 
-    // Right: Action shortcuts (Split, Keyframe, Delete, Fullscreen)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      IconButton(onClick = onSplit, modifier = Modifier.size(36.dp).testTag("timeline_quick_split")) {
-        Icon(Icons.Default.CallSplit, contentDescription = "Split", tint = CyanAccent)
+    // Right: Snapping, Undo, Redo, Quick Split, Delete
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+      IconButton(
+        onClick = onToggleSnapping,
+        modifier = Modifier.size(30.dp).testTag("editor_snapping_button")
+      ) {
+        Icon(
+          Icons.Default.Adjust,
+          contentDescription = "Snapping",
+          tint = if (isSnapping) CyanAccent else TextTertiary,
+          modifier = Modifier.size(17.dp)
+        )
       }
 
-      IconButton(onClick = onAddKeyframe, modifier = Modifier.size(36.dp).testTag("timeline_quick_keyframe")) {
-        Icon(Icons.Default.Diamond, contentDescription = "Keyframe", tint = PurpleAccent)
+      IconButton(
+        onClick = onUndoClick,
+        enabled = canUndo,
+        modifier = Modifier.size(30.dp).testTag("editor_undo_button")
+      ) {
+        Icon(
+          Icons.AutoMirrored.Filled.Undo,
+          contentDescription = "Undo",
+          tint = if (canUndo) TextPrimary else TextTertiary.copy(alpha = 0.35f),
+          modifier = Modifier.size(17.dp)
+        )
       }
 
-      IconButton(onClick = onDelete, modifier = Modifier.size(36.dp).testTag("timeline_quick_delete")) {
-        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = RedAccent)
+      IconButton(
+        onClick = onRedoClick,
+        enabled = canRedo,
+        modifier = Modifier.size(30.dp).testTag("editor_redo_button")
+      ) {
+        Icon(
+          Icons.AutoMirrored.Filled.Redo,
+          contentDescription = "Redo",
+          tint = if (canRedo) TextPrimary else TextTertiary.copy(alpha = 0.35f),
+          modifier = Modifier.size(17.dp)
+        )
       }
 
-      if (onToggleFullscreen != null) {
-        IconButton(
-          onClick = onToggleFullscreen,
-          modifier = Modifier.size(36.dp).testTag("timeline_fullscreen_button")
-        ) {
-          Icon(Icons.Default.Fullscreen, contentDescription = "Fullscreen", tint = TextSecondary)
-        }
+      IconButton(
+        onClick = onSplit,
+        modifier = Modifier.size(30.dp).testTag("timeline_quick_split")
+      ) {
+        Icon(
+          Icons.Default.CallSplit,
+          contentDescription = "Split",
+          tint = CyanAccent,
+          modifier = Modifier.size(17.dp)
+        )
+      }
+
+      IconButton(
+        onClick = onDelete,
+        modifier = Modifier.size(30.dp).testTag("timeline_quick_delete")
+      ) {
+        Icon(
+          Icons.Default.Delete,
+          contentDescription = "Delete",
+          tint = RedAccent,
+          modifier = Modifier.size(17.dp)
+        )
       }
     }
   }
 }
 
+// TIMELINE WITH TIMESTAMPS: 40-50dp
+@Composable
+private fun TimelineTimestampsRow(
+  currentPosMs: Long,
+  totalDurationMs: Long
+) {
+  val total = totalDurationMs.coerceAtLeast(1000L)
+  val safePos = currentPosMs.coerceIn(0L, total)
+
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(45.dp)
+      .background(Color.Black)
+      .padding(horizontal = 16.dp, vertical = 8.dp)
+      .testTag("timeline_container"),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(
+      text = "${formatDurationShort(safePos)} / ${formatDurationShort(total)}",
+      color = Color.White,
+      fontSize = 12.sp,
+      fontWeight = FontWeight.Medium,
+      modifier = Modifier.testTag("time_display")
+    )
+
+    Text(
+      text = "•",
+      color = Color.White.copy(alpha = 0.6f),
+      modifier = Modifier.padding(horizontal = 8.dp)
+    )
+
+    // Timestamps around current time
+    val step = (total / 5).coerceAtLeast(2000L)
+    val times = listOf(
+      (safePos - step).coerceAtLeast(0L),
+      safePos,
+      (safePos + step).coerceAtMost(total)
+    )
+
+    times.forEachIndexed { index, timeMs ->
+      Box(
+        modifier = Modifier.weight(1f),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(
+          text = formatDurationShort(timeMs),
+          color = if (index == 1) CyanAccent else Color.White.copy(alpha = 0.7f),
+          fontSize = 10.sp,
+          fontWeight = if (index == 1) FontWeight.Bold else FontWeight.Normal
+        )
+      }
+    }
+  }
+}
+
+// FILM STRIP THUMBNAILS: 80-100dp
+@Composable
+private fun FilmstripThumbnailsRow(
+  timeline: Timeline,
+  currentPosMs: Long,
+  onSeek: (Long) -> Unit,
+  onScrollLeft: () -> Unit,
+  onAddMedia: () -> Unit
+) {
+  val totalDuration = timeline.totalDurationMs.coerceAtLeast(2000L)
+  val frameIntervalMs = 500L
+  val frameCount = ((totalDuration / frameIntervalMs) + 1).toInt().coerceIn(8, 60)
+
+  val scrollState = rememberScrollState()
+
+  LaunchedEffect(currentPosMs) {
+    val progress = (currentPosMs.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+    val targetScroll = (scrollState.maxValue * progress).toInt()
+    if (!scrollState.isScrollInProgress) {
+      scrollState.scrollTo(targetScroll)
+    }
+  }
+
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(90.dp)
+      .background(Color.Black)
+      .testTag("filmstrip_scroll"),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    // Left scroll button
+    IconButton(
+      onClick = onScrollLeft,
+      modifier = Modifier
+        .width(48.dp)
+        .fillMaxHeight()
+        .testTag("scroll_left_btn")
+    ) {
+      Icon(
+        imageVector = Icons.Default.ChevronLeft,
+        contentDescription = "Scroll Left",
+        tint = Color.White,
+        modifier = Modifier.size(28.dp)
+      )
+    }
+
+    // Scrollable Thumbnails container
+    Row(
+      modifier = Modifier
+        .weight(1f)
+        .fillMaxHeight()
+        .horizontalScroll(scrollState)
+        .padding(vertical = 4.dp)
+        .testTag("filmstrip_container"),
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      for (i in 0 until frameCount) {
+        val frameTimeMs = (i * frameIntervalMs).coerceAtMost(totalDuration)
+        val isCurrentFrame = kotlin.math.abs(currentPosMs - frameTimeMs) < frameIntervalMs
+
+        val activeClip = timeline.videoClips.find { c ->
+          frameTimeMs >= c.timelineStartMs && frameTimeMs < (c.timelineStartMs + c.durationMs)
+        } ?: timeline.overlayClips.find { c ->
+          frameTimeMs >= c.timelineStartMs && frameTimeMs < (c.timelineStartMs + c.durationMs)
+        }
+
+        Box(
+          modifier = Modifier
+            .width(72.dp)
+            .height(82.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color(0xFF1E293B))
+            .border(
+              width = if (isCurrentFrame) 2.dp else 1.dp,
+              color = if (isCurrentFrame) CyanAccent else Color(0xFF334155),
+              shape = RoundedCornerShape(6.dp)
+            )
+            .clickable { onSeek(frameTimeMs) }
+        ) {
+          if (activeClip?.uri?.isNotEmpty() == true) {
+            AsyncImage(
+              model = activeClip.uri,
+              contentDescription = "Frame ${i + 1}",
+              contentScale = ContentScale.Crop,
+              modifier = Modifier.fillMaxSize()
+            )
+          } else {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .background(
+                  Brush.linearGradient(
+                    listOf(
+                      Color(0xFF0F172A),
+                      Color(0xFF1E293B),
+                      Color(0xFF0F172A)
+                    )
+                  )
+                )
+                .padding(4.dp),
+              verticalArrangement = Arrangement.SpaceBetween,
+              horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Box(modifier = Modifier.size(3.dp).background(Color.White.copy(alpha = 0.3f)))
+                Box(modifier = Modifier.size(3.dp).background(Color.White.copy(alpha = 0.3f)))
+              }
+              Icon(
+                imageVector = Icons.Default.Movie,
+                contentDescription = null,
+                tint = if (isCurrentFrame) CyanAccent else Color.White.copy(alpha = 0.4f),
+                modifier = Modifier.size(20.dp)
+              )
+              Text(
+                text = formatDurationShort(frameTimeMs),
+                color = if (isCurrentFrame) CyanAccent else Color.White.copy(alpha = 0.6f),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium
+              )
+            }
+          }
+
+          if (isCurrentFrame) {
+            Box(
+              modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(3.dp)
+                .background(CyanAccent)
+            )
+          }
+        }
+      }
+    }
+
+    // Right add button
+    IconButton(
+      onClick = onAddMedia,
+      modifier = Modifier
+        .width(48.dp)
+        .fillMaxHeight()
+        .testTag("add_btn")
+    ) {
+      Icon(
+        imageVector = Icons.Default.Add,
+        contentDescription = "Add Media",
+        tint = CyanAccent,
+        modifier = Modifier.size(28.dp)
+      )
+    }
+  }
+}
+
+// AUDIO WAVEFORM: 70-80dp
+@Composable
+private fun AudioWaveformView(
+  timeline: Timeline,
+  currentPosMs: Long,
+  isPlaying: Boolean,
+  onSeek: (Long) -> Unit
+) {
+  val totalDuration = timeline.totalDurationMs.coerceAtLeast(1000L)
+  val progress = (currentPosMs.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(75.dp)
+      .background(Color.Black)
+      .pointerInput(totalDuration) {
+        detectTapGestures { offset ->
+          val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+          onSeek((ratio * totalDuration).toLong())
+        }
+      }
+      .pointerInput(totalDuration) {
+        detectDragGestures { change, _ ->
+          change.consume()
+          val ratio = (change.position.x / size.width).coerceIn(0f, 1f)
+          onSeek((ratio * totalDuration).toLong())
+        }
+      }
+      .testTag("waveform_container")
+  ) {
+    Canvas(
+      modifier = Modifier
+        .fillMaxSize()
+        .testTag("waveform_view")
+    ) {
+      val canvasWidth = size.width
+      val canvasHeight = size.height
+      val barCount = 70
+      val barWidth = (canvasWidth / barCount) * 0.55f
+      val barSpacing = canvasWidth / barCount
+      val midY = canvasHeight / 2f
+
+      drawLine(
+        color = Color(0xFF1E293B),
+        start = Offset(0f, midY),
+        end = Offset(canvasWidth, midY),
+        strokeWidth = 1.dp.toPx()
+      )
+
+      for (i in 0 until barCount) {
+        val barX = i * barSpacing + (barSpacing - barWidth) / 2f
+        val normX = i.toFloat() / barCount.toFloat()
+
+        val baseFreq = kotlin.math.sin(normX * 18f + 1.2f) * 0.4f +
+          kotlin.math.sin(normX * 36f) * 0.3f +
+          kotlin.math.sin(normX * 72f) * 0.2f
+        val amp = (kotlin.math.abs(baseFreq) + 0.15f).coerceIn(0.1f, 0.95f)
+        val barHeight = (canvasHeight * 0.82f) * amp
+
+        val isPlayed = (barX / canvasWidth) <= progress
+        val barColor = if (isPlayed) {
+          CyanAccent
+        } else {
+          CyanAccent.copy(alpha = 0.35f)
+        }
+
+        drawRoundRect(
+          color = barColor,
+          topLeft = Offset(barX, midY - barHeight / 2f),
+          size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+          cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx())
+        )
+      }
+    }
+
+    // Playhead line
+    Box(
+      modifier = Modifier
+        .fillMaxHeight()
+        .width(2.dp)
+        .align(Alignment.CenterStart)
+        .graphicsLayer {
+          translationX = progress * this.size.width
+        }
+        .background(CyanAccent)
+        .testTag("playhead")
+    )
+  }
+}
+
+// BOTTOM TOOLBAR: CapCut-style horizontal scroll with all tools preserved, icons, labels, AI tags
 @Composable
 private fun EditorBottomToolbar(
   activeTab: EditorToolbarTab?,
@@ -1171,94 +1470,254 @@ private fun EditorBottomToolbar(
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .background(StudioSurface)
-      .border(1.dp, StudioBorder)
+      .height(68.dp)
+      .background(Color(0xFF141416))
+      .border(BorderStroke(0.5.dp, Color(0xFF262628)))
       .horizontalScroll(rememberScrollState())
-      .padding(horizontal = 8.dp, vertical = 6.dp),
+      .padding(horizontal = 6.dp, vertical = 4.dp)
+      .testTag("toolbar_scroll"),
+    verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(4.dp)
   ) {
-    EditorTabItem(icon = Icons.Default.VideoLibrary, label = "Media", isSelected = activeTab == EditorToolbarTab.MEDIA) {
-      onTabSelected(EditorToolbarTab.MEDIA)
-    }
-    EditorTabItem(icon = Icons.Default.Layers, label = "Overlay", isSelected = activeTab == EditorToolbarTab.OVERLAY) {
-      onTabSelected(EditorToolbarTab.OVERLAY)
-    }
-    EditorTabItem(icon = Icons.Default.Edit, label = "Edit", isSelected = activeTab == EditorToolbarTab.EDIT) {
-      onTabSelected(EditorToolbarTab.EDIT)
-    }
-    EditorTabItem(icon = Icons.Default.Audiotrack, label = "Audio", isSelected = activeTab == EditorToolbarTab.AUDIO) {
-      onTabSelected(EditorToolbarTab.AUDIO)
-    }
-    EditorTabItem(icon = Icons.Default.TextFields, label = "Text", isSelected = activeTab == EditorToolbarTab.TEXT) {
-      onTabSelected(EditorToolbarTab.TEXT)
-    }
-    EditorTabItem(icon = Icons.Default.ClosedCaption, label = "Captions", isSelected = activeTab == EditorToolbarTab.CAPTIONS) {
-      onTabSelected(EditorToolbarTab.CAPTIONS)
-    }
-    EditorTabItem(icon = Icons.Default.AutoAwesome, label = "AI Suite", isSelected = activeTab == EditorToolbarTab.AI) {
-      onTabSelected(EditorToolbarTab.AI)
-    }
-    EditorTabItem(icon = Icons.Default.FilterVintage, label = "Filters", isSelected = activeTab == EditorToolbarTab.FILTERS) {
-      onTabSelected(EditorToolbarTab.FILTERS)
-    }
-    EditorTabItem(icon = Icons.Default.AutoFixHigh, label = "Effects", isSelected = activeTab == EditorToolbarTab.EFFECTS) {
-      onTabSelected(EditorToolbarTab.EFFECTS)
-    }
-    EditorTabItem(icon = Icons.Default.Transform, label = "Transitions", isSelected = activeTab == EditorToolbarTab.TRANSITIONS) {
-      onTabSelected(EditorToolbarTab.TRANSITIONS)
-    }
-    EditorTabItem(icon = Icons.Default.Tune, label = "Adjust", isSelected = activeTab == EditorToolbarTab.ADJUST) {
-      onTabSelected(EditorToolbarTab.ADJUST)
-    }
-    EditorTabItem(icon = Icons.Default.Speed, label = "Speed", isSelected = activeTab == EditorToolbarTab.SPEED) {
-      onTabSelected(EditorToolbarTab.SPEED)
-    }
-    EditorTabItem(icon = Icons.Default.EmojiEmotions, label = "Stickers", isSelected = activeTab == EditorToolbarTab.STICKERS) {
-      onTabSelected(EditorToolbarTab.STICKERS)
-    }
-    EditorTabItem(icon = Icons.Default.ColorLens, label = "Chroma", isSelected = activeTab == EditorToolbarTab.CHROMA) {
-      onTabSelected(EditorToolbarTab.CHROMA)
-    }
-    EditorTabItem(icon = Icons.Default.AspectRatio, label = "Canvas", isSelected = activeTab == EditorToolbarTab.CANVAS) {
-      onTabSelected(EditorToolbarTab.CANVAS)
-    }
-    EditorTabItem(icon = Icons.Default.Diamond, label = "Keyframe", isSelected = activeTab == EditorToolbarTab.KEYFRAME) {
-      onTabSelected(EditorToolbarTab.KEYFRAME)
-    }
+    // 1. Edit ✂️
+    EditorToolbarItem(
+      icon = Icons.Default.ContentCut,
+      label = "Edit",
+      isSelected = activeTab == EditorToolbarTab.EDIT,
+      testTag = "edit_btn",
+      onClick = { onTabSelected(EditorToolbarTab.EDIT) }
+    )
+
+    // 2. Audio 🎵
+    EditorToolbarItem(
+      icon = Icons.Default.Audiotrack,
+      label = "Audio",
+      isSelected = activeTab == EditorToolbarTab.AUDIO,
+      testTag = "audio_btn",
+      onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
+    )
+
+    // 3. Text T
+    EditorToolbarItem(
+      icon = Icons.Default.TextFields,
+      label = "Text",
+      isSelected = activeTab == EditorToolbarTab.TEXT,
+      testTag = "text_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
+    )
+
+    // 4. Effects ⭐
+    EditorToolbarItem(
+      icon = Icons.Default.AutoFixHigh,
+      label = "Effects",
+      isSelected = activeTab == EditorToolbarTab.EFFECTS,
+      testTag = "effects_btn",
+      onClick = { onTabSelected(EditorToolbarTab.EFFECTS) }
+    )
+
+    // 5. Overlay 📦
+    EditorToolbarItem(
+      icon = Icons.Default.Layers,
+      label = "Overlay",
+      isSelected = activeTab == EditorToolbarTab.OVERLAY,
+      testTag = "overlay_btn",
+      onClick = { onTabSelected(EditorToolbarTab.OVERLAY) }
+    )
+
+    // 6. Captions CC
+    EditorToolbarItem(
+      icon = Icons.Default.ClosedCaption,
+      label = "Captions",
+      isSelected = activeTab == EditorToolbarTab.CAPTIONS,
+      testTag = "captions_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
+    )
+
+    // 7. Filters 🎨
+    EditorToolbarItem(
+      icon = Icons.Default.ColorLens,
+      label = "Filters",
+      isSelected = activeTab == EditorToolbarTab.FILTERS,
+      testTag = "filters_btn",
+      onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
+    )
+
+    // 8. Adjust ◯ with sliders
+    EditorToolbarItem(
+      icon = Icons.Default.Tune,
+      label = "Adjust",
+      isSelected = activeTab == EditorToolbarTab.ADJUST,
+      testTag = "adjust_btn",
+      onClick = { onTabSelected(EditorToolbarTab.ADJUST) }
+    )
+
+    // 9. Stickers ⭕
+    EditorToolbarItem(
+      icon = Icons.Default.EmojiEmotions,
+      label = "Stickers",
+      isSelected = activeTab == EditorToolbarTab.STICKERS,
+      testTag = "stickers_btn",
+      onClick = { onTabSelected(EditorToolbarTab.STICKERS) }
+    )
+
+    // 10. Generate media ⊕ (AI tag)
+    EditorToolbarItem(
+      icon = Icons.Default.VideoLibrary,
+      label = "Generate media",
+      isSelected = activeTab == EditorToolbarTab.AI,
+      testTag = "generate_media_btn",
+      badgeText = "AI",
+      onClick = { onTabSelected(EditorToolbarTab.AI) }
+    )
+
+    // 11. AI avatar 👤 (Purple diamond tag)
+    EditorToolbarItem(
+      icon = Icons.Default.AccountBox,
+      label = "AI avatar",
+      isSelected = activeTab == EditorToolbarTab.AI_AVATAR,
+      testTag = "ai_avatar_btn",
+      badgeIcon = Icons.Default.Diamond,
+      onClick = { onTabSelected(EditorToolbarTab.AI_AVATAR) }
+    )
+
+    // 12. Aspect ratio □
+    EditorToolbarItem(
+      icon = Icons.Default.CropSquare,
+      label = "Aspect ratio",
+      isSelected = activeTab == EditorToolbarTab.CANVAS,
+      testTag = "aspect_ratio_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CANVAS) }
+    )
+
+    // 13. Background ▨
+    EditorToolbarItem(
+      icon = Icons.Default.Texture,
+      label = "Background",
+      isSelected = activeTab == EditorToolbarTab.BACKGROUND,
+      testTag = "background_btn",
+      onClick = { onTabSelected(EditorToolbarTab.BACKGROUND) }
+    )
+
+    // 14. Speed ⚡
+    EditorToolbarItem(
+      icon = Icons.Default.Speed,
+      label = "Speed",
+      isSelected = activeTab == EditorToolbarTab.SPEED,
+      testTag = "speed_btn",
+      onClick = { onTabSelected(EditorToolbarTab.SPEED) }
+    )
+
+    // 15. Transitions 🔄
+    EditorToolbarItem(
+      icon = Icons.Default.Transform,
+      label = "Transitions",
+      isSelected = activeTab == EditorToolbarTab.TRANSITIONS,
+      testTag = "transitions_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TRANSITIONS) }
+    )
+
+    // 16. Chroma Key 🟩
+    EditorToolbarItem(
+      icon = Icons.Default.FilterFrames,
+      label = "Chroma",
+      isSelected = activeTab == EditorToolbarTab.CHROMA,
+      testTag = "chroma_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CHROMA) }
+    )
+
+    // 17. Keyframe 💎
+    EditorToolbarItem(
+      icon = Icons.Default.Diamond,
+      label = "Keyframe",
+      isSelected = activeTab == EditorToolbarTab.KEYFRAME,
+      testTag = "keyframe_btn",
+      onClick = { onTabSelected(EditorToolbarTab.KEYFRAME) }
+    )
+
+    // 18. Media / Add ➕
+    EditorToolbarItem(
+      icon = Icons.Default.AddPhotoAlternate,
+      label = "Media",
+      isSelected = activeTab == EditorToolbarTab.MEDIA,
+      testTag = "add_btn",
+      onClick = { onTabSelected(EditorToolbarTab.MEDIA) }
+    )
   }
 }
 
 @Composable
-private fun EditorTabItem(
+private fun EditorToolbarItem(
   icon: ImageVector,
   label: String,
   isSelected: Boolean,
+  testTag: String,
+  badgeText: String? = null,
+  badgeIcon: ImageVector? = null,
   onClick: () -> Unit
 ) {
   Box(
     modifier = Modifier
+      .defaultMinSize(minWidth = 62.dp, minHeight = 56.dp)
       .clip(RoundedCornerShape(8.dp))
       .clickable(onClick = onClick)
-      .background(if (isSelected) StudioSurfaceVariant else Color.Transparent)
-      .padding(horizontal = 10.dp, vertical = 6.dp),
+      .background(if (isSelected) CyanAccent.copy(alpha = 0.2f) else Color.Transparent)
+      .padding(horizontal = 6.dp, vertical = 4.dp)
+      .testTag(testTag),
     contentAlignment = Alignment.Center
   ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-      Icon(
-        imageVector = icon,
-        contentDescription = label,
-        tint = if (isSelected) CyanAccent else TextSecondary,
-        modifier = Modifier.size(20.dp)
-      )
-      Spacer(modifier = Modifier.height(2.dp))
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center
+    ) {
+      Box(contentAlignment = Alignment.TopEnd) {
+        Icon(
+          imageVector = icon,
+          contentDescription = label,
+          tint = if (isSelected) CyanAccent else Color.White,
+          modifier = Modifier.size(24.dp)
+        )
+        if (badgeText != null) {
+          Surface(
+            color = CyanAccent,
+            shape = RoundedCornerShape(3.dp),
+            modifier = Modifier.offset(x = 10.dp, y = (-5).dp)
+          ) {
+            Text(
+              text = badgeText,
+              color = Color.Black,
+              fontSize = 8.sp,
+              fontWeight = FontWeight.Black,
+              modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.5.dp)
+            )
+          }
+        } else if (badgeIcon != null) {
+          Icon(
+            imageVector = badgeIcon,
+            contentDescription = null,
+            tint = PurpleAccent,
+            modifier = Modifier
+              .size(10.dp)
+              .offset(x = 8.dp, y = (-4).dp)
+          )
+        }
+      }
+      Spacer(modifier = Modifier.height(3.dp))
       Text(
         text = label,
         style = MaterialTheme.typography.labelSmall.copy(
-          fontSize = 10.sp,
-          color = if (isSelected) CyanAccent else TextSecondary,
-          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-        )
+          fontSize = 11.sp,
+          color = if (isSelected) CyanAccent else Color(0xFFE2E2E2),
+          fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+        ),
+        maxLines = 1
       )
     }
   }
+}
+
+private fun formatDurationShort(timeMs: Long): String {
+  val totalSeconds = (timeMs / 1000).coerceAtLeast(0)
+  val minutes = totalSeconds / 60
+  val seconds = totalSeconds % 60
+  return String.format("%02d:%02d", minutes, seconds)
 }

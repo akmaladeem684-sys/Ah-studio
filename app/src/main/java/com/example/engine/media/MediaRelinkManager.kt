@@ -20,6 +20,8 @@ object MediaRelinkManager {
     // Sample / synthetic demo assets are always accessible
     if (uriString.startsWith("demo://") ||
       uriString.startsWith("sample://") ||
+      uriString.startsWith("asset://") ||
+      uriString.startsWith("internal://") ||
       uriString.startsWith("android.resource://")
     ) {
       return true

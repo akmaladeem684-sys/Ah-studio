@@ -70,7 +70,9 @@ enum class EditorToolbarTab {
   AI,
   CANVAS,
   KEYFRAME,
-  CAPTIONS
+  CAPTIONS,
+  BACKGROUND,
+  AI_AVATAR
 }
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
@@ -109,7 +111,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   val settings: StateFlow<UserSettings> = StudioPreferencesManager.settings
 
   // Navigation State
-  private val _currentScreen = MutableStateFlow(AppScreen.HOME)
+  private val _currentScreen = MutableStateFlow(AppScreen.EDITOR)
   val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
   // Active Project State
@@ -165,6 +167,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   init {
     viewModelScope.launch {
       repository.createSampleProjectIfEmpty()
+      val projects = repository.allProjects.first { it.isNotEmpty() }
+      if (_activeProjectId.value.isBlank()) {
+        val firstProj = projects.firstOrNull()
+        if (firstProj != null) {
+          loadProject(firstProj)
+        }
+      }
     }
 
     // Sync Timeline changes with Playback Engine, mark unsaved, and persist recovery snapshot

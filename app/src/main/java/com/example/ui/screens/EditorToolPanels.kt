@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1344,6 +1345,347 @@ private fun EditorActionTile(
         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, color = TextPrimary, fontWeight = FontWeight.Medium),
         maxLines = 1
       )
+    }
+  }
+}
+
+@Composable
+fun BackgroundToolPanel(
+  viewModel: StudioViewModel,
+  modifier: Modifier = Modifier
+) {
+  val currentAspect by viewModel.activeAspectRatio.collectAsState()
+  val currentRes by viewModel.activeResolution.collectAsState()
+  val currentFps by viewModel.activeFps.collectAsState()
+  val currentSampleRate by viewModel.activeSampleRate.collectAsState()
+  val activeCanvasColor by viewModel.activeCanvasColor.collectAsState()
+
+  val colors = listOf(
+    0xFF000000 to "Black",
+    0xFF0F172A to "Slate",
+    0xFF1E293B to "Charcoal",
+    0xFFFFFFFF to "White",
+    0xFF0A192F to "Navy",
+    0xFF2E1065 to "Purple",
+    0xFF064E3B to "Emerald",
+    0xFF450A0A to "Crimson",
+    0xFF083344 to "Cyan",
+    0xFF18181B to "Zinc"
+  )
+
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .background(StudioSurface)
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.Texture, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
+        Text(
+          text = "Canvas Background",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+        )
+      }
+      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+      }
+    }
+
+    Text(
+      text = "Select solid or styled background color for canvas",
+      style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+    )
+
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      items(colors) { (colorLong, name) ->
+        val isSelected = activeCanvasColor == colorLong
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          modifier = Modifier.clickable {
+            viewModel.updateProjectSettings(
+              aspectRatio = currentAspect,
+              resolution = currentRes,
+              fps = currentFps,
+              sampleRate = currentSampleRate,
+              canvasColor = colorLong
+            )
+          }
+        ) {
+          Box(
+            modifier = Modifier
+              .size(44.dp)
+              .clip(CircleShape)
+              .background(Color(colorLong))
+              .border(
+                width = if (isSelected) 3.dp else 1.dp,
+                color = if (isSelected) CyanAccent else Color.White.copy(alpha = 0.3f),
+                shape = CircleShape
+              ),
+            contentAlignment = Alignment.Center
+          ) {
+            if (isSelected) {
+              Icon(
+                Icons.Default.Check,
+                contentDescription = "Selected",
+                tint = if (colorLong == 0xFFFFFFFF) Color.Black else Color.White,
+                modifier = Modifier.size(20.dp)
+              )
+            }
+          }
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            text = name,
+            style = MaterialTheme.typography.labelSmall.copy(
+              color = if (isSelected) CyanAccent else TextSecondary,
+              fontSize = 10.sp,
+              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun GenerateMediaToolPanel(
+  viewModel: StudioViewModel,
+  modifier: Modifier = Modifier
+) {
+  var prompt by remember { mutableStateOf("") }
+  val isAIBusy by viewModel.isAIBusy.collectAsState()
+  val context = androidx.compose.ui.platform.LocalContext.current
+
+  val samplePrompts = listOf(
+    "Neon Cyberpunk City",
+    "Golden Sunset Over Ocean",
+    "Anime Lo-Fi Room",
+    "Deep Space Galaxy"
+  )
+
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .background(StudioSurface)
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(color = CyanAccent, shape = RoundedCornerShape(4.dp)) {
+          Text(
+            text = "AI",
+            color = Color.Black,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+          )
+        }
+        Text(
+          text = "Generate Media (AI)",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+        )
+      }
+      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+      }
+    }
+
+    OutlinedTextField(
+      value = prompt,
+      onValueChange = { prompt = it },
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("ai_media_prompt_input"),
+      placeholder = { Text("Describe image, clip, or sticker to generate...", color = TextTertiary) },
+      singleLine = true,
+      colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = CyanAccent,
+        unfocusedBorderColor = StudioBorder,
+        focusedTextColor = TextPrimary,
+        unfocusedTextColor = TextPrimary
+      )
+    )
+
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      items(samplePrompts) { sample ->
+        Surface(
+          onClick = { prompt = sample },
+          shape = RoundedCornerShape(12.dp),
+          color = StudioSurfaceVariant,
+          border = BorderStroke(1.dp, StudioBorder)
+        ) {
+          Text(
+            text = sample,
+            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+          )
+        }
+      }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      Button(
+        onClick = {
+          val activePrompt = prompt.ifBlank { "Cinematic AI Visual Asset" }
+          viewModel.timelineEngine.addStickerClip("🌟 $activePrompt")
+          android.widget.Toast.makeText(context, "Generated media added to timeline!", android.widget.Toast.LENGTH_SHORT).show()
+          viewModel.setActiveToolbarTab(null)
+        },
+        enabled = !isAIBusy,
+        modifier = Modifier.weight(1f).testTag("generate_media_submit_btn"),
+        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
+      ) {
+        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Generate Media", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+      }
+
+      Button(
+        onClick = {
+          viewModel.runAIAutoEdit()
+          viewModel.setActiveToolbarTab(null)
+        },
+        enabled = !isAIBusy,
+        colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White)
+      ) {
+        Text("Auto Reel", fontSize = 12.sp)
+      }
+    }
+
+    OutlinedButton(
+      onClick = {
+        viewModel.setActiveToolbarTab(null)
+        viewModel.navigateTo(com.example.ui.AppScreen.AI_SUITE)
+      },
+      modifier = Modifier.fillMaxWidth(),
+      colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+    ) {
+      Text("Open Full AI Suite (Captions, Speech, Highlights)", fontSize = 11.sp)
+    }
+  }
+}
+
+@Composable
+fun AIAvatarToolPanel(
+  viewModel: StudioViewModel,
+  modifier: Modifier = Modifier
+) {
+  var avatarScript by remember { mutableStateOf("Welcome to our video presentation! Powered by AI.") }
+  var selectedAvatar by remember { mutableStateOf("Sophia (Presenter)") }
+  val context = androidx.compose.ui.platform.LocalContext.current
+
+  val avatars = listOf(
+    "Sophia (Presenter)" to "👩‍💼",
+    "Alex (Tech Host)" to "👨‍💻",
+    "Marcus (Storyteller)" to "🎙️",
+    "Emma (Lifestyle)" to "✨",
+    "Cyber Host" to "🤖"
+  )
+
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .background(StudioSurface)
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.Diamond, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(18.dp))
+        Text(
+          text = "AI Avatar Presenter",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+        )
+      }
+      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+      }
+    }
+
+    Text("Choose Avatar Persona:", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      items(avatars) { (name, emoji) ->
+        val isSelected = selectedAvatar == name
+        Surface(
+          onClick = { selectedAvatar = name },
+          shape = RoundedCornerShape(10.dp),
+          color = if (isSelected) PurpleAccent.copy(alpha = 0.25f) else StudioSurfaceVariant,
+          border = BorderStroke(1.dp, if (isSelected) PurpleAccent else StudioBorder)
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Text(emoji, fontSize = 14.sp)
+            Text(
+              text = name,
+              style = MaterialTheme.typography.labelSmall.copy(
+                color = if (isSelected) Color.White else TextSecondary,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                fontSize = 11.sp
+              )
+            )
+          }
+        }
+      }
+    }
+
+    OutlinedTextField(
+      value = avatarScript,
+      onValueChange = { avatarScript = it },
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("ai_avatar_script_input"),
+      placeholder = { Text("What should the avatar say?", color = TextTertiary) },
+      maxLines = 3,
+      colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = PurpleAccent,
+        unfocusedBorderColor = StudioBorder,
+        focusedTextColor = TextPrimary,
+        unfocusedTextColor = TextPrimary
+      )
+    )
+
+    Button(
+      onClick = {
+        val script = avatarScript.ifBlank { "Hello from AI Avatar!" }
+        viewModel.runAITextToSpeech(script)
+        viewModel.timelineEngine.addTextClip(
+          text = "[${selectedAvatar.substringBefore(" ")}]: $script",
+          durationMs = 4000L
+        )
+        android.widget.Toast.makeText(context, "AI Avatar & speech added to timeline!", android.widget.Toast.LENGTH_SHORT).show()
+        viewModel.setActiveToolbarTab(null)
+      },
+      modifier = Modifier.fillMaxWidth().testTag("add_ai_avatar_btn"),
+      colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White)
+    ) {
+      Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(16.dp))
+      Spacer(modifier = Modifier.width(6.dp))
+      Text("Insert AI Avatar to Timeline", fontWeight = FontWeight.Bold)
     }
   }
 }

@@ -77,7 +77,7 @@ fun AccurateTimecodeRuler(
 
       val totalTicks = (safeTotalDuration / minorIntervalMs).toInt()
       val textPaint = android.graphics.Paint().apply {
-        color = android.graphics.Color.argb(200, 148, 163, 184) // TextSecondary
+        color = android.graphics.Color.argb(220, 15, 23, 42) // Dark Slate for high contrast on light surface
         textSize = 9.sp.toPx()
         isAntiAlias = true
         typeface = android.graphics.Typeface.MONOSPACE

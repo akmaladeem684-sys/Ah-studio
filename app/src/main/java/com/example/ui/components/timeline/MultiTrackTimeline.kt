@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState as rememberVerticalScrollState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -19,7 +21,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.domain.model.Timeline
 import com.example.domain.model.TrackHeight
 import com.example.domain.model.TrackSettings
@@ -49,6 +53,7 @@ fun MultiTrackTimeline(
   onToggleTrackMute: (TrackType) -> Unit,
   onToggleTrackSolo: (TrackType) -> Unit,
   onCycleTrackHeight: (TrackType) -> Unit,
+  showTrackHeaders: Boolean = false,
   selectedKeyframeIds: Set<String> = emptySet(),
   onSelectKeyframe: ((String) -> Unit)? = null,
   onMoveKeyframe: ((String, Long) -> Unit)? = null,
@@ -78,54 +83,56 @@ fun MultiTrackTimeline(
     color = StudioDarkBg
   ) {
     Row(modifier = Modifier.fillMaxSize()) {
-      // 1. Left Sticky Track Headers Column
-      Column(
-        modifier = Modifier
-          .width(108.dp)
-          .fillMaxHeight()
-          .background(StudioSurface)
-          .drawBehind {
-            drawLine(
-              color = StudioBorder,
-              start = Offset(size.width, 0f),
-              end = Offset(size.width, size.height),
-              strokeWidth = 1.dp.toPx()
-            )
-          }
-      ) {
-        // Top empty space aligned with the timecode ruler
-        Box(
+      // 1. Left Sticky Track Headers Column (Shown only when showTrackHeaders = true)
+      if (showTrackHeaders) {
+        Column(
           modifier = Modifier
-            .fillMaxWidth()
-            .height(30.dp)
+            .width(108.dp)
+            .fillMaxHeight()
             .background(StudioSurface)
             .drawBehind {
               drawLine(
                 color = StudioBorder,
-                start = Offset(0f, size.height),
+                start = Offset(size.width, 0f),
                 end = Offset(size.width, size.height),
                 strokeWidth = 1.dp.toPx()
               )
             }
-        )
-
-        // Scrollable headers matching vertical track content
-        Column(
-          modifier = Modifier
-            .weight(1f)
-            .verticalScroll(verticalScrollState)
         ) {
-          tracks.forEach { trackType ->
-            val settings = timeline.trackSettings[trackType] ?: TrackSettings(trackType)
-            TrackHeaderControl(
-              trackType = trackType,
-              settings = settings,
-              onToggleLock = { onToggleTrackLock(trackType) },
-              onToggleHide = { onToggleTrackHide(trackType) },
-              onToggleMute = { onToggleTrackMute(trackType) },
-              onToggleSolo = { onToggleTrackSolo(trackType) },
-              onCycleHeight = { onCycleTrackHeight(trackType) }
-            )
+          // Top empty space aligned with the timecode ruler
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(30.dp)
+              .background(StudioSurface)
+              .drawBehind {
+                drawLine(
+                  color = StudioBorder,
+                  start = Offset(0f, size.height),
+                  end = Offset(size.width, size.height),
+                  strokeWidth = 1.dp.toPx()
+                )
+              }
+          )
+
+          // Scrollable headers matching vertical track content
+          Column(
+            modifier = Modifier
+              .weight(1f)
+              .verticalScroll(verticalScrollState)
+          ) {
+            tracks.forEach { trackType ->
+              val settings = timeline.trackSettings[trackType] ?: TrackSettings(trackType)
+              TrackHeaderControl(
+                trackType = trackType,
+                settings = settings,
+                onToggleLock = { onToggleTrackLock(trackType) },
+                onToggleHide = { onToggleTrackHide(trackType) },
+                onToggleMute = { onToggleTrackMute(trackType) },
+                onToggleSolo = { onToggleTrackSolo(trackType) },
+                onCycleHeight = { onCycleTrackHeight(trackType) }
+              )
+            }
           }
         }
       }
@@ -183,11 +190,28 @@ fun MultiTrackTimeline(
                 val settings = timeline.trackSettings[trackType] ?: TrackSettings(trackType)
                 val trackHeightDp = settings.height.toDp()
 
+                val trackBadgeColor = when (trackType) {
+                  TrackType.MAIN_VIDEO -> VideoTrackColor
+                  TrackType.OVERLAY -> OverlayTrackColor
+                  TrackType.TEXT -> TextTrackColor
+                  TrackType.AUDIO -> AudioTrackColor
+                  TrackType.STICKER -> StickerTrackColor
+                  TrackType.EFFECT -> EffectTrackColor
+                }
+                val trackBadgeText = when (trackType) {
+                  TrackType.MAIN_VIDEO -> "V1"
+                  TrackType.OVERLAY -> "V2"
+                  TrackType.TEXT -> "T1"
+                  TrackType.AUDIO -> "A1"
+                  TrackType.STICKER -> "S1"
+                  TrackType.EFFECT -> "FX"
+                }
+
                 Box(
                   modifier = Modifier
                     .width(totalWidthDp)
                     .height(trackHeightDp)
-                    .background(if (settings.isHidden) Color(0xFF0F1522) else Color.Transparent)
+                    .background(if (settings.isHidden) Color(0xFFE2E8F0).copy(alpha = 0.5f) else Color.Transparent)
                     .drawBehind {
                       drawLine(
                         color = StudioBorder.copy(alpha = 0.35f),
@@ -198,6 +222,26 @@ fun MultiTrackTimeline(
                     }
                     .padding(vertical = 3.dp)
                 ) {
+                  // Track indicator badge on the far left when full headers are hidden
+                  if (!showTrackHeaders) {
+                    Surface(
+                      shape = RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp),
+                      color = trackBadgeColor.copy(alpha = 0.85f),
+                      modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 2.dp)
+                    ) {
+                      Text(
+                        text = trackBadgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                          color = Color.White,
+                          fontWeight = FontWeight.Bold,
+                          fontSize = 8.5.sp
+                        ),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                      )
+                    }
+                  }
                   when (trackType) {
                     TrackType.MAIN_VIDEO -> {
                       timeline.videoClips.forEach { clip ->

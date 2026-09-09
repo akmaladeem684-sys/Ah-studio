@@ -1,15 +1,15 @@
 package com.example.ui.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val StudioColorScheme = darkColorScheme(
+private val StudioColorScheme = lightColorScheme(
   primary = CyanAccent,
-  onPrimary = Color.Black,
-  primaryContainer = StudioSurfaceVariant,
-  onPrimaryContainer = CyanAccent,
+  onPrimary = Color.White,
+  primaryContainer = SkyBlueContainer,
+  onPrimaryContainer = CyanAccentDark,
   secondary = PurpleAccent,
   onSecondary = Color.White,
   secondaryContainer = StudioSurfaceVariant,
@@ -29,7 +29,7 @@ private val StudioColorScheme = darkColorScheme(
 
 @Composable
 fun MyApplicationTheme(
-  darkTheme: Boolean = true, // Editor always stays in professional dark mode
+  darkTheme: Boolean = false,
   dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
