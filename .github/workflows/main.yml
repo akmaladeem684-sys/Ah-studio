@@ -25,19 +25,20 @@ jobs:
     - name: Generate Gradle Wrapper
       run: gradle wrapper
 
-    - name: Generate Debug Keystore
+    - name: Create Required Dummy Keystore File
       run: |
-        mkdir -p ~/.android
-        keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        mkdir -p app
+        cp debug.keystore app/debug.keystore
 
     - name: Make Gradle Executable
       run: chmod +x gradlew
 
     - name: Build Debug APK
-      run: ./gradlew assembleDebug -x validateSigningDebug -x processDebugGoogleServices
+      run: ./gradlew assembleDebug -x processDebugGoogleServices
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: app-debug
-        path: app/build/outputs/apk/debug/app-debug.apk
+        path: "**/build/outputs/apk/debug/*.apk"
