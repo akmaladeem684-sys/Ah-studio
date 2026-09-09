@@ -96,6 +96,7 @@ fun EditorScreen(
   var showSpeedDialog by remember { mutableStateOf(false) }
   var showProjectSettingsDialog by remember { mutableStateOf(false) }
   var showRelinkMediaDialog by remember { mutableStateOf(false) }
+  var isFullscreenPreview by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
 
   val replaceMediaPickerLauncher = rememberLauncherForActivityResult(
@@ -169,6 +170,7 @@ fun EditorScreen(
             EditorToolbarTab.CHROMA -> ChromaKeyPanel(viewModel)
             EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
             EditorToolbarTab.KEYFRAME -> KeyframeAnimationPanel(viewModel)
+            EditorToolbarTab.CAPTIONS -> CaptionsToolPanel(viewModel)
             EditorToolbarTab.AI -> {
               // Quick AI trigger
               Column(
@@ -283,6 +285,7 @@ fun EditorScreen(
           selectedElement = selectedElement,
           onSelectElement = { viewModel.timelineEngine.selectElement(it) },
           player = viewModel.playbackEngine.player,
+          onToggleFullscreen = { isFullscreenPreview = true },
           modifier = Modifier.fillMaxSize()
         )
       }
@@ -304,7 +307,8 @@ fun EditorScreen(
           viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME)
         },
         onAddMedia = { viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA) },
-        onZoomChange = { viewModel.timelineEngine.setZoom(it) }
+        onZoomChange = { viewModel.timelineEngine.setZoom(it) },
+        onToggleFullscreen = { isFullscreenPreview = true }
       )
 
       // 3. Timeline Quick Action Toolbar
@@ -498,6 +502,109 @@ fun EditorScreen(
       }
     )
   }
+
+  // Immersive Fullscreen Video Preview Dialog
+  if (isFullscreenPreview) {
+    Dialog(
+      onDismissRequest = { isFullscreenPreview = false },
+      properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color.Black)
+      ) {
+        VideoPreviewSurface(
+          timeline = timeline,
+          currentPosMs = currentPosMs,
+          aspectRatio = aspectRatio,
+          selectedElement = selectedElement,
+          onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+          player = viewModel.playbackEngine.player,
+          onToggleFullscreen = { isFullscreenPreview = false },
+          modifier = Modifier.fillMaxSize()
+        )
+
+        // Top bar overlay
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .align(Alignment.TopCenter)
+            .statusBarsPadding()
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          IconButton(
+            onClick = { isFullscreenPreview = false },
+            modifier = Modifier
+              .size(40.dp)
+              .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+          ) {
+            Icon(Icons.Default.Close, contentDescription = "Close Fullscreen", tint = Color.White)
+          }
+
+          Text(
+            text = projectName,
+            style = MaterialTheme.typography.titleMedium.copy(
+              color = Color.White,
+              fontWeight = FontWeight.Bold
+            )
+          )
+
+          Text(
+            text = "${formatDuration(currentPosMs)} / ${formatDurationShort(timeline.totalDurationMs)}",
+            style = MaterialTheme.typography.labelMedium.copy(
+              color = CyanAccent,
+              fontWeight = FontWeight.Bold
+            )
+          )
+        }
+
+        // Bottom playback bar overlay
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
+            .padding(horizontal = 24.dp, vertical = 18.dp),
+          horizontalArrangement = Arrangement.Center,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          IconButton(
+            onClick = { viewModel.timelineEngine.stepBackwardOneFrame() },
+            modifier = Modifier.size(44.dp)
+          ) {
+            Icon(Icons.Default.SkipPrevious, contentDescription = "-1 Frame", tint = Color.White, modifier = Modifier.size(28.dp))
+          }
+          Spacer(modifier = Modifier.width(20.dp))
+          IconButton(
+            onClick = { viewModel.timelineEngine.togglePlayPause() },
+            modifier = Modifier
+              .size(54.dp)
+              .clip(CircleShape)
+              .background(CyanAccent)
+          ) {
+            Icon(
+              if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+              contentDescription = "Play/Pause",
+              tint = Color.Black,
+              modifier = Modifier.size(32.dp)
+            )
+          }
+          Spacer(modifier = Modifier.width(20.dp))
+          IconButton(
+            onClick = { viewModel.timelineEngine.stepForwardOneFrame() },
+            modifier = Modifier.size(44.dp)
+          ) {
+            Icon(Icons.Default.SkipNext, contentDescription = "+1 Frame", tint = Color.White, modifier = Modifier.size(28.dp))
+          }
+        }
+      }
+    }
+  }
 }
 
 @Composable
@@ -659,6 +766,7 @@ fun VideoPreviewSurface(
   selectedElement: SelectedTrackElement = SelectedTrackElement.None,
   onSelectElement: (SelectedTrackElement) -> Unit = {},
   player: ExoPlayer? = null,
+  onToggleFullscreen: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   // Find current active video clip
@@ -917,23 +1025,47 @@ fun VideoPreviewSurface(
         }
       }
 
-      // Top-right Timecode overlay
-      Box(
+      // Top-right Timecode & Fullscreen overlay
+      Row(
         modifier = Modifier
           .align(Alignment.TopEnd)
-          .padding(8.dp)
-          .clip(RoundedCornerShape(6.dp))
-          .background(Color.Black.copy(alpha = 0.7f))
-          .padding(horizontal = 8.dp, vertical = 4.dp)
+          .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
       ) {
-        Text(
-          text = "${formatDuration(currentPosMs)} / ${formatDurationShort(timeline.totalDurationMs)}",
-          style = MaterialTheme.typography.labelSmall.copy(
-            color = CyanAccent,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color.Black.copy(alpha = 0.75f))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+          Text(
+            text = "${formatDuration(currentPosMs)} / ${formatDurationShort(timeline.totalDurationMs)}",
+            style = MaterialTheme.typography.labelSmall.copy(
+              color = CyanAccent,
+              fontWeight = FontWeight.Bold,
+              fontSize = 11.sp
+            )
           )
-        )
+        }
+        if (onToggleFullscreen != null) {
+          Box(
+            modifier = Modifier
+              .size(28.dp)
+              .clip(CircleShape)
+              .background(Color.Black.copy(alpha = 0.75f))
+              .clickable { onToggleFullscreen() }
+              .testTag("preview_fullscreen_toggle"),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              Icons.Default.Fullscreen,
+              contentDescription = "Fullscreen",
+              tint = Color.White,
+              modifier = Modifier.size(16.dp)
+            )
+          }
+        }
       }
     }
   }
@@ -953,7 +1085,8 @@ private fun TimelineControlsBar(
   onDelete: () -> Unit,
   onAddKeyframe: () -> Unit,
   onAddMedia: () -> Unit,
-  onZoomChange: (Float) -> Unit
+  onZoomChange: (Float) -> Unit,
+  onToggleFullscreen: (() -> Unit)? = null
 ) {
   Row(
     modifier = Modifier
@@ -1004,7 +1137,7 @@ private fun TimelineControlsBar(
       }
     }
 
-    // Right: Action shortcuts (Split, Keyframe, Delete, Zoom)
+    // Right: Action shortcuts (Split, Keyframe, Delete, Fullscreen)
     Row(verticalAlignment = Alignment.CenterVertically) {
       IconButton(onClick = onSplit, modifier = Modifier.size(36.dp).testTag("timeline_quick_split")) {
         Icon(Icons.Default.CallSplit, contentDescription = "Split", tint = CyanAccent)
@@ -1016,6 +1149,15 @@ private fun TimelineControlsBar(
 
       IconButton(onClick = onDelete, modifier = Modifier.size(36.dp).testTag("timeline_quick_delete")) {
         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = RedAccent)
+      }
+
+      if (onToggleFullscreen != null) {
+        IconButton(
+          onClick = onToggleFullscreen,
+          modifier = Modifier.size(36.dp).testTag("timeline_fullscreen_button")
+        ) {
+          Icon(Icons.Default.Fullscreen, contentDescription = "Fullscreen", tint = TextSecondary)
+        }
       }
     }
   }
@@ -1049,6 +1191,9 @@ private fun EditorBottomToolbar(
     }
     EditorTabItem(icon = Icons.Default.TextFields, label = "Text", isSelected = activeTab == EditorToolbarTab.TEXT) {
       onTabSelected(EditorToolbarTab.TEXT)
+    }
+    EditorTabItem(icon = Icons.Default.ClosedCaption, label = "Captions", isSelected = activeTab == EditorToolbarTab.CAPTIONS) {
+      onTabSelected(EditorToolbarTab.CAPTIONS)
     }
     EditorTabItem(icon = Icons.Default.AutoAwesome, label = "AI Suite", isSelected = activeTab == EditorToolbarTab.AI) {
       onTabSelected(EditorToolbarTab.AI)

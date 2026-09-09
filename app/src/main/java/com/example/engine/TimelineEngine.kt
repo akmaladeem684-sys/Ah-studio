@@ -1784,12 +1784,16 @@ class TimelineEngine {
 
   // --- Text Operations ---
 
-  fun addTextClip(text: String = "NEW TEXT") {
+  fun addTextClip(
+    text: String = "NEW TEXT",
+    timelineStartMs: Long = _currentPositionMs.value,
+    durationMs: Long = 3000L
+  ) {
     recordHistory()
     val newText = TextClip(
       text = text,
-      timelineStartMs = _currentPositionMs.value,
-      durationMs = 3000L,
+      timelineStartMs = timelineStartMs,
+      durationMs = durationMs,
       fontSizeSp = 24f,
       fontWeight = 800,
       textColor = 0xFFFFFFFF,
@@ -2485,4 +2489,6 @@ class TimelineEngine {
     recordHistory()
     _timeline.value = _timeline.value.copy(canvasBackgroundColor = color)
   }
+
+  fun seekTo(posMs: Long) = setPosition(posMs)
 }
