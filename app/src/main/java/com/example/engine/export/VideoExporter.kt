@@ -7,15 +7,10 @@ import android.media.*
 import android.net.Uri
 import android.util.Log
 import android.view.Surface
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
-import androidx.media3.transformer.*
 import com.example.domain.model.*
-import com.example.engine.composition.VideoCompositionEngine
 import com.example.engine.composition.gpu.EglCore
 import com.example.engine.composition.gpu.GpuCompositionRenderer
 import com.example.engine.composition.gpu.WindowSurface
-import com.example.engine.media.MediaRelinkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 data class ExportConfig(
     val resolution: Resolution = Resolution.RES_1080P,
@@ -77,7 +73,7 @@ class MuxerCoordinator(
         if (videoTrackIndex < 0) {
             try {
                 videoTrackIndex = mediaMuxer.addTrack(format)
-                Log.d(tag, "Added video track index: $videoTrackIndex")
+                Log.d(tag, "Added video track with index $videoTrackIndex")
                 checkStart()
             } catch (e: Exception) {
                 Log.e(tag, "Failed to add video track", e)
@@ -90,24 +86,10 @@ class MuxerCoordinator(
         if (audioTrackIndex < 0) {
             try {
                 audioTrackIndex = mediaMuxer.addTrack(format)
-                Log.d(tag, "Added audio track index: $audioTrackIndex")
+                Log.d(tag, "Added audio track with index $audioTrackIndex")
                 checkStart()
             } catch (e: Exception) {
                 Log.e(tag, "Failed to add audio track", e)
-            }
-        }
-    }
-
-    @Synchronized
-    fun forceStartWithoutAudio() {
-        if (!isStarted && videoTrackIndex >= 0) {
-            Log.w(tag, "Force starting Muxer without audio track")
-            try {
-                mediaMuxer.start()
-                isStarted = true
-                flushPendingQueue()
-            } catch (e: Exception) {
-                Log.e(tag, "Force start muxer error", e)
             }
         }
     }
@@ -140,7 +122,7 @@ class MuxerCoordinator(
                 try {
                     mediaMuxer.writeSampleData(track, buf, info)
                 } catch (e: Exception) {
-                    Log.w(tag, "Muxer write dropped frame: ${e.message}")
+                    Log.w(tag, "Dropped frame on muxer flush: ${e.message}")
                 }
             }
         }
@@ -176,10 +158,6 @@ class MuxerCoordinator(
             buffer.position(info.offset)
             buffer.get(bytes)
             pendingQueue.add(QueuedPacket(false, bytes, info.presentationTimeUs, info.flags))
-
-            if (pendingQueue.size > 90 && videoTrackIndex >= 0) {
-                forceStartWithoutAudio()
-            }
         }
     }
 
@@ -219,6 +197,24 @@ class VideoExporter(private val context: Context) {
         isCancelled = true
     }
 
+    fun release() {
+        isCancelled = true
+        audioProcessor.clearCache()
+    }
+
+    fun calculateEstimatedSizeBytes(durationMs: Long, config: ExportConfig): Long {
+        val durationSec = (durationMs / 1000f).coerceAtLeast(1f)
+        val baseBitrate = when (config.resolution) {
+            Resolution.RES_480P -> 2_000_000L
+            Resolution.RES_720P -> 4_500_000L
+            Resolution.RES_1080P -> 8_500_000L
+            Resolution.RES_2K -> 14_000_000L
+            Resolution.RES_4K -> 25_000_000L
+        }
+        val adjustedBitrate = (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f)).toLong()
+        return (adjustedBitrate * durationSec / 8).toLong()
+    }
+
     private fun getDimensionsForResolution(resolution: Resolution, aspectRatio: AspectRatio): Pair<Int, Int> {
         val baseH = when (resolution) {
             Resolution.RES_480P -> 480
@@ -235,7 +231,6 @@ class VideoExporter(private val context: Context) {
         }
         var width = (baseH * ratio).toInt()
         var height = baseH
-        // 16-pixel multiple alignment for hardware encoders
         width = (width / 16) * 16
         height = (height / 16) * 16
         return Pair(width.coerceAtLeast(320), height.coerceAtLeast(320))
@@ -259,16 +254,23 @@ class VideoExporter(private val context: Context) {
 
         var mediaMuxer: MediaMuxer? = null
         var videoEncoder: MediaCodec? = null
+        var audioEncoder: MediaCodec? = null
         var eglCore: EglCore? = null
         var windowSurface: WindowSurface? = null
         var gpuRenderer: GpuCompositionRenderer? = null
         var encoderInputSurface: Surface? = null
 
         try {
-            _exportState.value = ExportState.Rendering(0.05f, 0, totalFrames, "Configuring hardware encoders...")
+            _exportState.value = ExportState.Rendering(0.02f, 0, totalFrames, "Preparing audio tracks...")
+
+            val hasAudio = audioProcessor.hasActiveAudio(timeline)
+            var masterPcm = ShortArray(0)
+            if (hasAudio) {
+                masterPcm = audioProcessor.mixTimelineAudio(timeline, totalDurationMs) { isCancelled }
+            }
 
             mediaMuxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val muxerCoordinator = MuxerCoordinator(mediaMuxer, false)
+            val muxerCoordinator = MuxerCoordinator(mediaMuxer, hasAudio && masterPcm.isNotEmpty())
 
             val videoMime = MediaFormat.MIMETYPE_VIDEO_AVC
             val bitrate = (config.customBitrateKbps * 1000).coerceIn(1_500_000, 25_000_000)
@@ -294,12 +296,26 @@ class VideoExporter(private val context: Context) {
 
             videoEncoder.start()
 
+            if (hasAudio && masterPcm.isNotEmpty()) {
+                val audioMime = MediaFormat.MIMETYPE_AUDIO_AAC
+                val audioFormat = MediaFormat.createAudioFormat(audioMime, audioProcessor.sampleRate, audioProcessor.channelCount).apply {
+                    setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                    setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
+                    setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+                }
+                audioEncoder = MediaCodec.createEncoderByType(audioMime)
+                audioEncoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                audioEncoder.start()
+
+                encodePcmAudio(audioEncoder, muxerCoordinator, masterPcm, audioProcessor.sampleRate, audioProcessor.channelCount)
+            }
+
             val bufferInfo = MediaCodec.BufferInfo()
             val frameIntervalUs = 1_000_000L / fps
 
             for (frame in 0 until totalFrames) {
                 if (isCancelled) {
-                    cleanUp(videoEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
+                    cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
                     _exportState.value = ExportState.Idle
                     return@withContext null
                 }
@@ -310,41 +326,84 @@ class VideoExporter(private val context: Context) {
                 windowSurface.setPresentationTime(currentPtsUs * 1000L)
                 windowSurface.swapBuffers()
 
-                drainEncoder(videoEncoder, muxerCoordinator, bufferInfo, false)
+                drainEncoder(videoEncoder, muxerCoordinator, bufferInfo, false, isAudio = false)
 
                 val progress = (frame.toFloat() / totalFrames.toFloat()).coerceIn(0.05f, 0.95f)
                 _exportState.value = ExportState.Rendering(progress, frame, totalFrames, "Rendering frame $frame of $totalFrames")
             }
 
-            // Flush remaining frames
             videoEncoder.signalEndOfInputStream()
-            drainEncoder(videoEncoder, muxerCoordinator, bufferInfo, true)
+            drainEncoder(videoEncoder, muxerCoordinator, bufferInfo, true, isAudio = false)
 
-            cleanUp(videoEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, null)
+            cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, null)
 
             if (outputFile.exists() && outputFile.length() > 1024L) {
                 _exportState.value = ExportState.Success(outputFile, totalDurationMs, outputFile.length())
                 return@withContext outputFile
             } else {
-                _exportState.value = ExportState.Error("Output file is corrupted or empty.")
+                _exportState.value = ExportState.Error("Output file empty or failed.")
                 return@withContext null
             }
 
         } catch (e: Exception) {
             Log.e(tag, "Export failed: ${e.message}", e)
-            cleanUp(videoEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
-            _exportState.value = ExportState.Error(e.message ?: "Unknown export failure")
+            cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
+            _exportState.value = ExportState.Error(e.message ?: "Export failure")
             return@withContext null
         }
+    }
+
+    private fun encodePcmAudio(
+        audioEncoder: MediaCodec,
+        muxerCoordinator: MuxerCoordinator,
+        pcmData: ShortArray,
+        sampleRate: Int,
+        channelCount: Int
+    ) {
+        val byteBuffer = ByteBuffer.allocate(pcmData.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        val shortBuffer = byteBuffer.asShortBuffer()
+        shortBuffer.put(pcmData)
+        val audioBytes = byteBuffer.array()
+
+        var inputOffset = 0
+        val bufferInfo = MediaCodec.BufferInfo()
+        var ptsUs = 0L
+        var inputDone = false
+
+        while (!inputDone) {
+            val inIndex = audioEncoder.dequeueInputBuffer(5000L)
+            if (inIndex >= 0) {
+                val inputBuf = audioEncoder.getInputBuffer(inIndex)
+                if (inputBuf != null) {
+                    inputBuf.clear()
+                    val remaining = audioBytes.size - inputOffset
+                    val chunkSize = minOf(remaining, inputBuf.remaining())
+                    if (chunkSize > 0) {
+                        inputBuf.put(audioBytes, inputOffset, chunkSize)
+                        audioEncoder.queueInputBuffer(inIndex, 0, chunkSize, ptsUs, 0)
+                        inputOffset += chunkSize
+                        val samplesFed = chunkSize / (2 * channelCount)
+                        ptsUs += ((samplesFed.toDouble() / sampleRate) * 1_000_000L).toLong()
+                    } else {
+                        audioEncoder.queueInputBuffer(inIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        inputDone = true
+                    }
+                }
+            }
+            drainEncoder(audioEncoder, muxerCoordinator, bufferInfo, false, isAudio = true)
+        }
+
+        drainEncoder(audioEncoder, muxerCoordinator, bufferInfo, true, isAudio = true)
     }
 
     private fun drainEncoder(
         encoder: MediaCodec,
         muxerCoordinator: MuxerCoordinator,
         bufferInfo: MediaCodec.BufferInfo,
-        endOfStream: Boolean
+        endOfStream: Boolean,
+        isAudio: Boolean
     ) {
-        val timeoutUs = 10000L
+        val timeoutUs = 5000L
         while (true) {
             val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
             when {
@@ -352,12 +411,20 @@ class VideoExporter(private val context: Context) {
                     if (!endOfStream) break
                 }
                 outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    muxerCoordinator.setVideoFormat(encoder.outputFormat)
+                    if (isAudio) {
+                        muxerCoordinator.setAudioFormat(encoder.outputFormat)
+                    } else {
+                        muxerCoordinator.setVideoFormat(encoder.outputFormat)
+                    }
                 }
                 outputIndex >= 0 -> {
                     val encodedData = encoder.getOutputBuffer(outputIndex)
                     if (encodedData != null && bufferInfo.size > 0) {
-                        muxerCoordinator.writeVideoSample(encodedData, bufferInfo)
+                        if (isAudio) {
+                            muxerCoordinator.writeAudioSample(encodedData, bufferInfo)
+                        } else {
+                            muxerCoordinator.writeVideoSample(encodedData, bufferInfo)
+                        }
                     }
                     encoder.releaseOutputBuffer(outputIndex, false)
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -370,6 +437,7 @@ class VideoExporter(private val context: Context) {
 
     private fun cleanUp(
         videoEncoder: MediaCodec?,
+        audioEncoder: MediaCodec?,
         surface: Surface?,
         windowSurface: WindowSurface?,
         eglCore: EglCore?,
@@ -379,6 +447,8 @@ class VideoExporter(private val context: Context) {
     ) {
         try { videoEncoder?.stop() } catch (ignored: Exception) {}
         try { videoEncoder?.release() } catch (ignored: Exception) {}
+        try { audioEncoder?.stop() } catch (ignored: Exception) {}
+        try { audioEncoder?.release() } catch (ignored: Exception) {}
         try { surface?.release() } catch (ignored: Exception) {}
         try { windowSurface?.release() } catch (ignored: Exception) {}
         try { gpuRenderer?.release() } catch (ignored: Exception) {}
