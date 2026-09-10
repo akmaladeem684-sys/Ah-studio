@@ -322,4 +322,78 @@ class ExportSystemTest {
     }
     assertFalse("Fake or corrupt file should not be accepted as valid video", hasValidVideo)
   }
+
+  @Test
+  fun `test 13 - Custom bitrate configuration accurately influences estimated size`() {
+    val durationMs = 10_000L // 10 seconds
+    val lowBitrateConfig = ExportConfig(
+      resolution = Resolution.RES_1080P,
+      frameRate = FrameRate.FPS_30,
+      quality = ExportQuality.CUSTOM,
+      customBitrateKbps = 2_000 // 2 Mbps
+    )
+    val highBitrateConfig = ExportConfig(
+      resolution = Resolution.RES_1080P,
+      frameRate = FrameRate.FPS_30,
+      quality = ExportQuality.CUSTOM,
+      customBitrateKbps = 20_000 // 20 Mbps
+    )
+
+    val lowSizeBytes = exporter.calculateEstimatedSizeBytes(durationMs, lowBitrateConfig)
+    val highSizeBytes = exporter.calculateEstimatedSizeBytes(durationMs, highBitrateConfig)
+
+    assertTrue("High bitrate must produce significantly larger estimate than low bitrate", highSizeBytes > lowSizeBytes)
+    // 20 Mbps / 2 Mbps is a 10x ratio
+    val ratio = highSizeBytes.toDouble() / lowSizeBytes.toDouble()
+    assertEquals(10.0, ratio, 0.5)
+  }
+
+  @Test
+  fun `test 14 - Export dimensions helper yields valid even dimensions for portrait and landscape`() {
+    val landscapeDims = com.example.ui.components.export.calculateExportDimensions(
+      Resolution.RES_1080P,
+      AspectRatio.RATIO_16_9
+    )
+    assertEquals(1920, landscapeDims.first)
+    assertEquals(1080, landscapeDims.second)
+    assertEquals(0, landscapeDims.first % 2)
+    assertEquals(0, landscapeDims.second % 2)
+
+    val portraitDims = com.example.ui.components.export.calculateExportDimensions(
+      Resolution.RES_1080P,
+      AspectRatio.RATIO_9_16
+    )
+    assertEquals(1080, portraitDims.first)
+    assertEquals(1920, portraitDims.second)
+    assertEquals(0, portraitDims.first % 2)
+    assertEquals(0, portraitDims.second % 2)
+
+    val squareDims = com.example.ui.components.export.calculateExportDimensions(
+      Resolution.RES_720P,
+      AspectRatio.RATIO_1_1
+    )
+    assertEquals(1280, squareDims.first)
+    assertEquals(1280, squareDims.second)
+  }
+
+  @Test
+  fun `test 15 - Frame rate variation alters encoding bitrate proportionally`() {
+    val config30Fps = ExportConfig(
+      resolution = Resolution.RES_1080P,
+      frameRate = FrameRate.FPS_30,
+      quality = ExportQuality.HIGH
+    )
+    val config60Fps = ExportConfig(
+      resolution = Resolution.RES_1080P,
+      frameRate = FrameRate.FPS_60,
+      quality = ExportQuality.HIGH
+    )
+
+    val size30 = exporter.calculateEstimatedSizeBytes(5000L, config30Fps)
+    val size60 = exporter.calculateEstimatedSizeBytes(5000L, config60Fps)
+
+    assertTrue("60 FPS must yield higher bitrate than 30 FPS", size60 > size30)
+    val fpsRatio = size60.toDouble() / size30.toDouble()
+    assertEquals(2.0, fpsRatio, 0.1)
+  }
 }

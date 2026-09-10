@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +35,7 @@ import com.example.engine.export.ExportState
 import com.example.ui.AppScreen
 import com.example.ui.StudioViewModel
 import com.example.ui.components.PrimaryPillButton
+import com.example.ui.components.export.ExportConfigurationDialog
 import com.example.ui.components.formatDurationShort
 import com.example.ui.theme.*
 
@@ -48,16 +50,21 @@ fun ExportScreen(
   val timeline by viewModel.timelineEngine.timeline.collectAsState()
   val defaultRes by viewModel.activeResolution.collectAsState()
   val defaultFps by viewModel.activeFps.collectAsState()
+  val projectName by viewModel.activeProjectName.collectAsState()
+  val aspectRatio by viewModel.activeAspectRatio.collectAsState()
 
   var selectedResolution by remember { mutableStateOf(defaultRes) }
   var selectedFps by remember { mutableStateOf(defaultFps) }
   var selectedQuality by remember { mutableStateOf(ExportQuality.HIGH) }
+  var customBitrateKbps by remember { mutableIntStateOf(12000) }
+  var showConfigDialog by remember { mutableStateOf(false) }
 
-  val config = remember(selectedResolution, selectedFps, selectedQuality) {
+  val config = remember(selectedResolution, selectedFps, selectedQuality, customBitrateKbps) {
     ExportConfig(
       resolution = selectedResolution,
       frameRate = selectedFps,
-      quality = selectedQuality
+      quality = selectedQuality,
+      customBitrateKbps = customBitrateKbps
     )
   }
 
@@ -81,6 +88,14 @@ fun ExportScreen(
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
           }
         },
+        actions = {
+          IconButton(
+            onClick = { showConfigDialog = true },
+            modifier = Modifier.testTag("open_export_dialog_btn")
+          ) {
+            Icon(Icons.Default.Tune, contentDescription = "Configure Export", tint = CyanAccent)
+          }
+        },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = StudioDarkBg)
       )
     }
@@ -101,6 +116,42 @@ fun ExportScreen(
             border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, StudioBorder.copy(alpha = 0.4f))))
           ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+              // Engine banner with Dialog shortcut
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = SkyBlueContainer
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Icon(Icons.Default.Speed, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                      text = "Media3 Transformer",
+                      style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = CyanAccentDark
+                      )
+                    )
+                  }
+                }
+
+                TextButton(
+                  onClick = { showConfigDialog = true },
+                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                  Icon(Icons.Default.VideoSettings, contentDescription = null, modifier = Modifier.size(16.dp), tint = CyanAccent)
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Advanced Dialog", style = MaterialTheme.typography.labelMedium.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
+                }
+              }
+
               // Resolution
               Column {
                 Text("Resolution", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
@@ -147,9 +198,47 @@ fun ExportScreen(
                     )
                   }
                 }
+
+                // Custom Bitrate Controls when Custom Quality selected
+                if (selectedQuality == ExportQuality.CUSTOM) {
+                  Spacer(modifier = Modifier.height(10.dp))
+                  Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = StudioSurfaceVariant,
+                    border = BorderStroke(1.dp, StudioBorder)
+                  ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                      ) {
+                        Text(
+                          text = "Custom Bitrate",
+                          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                        )
+                        Text(
+                          text = "${customBitrateKbps / 1000} Mbps (${customBitrateKbps} Kbps)",
+                          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = CyanAccentDark)
+                        )
+                      }
+                      Slider(
+                        value = customBitrateKbps.toFloat(),
+                        onValueChange = { customBitrateKbps = it.toInt() },
+                        valueRange = 1000f..50000f,
+                        steps = 97,
+                        colors = SliderDefaults.colors(
+                          thumbColor = CyanAccent,
+                          activeTrackColor = CyanAccent,
+                          inactiveTrackColor = StudioBorder
+                        )
+                      )
+                    }
+                  }
+                }
               }
 
-              Divider(color = StudioBorder)
+              HorizontalDivider(color = StudioBorder)
 
               // Summary
               Row(
@@ -318,5 +407,26 @@ fun ExportScreen(
         }
       }
     }
+  }
+
+  if (showConfigDialog) {
+    ExportConfigurationDialog(
+      projectName = projectName,
+      totalDurationMs = timeline.totalDurationMs,
+      aspectRatio = aspectRatio,
+      initialResolution = selectedResolution,
+      initialFps = selectedFps,
+      initialQuality = selectedQuality,
+      initialBitrateKbps = customBitrateKbps,
+      onDismiss = { showConfigDialog = false },
+      onConfirmExport = { newConfig ->
+        showConfigDialog = false
+        selectedResolution = newConfig.resolution
+        selectedFps = newConfig.frameRate
+        selectedQuality = newConfig.quality
+        customBitrateKbps = newConfig.customBitrateKbps
+        viewModel.startExport(newConfig)
+      }
+    )
   }
 }

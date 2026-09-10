@@ -154,5 +154,95 @@ class ExampleRobolectricTest {
     // Verify GPU renderer lifecycle release
     engine.releaseGpu()
   }
+
+  @Test
+  fun `timeline engine reorders video clips and recalculates contiguous timing`() {
+    val engine = TimelineEngine()
+
+    engine.addVideoClip("content://media/clip_a", "Clip A", isVideo = true, durationMs = 3000L)
+    engine.addVideoClip("content://media/clip_b", "Clip B", isVideo = true, durationMs = 4000L)
+    engine.addVideoClip("content://media/clip_c", "Clip C", isVideo = true, durationMs = 5000L)
+
+    val initialClips = engine.timeline.value.videoClips
+    assertEquals(3, initialClips.size)
+    assertEquals("Clip A", initialClips[0].name)
+    assertEquals(0L, initialClips[0].timelineStartMs)
+    assertEquals("Clip B", initialClips[1].name)
+    assertEquals(3000L, initialClips[1].timelineStartMs)
+    assertEquals("Clip C", initialClips[2].name)
+    assertEquals(7000L, initialClips[2].timelineStartMs)
+    assertEquals(12000L, engine.timeline.value.totalDurationMs)
+
+    // Reorder: Move Clip C (index 2) to the beginning (index 0)
+    val success = engine.reorderVideoClips(fromIndex = 2, toIndex = 0)
+    assertTrue(success)
+
+    val reorderedClips = engine.timeline.value.videoClips
+    assertEquals(3, reorderedClips.size)
+    assertEquals("Clip C", reorderedClips[0].name)
+    assertEquals(0L, reorderedClips[0].timelineStartMs)
+    assertEquals(5000L, reorderedClips[0].durationMs)
+
+    assertEquals("Clip A", reorderedClips[1].name)
+    assertEquals(5000L, reorderedClips[1].timelineStartMs)
+    assertEquals(3000L, reorderedClips[1].durationMs)
+
+    assertEquals("Clip B", reorderedClips[2].name)
+    assertEquals(8000L, reorderedClips[2].timelineStartMs)
+    assertEquals(4000L, reorderedClips[2].durationMs)
+
+    assertEquals(12000L, engine.timeline.value.totalDurationMs)
+  }
+
+  @Test
+  fun `timeline engine trims video clip source in and out points and recalculates contiguous timing`() {
+    val engine = TimelineEngine()
+
+    engine.addVideoClip("content://media/clip_1", "Clip 1", isVideo = true, durationMs = 5000L)
+    engine.addVideoClip("content://media/clip_2", "Clip 2", isVideo = true, durationMs = 5000L)
+
+    val clip1Id = engine.timeline.value.videoClips[0].id
+    val clip2Id = engine.timeline.value.videoClips[1].id
+
+    // Trim Clip 1: In-point at 1000ms, Out-point at 3500ms (duration becomes 2500ms)
+    val trimSuccess = engine.trimClipSourceRange(
+      clipId = clip1Id,
+      newSourceStartMs = 1000L,
+      newSourceEndMs = 3500L,
+      rippleContiguous = true
+    )
+    assertTrue(trimSuccess)
+
+    val updatedClips = engine.timeline.value.videoClips
+    val trimmedClip1 = updatedClips[0]
+    val rippledClip2 = updatedClips[1]
+
+    assertEquals(1000L, trimmedClip1.sourceStartMs)
+    assertEquals(3500L, trimmedClip1.sourceEndMs)
+    assertEquals(2500L, trimmedClip1.durationMs)
+    assertEquals(0L, trimmedClip1.timelineStartMs)
+    assertEquals(5000L, trimmedClip1.sourceTotalDurationMs)
+
+    // Clip 2 should be contiguously shifted to start at 2500L
+    assertEquals(2500L, rippledClip2.timelineStartMs)
+    assertEquals(5000L, rippledClip2.durationMs)
+    assertEquals(7500L, engine.timeline.value.totalDurationMs)
+
+    // Verify source time mapping
+    assertEquals(1000L, trimmedClip1.timelineToSourceMs(0L))
+    assertEquals(2000L, trimmedClip1.timelineToSourceMs(1000L))
+    assertEquals(3500L, trimmedClip1.timelineToSourceMs(2500L))
+
+    // Reset trim on Clip 1 restores original 5000L duration
+    val resetSuccess = engine.resetClipTrim(clip1Id)
+    assertTrue(resetSuccess)
+
+    val resetClips = engine.timeline.value.videoClips
+    assertEquals(0L, resetClips[0].sourceStartMs)
+    assertEquals(5000L, resetClips[0].sourceEndMs)
+    assertEquals(5000L, resetClips[0].durationMs)
+    assertEquals(5000L, resetClips[1].timelineStartMs)
+    assertEquals(10000L, engine.timeline.value.totalDurationMs)
+  }
 }
 

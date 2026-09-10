@@ -70,6 +70,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.zIndex
 import com.example.ui.StudioViewModel
 import com.example.ui.components.KeyframeAnimationPanel
+import com.example.ui.components.trim.VideoTrimmingToolPanel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.formatDurationShort
 import com.example.ui.components.timeline.*
@@ -115,6 +116,7 @@ fun EditorScreen(
   var showRenameDialog by remember { mutableStateOf(false) }
   var showSpeedDialog by remember { mutableStateOf(false) }
   var showProjectSettingsDialog by remember { mutableStateOf(false) }
+  var showExportConfigDialog by remember { mutableStateOf(false) }
   var showRelinkMediaDialog by remember { mutableStateOf(false) }
   var isFullscreenPreview by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
@@ -157,7 +159,7 @@ fun EditorScreen(
           },
           onExportClick = {
             viewModel.saveCurrentProject()
-            viewModel.navigateTo(AppScreen.EXPORT)
+            showExportConfigDialog = true
           }
         )
       },
@@ -179,6 +181,10 @@ fun EditorScreen(
               onDismiss = { viewModel.setActiveToolbarTab(null) }
             )
             EditorToolbarTab.EDIT -> EditToolPanel(viewModel)
+            EditorToolbarTab.TRIM -> VideoTrimmingToolPanel(
+              viewModel = viewModel,
+              onDismiss = { viewModel.setActiveToolbarTab(null) }
+            )
             EditorToolbarTab.ADJUST -> AdjustToolPanel(viewModel)
             EditorToolbarTab.SPEED -> SpeedToolPanel(viewModel)
             EditorToolbarTab.FILTERS -> FiltersToolPanel(viewModel)
@@ -296,33 +302,121 @@ fun EditorScreen(
         }
       }
 
+      var isMultiTrackTimelineView by remember { mutableStateOf(false) }
+      var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
+
+      LaunchedEffect(timeline.audioClips.isEmpty(), timeline.videoClips.isNotEmpty()) {
+        if (timeline.audioClips.isEmpty() && timeline.videoClips.isNotEmpty()) {
+          viewModel.timelineEngine.ensureAudioTrackExists()
+        }
+      }
+
       // 2. TIMELINE WITH TIMESTAMPS: 40-50dp (45dp)
       TimelineTimestampsRow(
         currentPosMs = currentPosMs,
-        totalDurationMs = timeline.totalDurationMs
+        totalDurationMs = timeline.totalDurationMs,
+        isMultiTrackView = isMultiTrackTimelineView,
+        onToggleMultiTrackView = { isMultiTrackTimelineView = !isMultiTrackTimelineView }
       )
 
-      // 3. FILM STRIP THUMBNAILS: 80-100dp (90dp)
-      FilmstripThumbnailsRow(
-        timeline = timeline,
-        currentPosMs = currentPosMs,
-        onSeek = { viewModel.timelineEngine.setPosition(it) },
-        onScrollLeft = {
-          val newPos = (currentPosMs - 1500L).coerceAtLeast(0L)
-          viewModel.timelineEngine.setPosition(newPos)
-        },
-        onAddMedia = {
-          viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA)
-        }
-      )
+      if (isMultiTrackTimelineView) {
+        // STUDIO MULTI-TRACK TIMELINE: Full multi-track video & audio with reordering & volume envelopes
+        MultiTrackTimeline(
+          timeline = timeline,
+          currentPosMs = currentPosMs,
+          zoom = multiTrackZoom,
+          selectedElement = selectedElement,
+          selectedClipIds = emptySet(),
+          isMultiSelectMode = false,
+          snapIndicatorMs = null,
+          onSeek = {
+            viewModel.timelineEngine.setPosition(it)
+            viewModel.playbackEngine.seekTo(it)
+          },
+          onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+          onToggleClipSelection = { /* selection */ },
+          onZoomChange = { multiTrackZoom = it },
+          onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
+          onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
+          onSplitClip = {
+            val clipId = when (val el = selectedElement) {
+              is SelectedTrackElement.Video -> el.clipId
+              is SelectedTrackElement.Overlay -> el.clipId
+              is SelectedTrackElement.Audio -> el.clipId
+              else -> null
+            }
+            if (clipId != null) {
+              viewModel.timelineEngine.splitClipAtPlayhead(clipId)
+            }
+          },
+          onTrimLeftToPlayhead = {
+            val clipId = when (val el = selectedElement) {
+              is SelectedTrackElement.Video -> el.clipId
+              is SelectedTrackElement.Overlay -> el.clipId
+              else -> null
+            }
+            if (clipId != null) {
+              viewModel.setClipInPointAtPlayhead(clipId)
+            }
+          },
+          onTrimRightToPlayhead = {
+            val clipId = when (val el = selectedElement) {
+              is SelectedTrackElement.Video -> el.clipId
+              is SelectedTrackElement.Overlay -> el.clipId
+              else -> null
+            }
+            if (clipId != null) {
+              viewModel.setClipOutPointAtPlayhead(clipId)
+            }
+          },
+          onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
+          onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
+          onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
+          onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
+          onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
+          onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
+          onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
+          onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
+          onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
+          onSelectKeyframe = { viewModel.timelineEngine.selectKeyframe(it) },
+          onMoveKeyframe = { kfId, newTime -> viewModel.timelineEngine.moveKeyframe(kfId, newTime) },
+          onAddAudioKeyframe = { clipId, relTime, vol ->
+            viewModel.timelineEngine.addAudioVolumeKeyframe(clipId, relTime, vol)
+          },
+          onUpdateAudioKeyframe = { clipId, kfId, relTime, vol ->
+            viewModel.timelineEngine.updateAudioVolumeKeyframe(clipId, kfId, relTime, vol)
+          },
+          onDeleteAudioKeyframe = { clipId, kfId ->
+            viewModel.timelineEngine.deleteAudioVolumeKeyframe(clipId, kfId)
+          },
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp)
+        )
+      } else {
+        // 3. FILM STRIP THUMBNAILS: 80-100dp (90dp)
+        FilmstripThumbnailsRow(
+          timeline = timeline,
+          currentPosMs = currentPosMs,
+          onSeek = { viewModel.timelineEngine.setPosition(it) },
+          onScrollLeft = {
+            val newPos = (currentPosMs - 1500L).coerceAtLeast(0L)
+            viewModel.timelineEngine.setPosition(newPos)
+          },
+          onAddMedia = {
+            viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA)
+          }
+        )
 
-      // 4. AUDIO WAVEFORM VISUALIZATION: 70-80dp (75dp)
-      AudioWaveformView(
-        timeline = timeline,
-        currentPosMs = currentPosMs,
-        isPlaying = isPlaying,
-        onSeek = { viewModel.timelineEngine.setPosition(it) }
-      )
+        // 4. AUDIO WAVEFORM & VOLUME ENVELOPE GRAPH: 80-120dp
+        AudioWaveformView(
+          timeline = timeline,
+          currentPosMs = currentPosMs,
+          isPlaying = isPlaying,
+          onSeek = { viewModel.timelineEngine.setPosition(it) },
+          viewModel = viewModel
+        )
+      }
 
       // HIDDEN SIDEBAR (Old layers panel - keep code but hide: 0% width, takes no space)
       Box(
@@ -385,6 +479,24 @@ fun EditorScreen(
       onDismiss = { showProjectSettingsDialog = false },
       onSaveSettings = { aspect, res, fps, sampleRate, canvasColor ->
         viewModel.updateProjectSettings(aspect, res, fps, sampleRate, canvasColor)
+      }
+    )
+  }
+
+  // Export Configuration Dialog (Media3 Transformer)
+  if (showExportConfigDialog) {
+    com.example.ui.components.export.ExportConfigurationDialog(
+      projectName = projectName,
+      totalDurationMs = timeline.totalDurationMs,
+      aspectRatio = aspectRatio,
+      initialResolution = activeResolution,
+      initialFps = activeFps,
+      onDismiss = { showExportConfigDialog = false },
+      onConfirmExport = { config ->
+        showExportConfigDialog = false
+        viewModel.saveCurrentProject()
+        viewModel.startExport(config)
+        viewModel.navigateTo(AppScreen.EXPORT)
       }
     )
   }
@@ -1263,7 +1375,9 @@ private fun TimelineControlsBar(
 @Composable
 private fun TimelineTimestampsRow(
   currentPosMs: Long,
-  totalDurationMs: Long
+  totalDurationMs: Long,
+  isMultiTrackView: Boolean = false,
+  onToggleMultiTrackView: (() -> Unit)? = null
 ) {
   val total = totalDurationMs.coerceAtLeast(1000L)
   val safePos = currentPosMs.coerceIn(0L, total)
@@ -1273,7 +1387,7 @@ private fun TimelineTimestampsRow(
       .fillMaxWidth()
       .height(45.dp)
       .background(Color.Black)
-      .padding(horizontal = 16.dp, vertical = 8.dp)
+      .padding(horizontal = 14.dp, vertical = 6.dp)
       .testTag("timeline_container"),
     verticalAlignment = Alignment.CenterVertically
   ) {
@@ -1287,8 +1401,8 @@ private fun TimelineTimestampsRow(
 
     Text(
       text = "•",
-      color = Color.White.copy(alpha = 0.6f),
-      modifier = Modifier.padding(horizontal = 8.dp)
+      color = Color.White.copy(alpha = 0.5f),
+      modifier = Modifier.padding(horizontal = 6.dp)
     )
 
     // Timestamps around current time
@@ -1299,16 +1413,48 @@ private fun TimelineTimestampsRow(
       (safePos + step).coerceAtMost(total)
     )
 
-    times.forEachIndexed { index, timeMs ->
-      Box(
-        modifier = Modifier.weight(1f),
-        contentAlignment = Alignment.Center
-      ) {
+    Row(
+      modifier = Modifier.weight(1f),
+      horizontalArrangement = Arrangement.SpaceEvenly,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      times.forEachIndexed { index, timeMs ->
         Text(
           text = formatDurationShort(timeMs),
-          color = if (index == 1) CyanAccent else Color.White.copy(alpha = 0.7f),
+          color = if (index == 1) CyanAccent else Color.White.copy(alpha = 0.6f),
           fontSize = 10.sp,
           fontWeight = if (index == 1) FontWeight.Bold else FontWeight.Normal
+        )
+      }
+    }
+
+    // Toggle Multi-Track vs Compact View Pill
+    Surface(
+      shape = RoundedCornerShape(12.dp),
+      color = if (isMultiTrackView) StudioSurfaceVariant else StudioDarkBg,
+      border = BorderStroke(1.dp, if (isMultiTrackView) CyanAccent else StudioBorder),
+      modifier = Modifier
+        .clickable { onToggleMultiTrackView?.invoke() }
+        .testTag("timeline_mode_toggle")
+    ) {
+      Row(
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Icon(
+          imageVector = if (isMultiTrackView) Icons.Default.ViewAgenda else Icons.Default.Tune,
+          contentDescription = null,
+          tint = if (isMultiTrackView) CyanAccent else AudioTrackColor,
+          modifier = Modifier.size(13.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+          text = if (isMultiTrackView) "Multi-Track" else "Envelopes",
+          style = MaterialTheme.typography.labelSmall.copy(
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+          )
         )
       }
     }
@@ -1473,94 +1619,167 @@ private fun FilmstripThumbnailsRow(
   }
 }
 
-// AUDIO WAVEFORM: 70-80dp
+// AUDIO WAVEFORM & VOLUME ENVELOPE VIEW: 80-120dp
 @Composable
 private fun AudioWaveformView(
   timeline: Timeline,
   currentPosMs: Long,
   isPlaying: Boolean,
-  onSeek: (Long) -> Unit
+  onSeek: (Long) -> Unit,
+  viewModel: StudioViewModel? = null
 ) {
-  val totalDuration = timeline.totalDurationMs.coerceAtLeast(1000L)
-  val progress = (currentPosMs.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+  val audioClip = timeline.audioClips.firstOrNull()
+  var isEnvelopeMode by remember { mutableStateOf(true) }
 
-  Box(
-    modifier = Modifier
-      .fillMaxWidth()
-      .height(75.dp)
-      .background(Color.Black)
-      .pointerInput(totalDuration) {
-        detectTapGestures { offset ->
-          val ratio = (offset.x / size.width).coerceIn(0f, 1f)
-          onSeek((ratio * totalDuration).toLong())
+  if (audioClip != null) {
+    AudioVolumeEnvelopeGraph(
+      audioClip = audioClip,
+      clipDurationMs = audioClip.durationMs,
+      currentPlayheadMs = currentPosMs,
+      isEnvelopeMode = isEnvelopeMode,
+      showControlsHeader = true,
+      onToggleEnvelopeMode = { isEnvelopeMode = !isEnvelopeMode },
+      onAddKeyframe = { relTime, vol ->
+        viewModel?.timelineEngine?.addAudioVolumeKeyframe(audioClip.id, relTime, vol)
+      },
+      onUpdateKeyframe = { kfId, newTime, newVol ->
+        viewModel?.timelineEngine?.updateAudioVolumeKeyframe(audioClip.id, kfId, newTime, newVol)
+      },
+      onDeleteKeyframe = { kfId ->
+        viewModel?.timelineEngine?.deleteAudioVolumeKeyframe(audioClip.id, kfId)
+      },
+      onFadeInChanged = { newFadeIn ->
+        viewModel?.timelineEngine?.setAudioFade(audioClip.id, newFadeIn, audioClip.fadeOutMs)
+      },
+      onFadeOutChanged = { newFadeOut ->
+        viewModel?.timelineEngine?.setAudioFade(audioClip.id, audioClip.fadeInMs, newFadeOut)
+      },
+      onApplyPresetFade = { type ->
+        when (type) {
+          "fadeIn" -> viewModel?.timelineEngine?.applyAudioFadeKeyframes(audioClip.id, fadeInMs = 1200L, fadeOutMs = audioClip.fadeOutMs)
+          "fadeOut" -> viewModel?.timelineEngine?.applyAudioFadeKeyframes(audioClip.id, fadeInMs = audioClip.fadeInMs, fadeOutMs = 1200L)
+          else -> viewModel?.timelineEngine?.applyAudioFadeKeyframes(audioClip.id, 1000L, 1000L)
         }
-      }
-      .pointerInput(totalDuration) {
-        detectDragGestures { change, _ ->
-          change.consume()
-          val ratio = (change.position.x / size.width).coerceIn(0f, 1f)
-          onSeek((ratio * totalDuration).toLong())
-        }
-      }
-      .testTag("waveform_container")
-  ) {
-    Canvas(
+      },
+      onResetEnvelope = {
+        viewModel?.timelineEngine?.resetAudioVolumeEnvelope(audioClip.id)
+      },
+      onBaseVolumeChanged = { vol ->
+        viewModel?.timelineEngine?.setAudioClipBaseVolume(audioClip.id, vol)
+      },
+      onSeek = onSeek,
       modifier = Modifier
-        .fillMaxSize()
-        .testTag("waveform_view")
-    ) {
-      val canvasWidth = size.width
-      val canvasHeight = size.height
-      val barCount = 70
-      val barWidth = (canvasWidth / barCount) * 0.55f
-      val barSpacing = canvasWidth / barCount
-      val midY = canvasHeight / 2f
+        .fillMaxWidth()
+        .testTag("audio_waveform_envelope_view")
+    )
+  } else {
+    // Fallback: Waveform placeholder with button to add audio track & draw volume envelope
+    val totalDuration = timeline.totalDurationMs.coerceAtLeast(1000L)
+    val progress = (currentPosMs.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
 
-      drawLine(
-        color = Color(0xFF1E293B),
-        start = Offset(0f, midY),
-        end = Offset(canvasWidth, midY),
-        strokeWidth = 1.dp.toPx()
-      )
-
-      for (i in 0 until barCount) {
-        val barX = i * barSpacing + (barSpacing - barWidth) / 2f
-        val normX = i.toFloat() / barCount.toFloat()
-
-        val baseFreq = kotlin.math.sin(normX * 18f + 1.2f) * 0.4f +
-          kotlin.math.sin(normX * 36f) * 0.3f +
-          kotlin.math.sin(normX * 72f) * 0.2f
-        val amp = (kotlin.math.abs(baseFreq) + 0.15f).coerceIn(0.1f, 0.95f)
-        val barHeight = (canvasHeight * 0.82f) * amp
-
-        val isPlayed = (barX / canvasWidth) <= progress
-        val barColor = if (isPlayed) {
-          CyanAccent
-        } else {
-          CyanAccent.copy(alpha = 0.35f)
-        }
-
-        drawRoundRect(
-          color = barColor,
-          topLeft = Offset(barX, midY - barHeight / 2f),
-          size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-          cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx())
-        )
-      }
-    }
-
-    // Playhead line
     Box(
       modifier = Modifier
-        .fillMaxHeight()
-        .width(2.dp)
-        .align(Alignment.CenterStart)
-        .graphicsLayer {
-          translationX = progress * this.size.width
+        .fillMaxWidth()
+        .height(80.dp)
+        .background(Color.Black)
+        .pointerInput(totalDuration) {
+          detectTapGestures { offset ->
+            val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+            onSeek((ratio * totalDuration).toLong())
+          }
         }
-        .background(CyanAccent)
-        .testTag("playhead")
-    )
+        .testTag("waveform_container")
+    ) {
+      Canvas(
+        modifier = Modifier
+          .fillMaxSize()
+          .testTag("waveform_view")
+      ) {
+        val canvasWidth = size.width
+        val canvasHeight = size.height
+        val barCount = 70
+        val barWidth = (canvasWidth / barCount) * 0.55f
+        val barSpacing = canvasWidth / barCount
+        val midY = canvasHeight / 2f
+
+        drawLine(
+          color = Color(0xFF1E293B),
+          start = Offset(0f, midY),
+          end = Offset(canvasWidth, midY),
+          strokeWidth = 1.dp.toPx()
+        )
+
+        for (i in 0 until barCount) {
+          val barX = i * barSpacing + (barSpacing - barWidth) / 2f
+          val normX = i.toFloat() / barCount.toFloat()
+
+          val baseFreq = kotlin.math.sin(normX * 18f + 1.2f) * 0.4f +
+            kotlin.math.sin(normX * 36f) * 0.3f +
+            kotlin.math.sin(normX * 72f) * 0.2f
+          val amp = (kotlin.math.abs(baseFreq) + 0.15f).coerceIn(0.1f, 0.95f)
+          val barHeight = (canvasHeight * 0.75f) * amp
+
+          val isPlayed = (barX / canvasWidth) <= progress
+          val barColor = if (isPlayed) {
+            AudioTrackColor
+          } else {
+            AudioTrackColor.copy(alpha = 0.35f)
+          }
+
+          drawRoundRect(
+            color = barColor,
+            topLeft = Offset(barX, midY - barHeight / 2f),
+            size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx())
+          )
+        }
+      }
+
+      // Playhead line
+      Box(
+        modifier = Modifier
+          .fillMaxHeight()
+          .width(2.dp)
+          .align(Alignment.CenterStart)
+          .graphicsLayer {
+            translationX = progress * this.size.width
+          }
+          .background(CyanAccent)
+          .testTag("playhead")
+      )
+
+      // Overlay prompt: Add Audio Track to draw volume keyframes
+      Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF0F172A).copy(alpha = 0.88f),
+        border = BorderStroke(1.dp, AudioTrackColor.copy(alpha = 0.6f)),
+        modifier = Modifier
+          .align(Alignment.Center)
+          .clickable { viewModel?.timelineEngine?.ensureAudioTrackExists() }
+          .testTag("add_audio_track_prompt")
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            imageVector = Icons.Default.Audiotrack,
+            contentDescription = null,
+            tint = AudioTrackColor,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "Enable Audio Track (Draw Volume Keyframes)",
+            style = MaterialTheme.typography.labelSmall.copy(
+              color = Color.White,
+              fontWeight = FontWeight.Bold,
+              fontSize = 11.sp
+            )
+          )
+        }
+      }
+    }
   }
 }
 
@@ -1584,11 +1803,20 @@ private fun EditorBottomToolbar(
   ) {
     // 1. Edit ✂️
     EditorToolbarItem(
-      icon = Icons.Default.ContentCut,
+      icon = Icons.Default.Edit,
       label = "Edit",
       isSelected = activeTab == EditorToolbarTab.EDIT,
       testTag = "edit_btn",
       onClick = { onTabSelected(EditorToolbarTab.EDIT) }
+    )
+
+    // 1b. Trim ✂️
+    EditorToolbarItem(
+      icon = Icons.Default.ContentCut,
+      label = "Trim",
+      isSelected = activeTab == EditorToolbarTab.TRIM,
+      testTag = "trim_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TRIM) }
     )
 
     // 2. Audio 🎵

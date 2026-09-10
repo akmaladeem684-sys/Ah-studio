@@ -851,6 +851,48 @@ class TimelineEngine {
     }
   }
 
+  fun trimClipLeftByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {
+    val element = findTrackElementForClip(clipId) ?: return
+    val currentStart = when (element) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Text -> _timeline.value.textClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Sticker -> _timeline.value.stickerClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Effect -> _timeline.value.effectClips.find { it.id == clipId }?.timelineStartMs ?: return
+      SelectedTrackElement.None -> return
+    }
+    trimClipLeft(clipId, (currentStart + deltaMs).coerceAtLeast(0L), snap)
+  }
+
+  fun trimClipRightByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {
+    val element = findTrackElementForClip(clipId) ?: return
+    val currentDuration = when (element) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == clipId }?.durationMs ?: return
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == clipId }?.durationMs ?: return
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == clipId }?.durationMs ?: return
+      is SelectedTrackElement.Text -> _timeline.value.textClips.find { it.id == clipId }?.durationMs ?: return
+      is SelectedTrackElement.Sticker -> _timeline.value.stickerClips.find { it.id == clipId }?.durationMs ?: return
+      is SelectedTrackElement.Effect -> _timeline.value.effectClips.find { it.id == clipId }?.durationMs ?: return
+      SelectedTrackElement.None -> return
+    }
+    trimClipRight(clipId, (currentDuration + deltaMs).coerceAtLeast(100L), snap)
+  }
+
+  fun moveClipByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {
+    val element = findTrackElementForClip(clipId) ?: return
+    val currentStart = when (element) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Text -> _timeline.value.textClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Sticker -> _timeline.value.stickerClips.find { it.id == clipId }?.timelineStartMs ?: return
+      is SelectedTrackElement.Effect -> _timeline.value.effectClips.find { it.id == clipId }?.timelineStartMs ?: return
+      SelectedTrackElement.None -> return
+    }
+    moveClip(clipId, (currentStart + deltaMs).coerceAtLeast(0L), snap)
+  }
+
   fun moveClip(clipId: String, newStartMs: Long, snap: Boolean = true) {
     val element = findTrackElementForClip(clipId)
     val duration = when (element) {
@@ -1103,6 +1145,148 @@ class TimelineEngine {
   fun trimClip(clipId: String, newStartMs: Long, newDurationMs: Long) {
     trimClipLeft(clipId, newStartMs, snap = false)
     trimClipRight(clipId, newDurationMs, snap = false)
+  }
+
+  /**
+   * Trims a clip's underlying media by setting its source start and end points.
+   * Recalculates contiguous timeline positions for main video track clips.
+   */
+  fun trimClipSourceRange(
+    clipId: String,
+    newSourceStartMs: Long,
+    newSourceEndMs: Long,
+    rippleContiguous: Boolean = true
+  ): Boolean {
+    val element = findTrackElementForClip(clipId) ?: return false
+    when (element) {
+      is SelectedTrackElement.Video -> {
+        if (isTrackLocked(TrackType.MAIN_VIDEO)) return false
+        val clip = _timeline.value.videoClips.find { it.id == clipId } ?: return false
+        val maxSource = if (clip.sourceTotalDurationMs > 0L) clip.sourceTotalDurationMs else maxOf(clip.sourceEndMs, clip.durationMs)
+        val clampedStart = newSourceStartMs.coerceIn(0L, (maxSource - 100L).coerceAtLeast(0L))
+        val clampedEnd = newSourceEndMs.coerceIn(clampedStart + 100L, maxOf(maxSource, clampedStart + 100L))
+        val newDur = (((clampedEnd - clampedStart) / clip.speed).toLong()).coerceAtLeast(100L)
+        val originalTotal = if (clip.sourceTotalDurationMs > 0L) clip.sourceTotalDurationMs else maxOf(clip.sourceEndMs, clampedEnd)
+
+        recordHistory()
+        val clips = _timeline.value.videoClips.toMutableList()
+        val clipIndex = clips.indexOfFirst { it.id == clipId }
+        if (clipIndex == -1) return false
+
+        if (rippleContiguous) {
+          var curStart = 0L
+          for (i in clips.indices) {
+            val c = clips[i]
+            if (c.id == clipId) {
+              clips[i] = c.copy(
+                sourceStartMs = clampedStart,
+                sourceEndMs = clampedEnd,
+                durationMs = newDur,
+                timelineStartMs = curStart,
+                sourceTotalDurationMs = originalTotal
+              )
+            } else {
+              clips[i] = c.copy(timelineStartMs = curStart)
+            }
+            curStart += clips[i].durationMs
+          }
+        } else {
+          clips[clipIndex] = clip.copy(
+            sourceStartMs = clampedStart,
+            sourceEndMs = clampedEnd,
+            durationMs = newDur,
+            sourceTotalDurationMs = originalTotal
+          )
+        }
+        _timeline.value = _timeline.value.copy(videoClips = clips)
+        return true
+      }
+      is SelectedTrackElement.Overlay -> {
+        if (isTrackLocked(TrackType.OVERLAY)) return false
+        val clip = _timeline.value.overlayClips.find { it.id == clipId } ?: return false
+        val maxSource = if (clip.sourceTotalDurationMs > 0L) clip.sourceTotalDurationMs else maxOf(clip.sourceEndMs, clip.durationMs)
+        val clampedStart = newSourceStartMs.coerceIn(0L, (maxSource - 100L).coerceAtLeast(0L))
+        val clampedEnd = newSourceEndMs.coerceIn(clampedStart + 100L, maxOf(maxSource, clampedStart + 100L))
+        val newDur = (((clampedEnd - clampedStart) / clip.speed).toLong()).coerceAtLeast(100L)
+        val originalTotal = if (clip.sourceTotalDurationMs > 0L) clip.sourceTotalDurationMs else maxOf(clip.sourceEndMs, clampedEnd)
+
+        recordHistory()
+        val list = _timeline.value.overlayClips.map {
+          if (it.id == clipId) it.copy(
+            sourceStartMs = clampedStart,
+            sourceEndMs = clampedEnd,
+            durationMs = newDur,
+            sourceTotalDurationMs = originalTotal
+          ) else it
+        }
+        _timeline.value = _timeline.value.copy(overlayClips = list)
+        return true
+      }
+      is SelectedTrackElement.Audio -> {
+        if (isTrackLocked(TrackType.AUDIO)) return false
+        val clip = _timeline.value.audioClips.find { it.id == clipId } ?: return false
+        val maxSource = maxOf(clip.sourceEndMs, clip.durationMs)
+        val clampedStart = newSourceStartMs.coerceIn(0L, (maxSource - 100L).coerceAtLeast(0L))
+        val clampedEnd = newSourceEndMs.coerceIn(clampedStart + 100L, maxOf(maxSource, clampedStart + 100L))
+        val newDur = (((clampedEnd - clampedStart) / clip.speed).toLong()).coerceAtLeast(100L)
+
+        recordHistory()
+        val list = _timeline.value.audioClips.map {
+          if (it.id == clipId) it.copy(
+            sourceStartMs = clampedStart,
+            sourceEndMs = clampedEnd,
+            durationMs = newDur
+          ) else it
+        }
+        _timeline.value = _timeline.value.copy(audioClips = list)
+        return true
+      }
+      else -> return false
+    }
+  }
+
+  fun resetClipTrim(clipId: String): Boolean {
+    val element = findTrackElementForClip(clipId) ?: return false
+    if (element is SelectedTrackElement.Video) {
+      val clip = _timeline.value.videoClips.find { it.id == clipId } ?: return false
+      val fullDuration = if (clip.sourceTotalDurationMs > 0L) clip.sourceTotalDurationMs else maxOf(clip.sourceEndMs, clip.durationMs)
+      return trimClipSourceRange(clipId, 0L, fullDuration, rippleContiguous = true)
+    } else if (element is SelectedTrackElement.Overlay) {
+      val clip = _timeline.value.overlayClips.find { it.id == clipId } ?: return false
+      val fullDuration = if (clip.sourceTotalDurationMs > 0L) clip.sourceTotalDurationMs else maxOf(clip.sourceEndMs, clip.durationMs)
+      return trimClipSourceRange(clipId, 0L, fullDuration, rippleContiguous = false)
+    }
+    return false
+  }
+
+  fun setClipInPointAtPlayhead(clipId: String): Boolean {
+    val element = findTrackElementForClip(clipId) ?: return false
+    val currentPlayhead = _currentPositionMs.value
+    if (element is SelectedTrackElement.Video) {
+      val clip = _timeline.value.videoClips.find { it.id == clipId } ?: return false
+      val sourcePos = clip.timelineToSourceMs(currentPlayhead)
+      return trimClipSourceRange(clipId, sourcePos, clip.sourceEndMs, rippleContiguous = true)
+    } else if (element is SelectedTrackElement.Overlay) {
+      val clip = _timeline.value.overlayClips.find { it.id == clipId } ?: return false
+      val sourcePos = clip.timelineToSourceMs(currentPlayhead)
+      return trimClipSourceRange(clipId, sourcePos, clip.sourceEndMs, rippleContiguous = false)
+    }
+    return false
+  }
+
+  fun setClipOutPointAtPlayhead(clipId: String): Boolean {
+    val element = findTrackElementForClip(clipId) ?: return false
+    val currentPlayhead = _currentPositionMs.value
+    if (element is SelectedTrackElement.Video) {
+      val clip = _timeline.value.videoClips.find { it.id == clipId } ?: return false
+      val sourcePos = clip.timelineToSourceMs(currentPlayhead)
+      return trimClipSourceRange(clipId, clip.sourceStartMs, sourcePos, rippleContiguous = true)
+    } else if (element is SelectedTrackElement.Overlay) {
+      val clip = _timeline.value.overlayClips.find { it.id == clipId } ?: return false
+      val sourcePos = clip.timelineToSourceMs(currentPlayhead)
+      return trimClipSourceRange(clipId, clip.sourceStartMs, sourcePos, rippleContiguous = false)
+    }
+    return false
   }
 
   fun rippleDelete(clipIds: Set<String> = emptySet()): Boolean {
@@ -2496,4 +2680,151 @@ class TimelineEngine {
   }
 
   fun seekTo(posMs: Long) = setPosition(posMs)
+
+  // ==========================================
+  // AUDIO VOLUME ENVELOPE & KEYFRAMING HELPERS
+  // ==========================================
+
+  /**
+   * Ensures at least one audio track exists on the timeline.
+   * If none exists, creates a default background audio track matching the timeline duration.
+   */
+  fun ensureAudioTrackExists(): String {
+    val existing = _timeline.value.audioClips.firstOrNull()
+    if (existing != null) return existing.id
+
+    val totalDur = _timeline.value.totalDurationMs.coerceAtLeast(4000L)
+    val newAudioClip = com.example.domain.model.AudioClip(
+      id = "audio_${System.currentTimeMillis()}",
+      uri = "internal://lofi_chill_beat",
+      title = "Audio Track 1 (Master)",
+      timelineStartMs = 0L,
+      durationMs = totalDur,
+      volume = 1.0f,
+      fadeInMs = 600L,
+      fadeOutMs = 800L,
+      waveformData = listOf(0.3f, 0.45f, 0.7f, 0.85f, 0.6f, 0.4f, 0.75f, 0.9f, 0.65f, 0.5f, 0.7f, 0.8f, 0.4f, 0.2f)
+    )
+    recordHistory()
+    _timeline.value = _timeline.value.copy(audioClips = listOf(newAudioClip))
+    return newAudioClip.id
+  }
+
+  /**
+   * Adds a volume keyframe to the specified audio clip at [relTimeMs] with [volume] (0.0 to 1.5+).
+   */
+  fun addAudioVolumeKeyframe(clipId: String, relTimeMs: Long, volume: Float) {
+    recordHistory()
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        val clampedTime = relTimeMs.coerceIn(0L, clip.durationMs)
+        val clampedVol = volume.coerceIn(0f, 2f)
+        val filtered = clip.keyframes.filterNot { kotlin.math.abs(it.timeMs - clampedTime) < 30L }
+        val newKf = com.example.domain.model.ClipKeyframe(
+          timeMs = clampedTime,
+          volume = clampedVol
+        )
+        clip.copy(keyframes = (filtered + newKf).sortedBy { it.timeMs })
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Updates time and volume of an existing keyframe on an audio clip.
+   */
+  fun updateAudioVolumeKeyframe(clipId: String, keyframeId: String, newTimeMs: Long, newVolume: Float) {
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        val clampedTime = newTimeMs.coerceIn(0L, clip.durationMs)
+        val clampedVol = newVolume.coerceIn(0f, 2f)
+        val updated = clip.keyframes.map { kf ->
+          if (kf.id == keyframeId) kf.copy(timeMs = clampedTime, volume = clampedVol) else kf
+        }.sortedBy { it.timeMs }
+        clip.copy(keyframes = updated)
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Deletes a volume keyframe from the specified audio clip.
+   */
+  fun deleteAudioVolumeKeyframe(clipId: String, keyframeId: String) {
+    recordHistory()
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        clip.copy(keyframes = clip.keyframes.filterNot { it.id == keyframeId })
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Sets the fade in / fade out durations in milliseconds for the audio clip.
+   */
+  fun setAudioFade(clipId: String, fadeInMs: Long, fadeOutMs: Long) {
+    recordHistory()
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        clip.copy(
+          fadeInMs = fadeInMs.coerceIn(0L, clip.durationMs / 2),
+          fadeOutMs = fadeOutMs.coerceIn(0L, clip.durationMs / 2)
+        )
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Converts or generates explicit volume keyframes for fading audio in and out.
+   */
+  fun applyAudioFadeKeyframes(clipId: String, fadeInMs: Long = 1000L, fadeOutMs: Long = 1000L) {
+    recordHistory()
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        val dur = clip.durationMs
+        val fIn = fadeInMs.coerceIn(100L, (dur / 2).coerceAtLeast(100L))
+        val fOut = fadeOutMs.coerceIn(100L, (dur / 2).coerceAtLeast(100L))
+
+        // Build 4 keyframes: start (0), fade-in peak (clip.volume), fade-out start (clip.volume), end (0)
+        val kf0 = com.example.domain.model.ClipKeyframe(timeMs = 0L, volume = 0f)
+        val kf1 = com.example.domain.model.ClipKeyframe(timeMs = fIn, volume = clip.volume)
+        val kf2 = com.example.domain.model.ClipKeyframe(timeMs = (dur - fOut).coerceAtLeast(fIn + 50L), volume = clip.volume)
+        val kf3 = com.example.domain.model.ClipKeyframe(timeMs = dur, volume = 0f)
+
+        clip.copy(
+          keyframes = listOf(kf0, kf1, kf2, kf3).sortedBy { it.timeMs },
+          fadeInMs = fIn,
+          fadeOutMs = fOut
+        )
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Resets all volume keyframes and fades for the audio clip back to default flat volume.
+   */
+  fun resetAudioVolumeEnvelope(clipId: String) {
+    recordHistory()
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        clip.copy(keyframes = emptyList(), fadeInMs = 0L, fadeOutMs = 0L)
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Updates base volume level for an audio clip (0.0 to 1.5).
+   */
+  fun setAudioClipBaseVolume(clipId: String, volume: Float) {
+    val list = _timeline.value.audioClips.map { clip ->
+      if (clip.id == clipId) {
+        clip.copy(volume = volume.coerceIn(0f, 2f))
+      } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
 }

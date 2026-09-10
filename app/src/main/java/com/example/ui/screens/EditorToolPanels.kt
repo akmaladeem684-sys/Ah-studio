@@ -75,6 +75,9 @@ fun EditToolPanel(
       EditorActionTile(icon = Icons.Default.CallSplit, label = "Split", color = CyanAccent) {
         viewModel.timelineEngine.splitSelectedClipAtPlayhead()
       }
+      EditorActionTile(icon = Icons.Default.ContentCut, label = "Trim Tool", color = AmberAccent) {
+        viewModel.setActiveToolbarTab(com.example.ui.EditorToolbarTab.TRIM)
+      }
       EditorActionTile(icon = Icons.Default.Delete, label = "Delete", color = RedAccent) {
         viewModel.timelineEngine.deleteSelected()
       }

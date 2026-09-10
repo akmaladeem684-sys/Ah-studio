@@ -130,7 +130,17 @@ object KeyframeInterpolator {
   }
 
   fun interpolateVolume(clip: AudioClip, relTimeMs: Long): Float {
-    return interpolateVolume(clip.keyframes, relTimeMs, clip.volume)
+    if (clip.keyframes.isNotEmpty()) {
+      return interpolateVolume(clip.keyframes, relTimeMs, clip.volume)
+    }
+    var vol = clip.volume
+    if (clip.fadeInMs > 0L && relTimeMs < clip.fadeInMs) {
+      vol *= (relTimeMs.toFloat() / clip.fadeInMs.toFloat()).coerceIn(0f, 1f)
+    }
+    if (clip.fadeOutMs > 0L && (clip.durationMs - relTimeMs) < clip.fadeOutMs) {
+      vol *= ((clip.durationMs - relTimeMs).toFloat() / clip.fadeOutMs.toFloat()).coerceIn(0f, 1f)
+    }
+    return vol.coerceAtLeast(0f)
   }
 
   fun computeFactor(

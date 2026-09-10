@@ -45,6 +45,7 @@ fun TimelineActionToolbar(
   onReplaceMedia: () -> Unit,
   onToggleMultiSelect: () -> Unit,
   onToggleMagnetic: () -> Unit,
+  onOpenTrimTool: (() -> Unit)? = null,
   onNextPeak: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
@@ -94,6 +95,17 @@ fun TimelineActionToolbar(
         testTag = "action_trim_right",
         onClick = onTrimRight
       )
+
+      if (onOpenTrimTool != null) {
+        TimelineActionButton(
+          icon = Icons.Default.ContentCut,
+          label = "Trim Tool",
+          enabled = hasSelection,
+          accentColor = AmberAccent,
+          testTag = "action_trim_tool",
+          onClick = onOpenTrimTool
+        )
+      }
 
       if (onNextPeak != null) {
         // Audio Beat / Peak alignment jump

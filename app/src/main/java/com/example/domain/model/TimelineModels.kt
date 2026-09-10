@@ -100,8 +100,12 @@ data class VideoClip(
   val hasAudio: Boolean = true,
   val isReversed: Boolean = false,
   val freezeFrameAtMs: Long? = null,
+  val sourceTotalDurationMs: Long = 0L,
   val keyframes: List<ClipKeyframe> = emptyList()
 ) {
+  val totalMediaDurationMs: Long
+    get() = if (sourceTotalDurationMs > 0L) sourceTotalDurationMs else maxOf(sourceEndMs, durationMs)
+
   fun timelineToSourceMs(timelinePosMs: Long): Long {
     val offset = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
     val scaledOffset = (offset * speed).toLong()

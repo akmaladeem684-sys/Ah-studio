@@ -189,6 +189,18 @@ class ProjectRepository(private val database: AppDatabase) {
           sourceEndMs = 5500L,
           speed = 1.25f,
           volume = 0.8f
+        ),
+        VideoClip(
+          id = "sample_clip_3",
+          uri = "sample://cyber_neon",
+          name = "Cyberpunk Night Drive",
+          isVideo = true,
+          timelineStartMs = 10000L,
+          durationMs = 5000L,
+          sourceStartMs = 0L,
+          sourceEndMs = 5000L,
+          speed = 1.0f,
+          volume = 0.9f
         )
       ),
       audioClips = listOf(
@@ -197,7 +209,7 @@ class ProjectRepository(private val database: AppDatabase) {
           uri = "internal://lofi_chill_beat",
           title = "Chill Lofi Dreams (Original Mix)",
           timelineStartMs = 0L,
-          durationMs = 10000L,
+          durationMs = 15000L,
           volume = 0.85f,
           fadeInMs = 800L,
           fadeOutMs = 1200L,

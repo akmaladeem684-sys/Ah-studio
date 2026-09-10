@@ -16,6 +16,7 @@ import com.example.data.repository.ProjectRepository
 import com.example.domain.StudioPreferencesManager
 import com.example.domain.UserSettings
 import com.example.domain.model.*
+import com.example.engine.SelectedTrackElement
 import com.example.engine.TimelineEngine
 import com.example.engine.audio.AudioEngine
 import com.example.engine.export.ExportConfig
@@ -58,6 +59,7 @@ enum class EditorToolbarTab {
   MEDIA,
   OVERLAY,
   EDIT,
+  TRIM,
   AUDIO,
   TEXT,
   STICKERS,
@@ -439,6 +441,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
   }
 
+  fun reorderVideoClips(fromIndex: Int, toIndex: Int) {
+    val clips = timelineEngine.timeline.value.videoClips
+    if (fromIndex in clips.indices && toIndex in clips.indices && fromIndex != toIndex) {
+      val movedClip = clips[fromIndex]
+      val success = timelineEngine.reorderVideoClips(fromIndex, toIndex)
+      if (success) {
+        val updatedClips = timelineEngine.timeline.value.videoClips
+        val newClip = updatedClips.find { it.id == movedClip.id }
+        if (newClip != null) {
+          timelineEngine.selectElement(SelectedTrackElement.Video(newClip.id))
+          timelineEngine.setPosition(newClip.timelineStartMs)
+          playbackEngine.seekTo(newClip.timelineStartMs)
+        }
+      }
+    }
+  }
+
   fun checkMissingMedia() {
     viewModelScope.launch(Dispatchers.IO) {
       val missing = MediaRelinkManager.detectMissingMedia(getApplication(), timelineEngine.timeline.value)
@@ -474,6 +493,90 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     viewModelScope.launch {
       repository.duplicateProject(id)
     }
+  }
+
+  // --- Precision Video Trimming (Media3) ---
+
+  val trimPlaybackPosition = playbackEngine.trimPlaybackPositionMs
+
+  fun previewClipTrim(clip: VideoClip, startMs: Long, endMs: Long, loop: Boolean = true) {
+    playbackEngine.previewTrimRange(clip, startMs, endMs, loop)
+  }
+
+  fun seekTrimPreview(offsetFromStartMs: Long) {
+    playbackEngine.seekTrimPreview(offsetFromStartMs)
+  }
+
+  fun seekTrimPreviewToSourceMs(sourceTimeMs: Long) {
+    playbackEngine.seekTrimPreviewToSourceMs(sourceTimeMs)
+  }
+
+  fun stepTrimFrame(forward: Boolean) {
+    playbackEngine.stepTrimFrame(forward)
+  }
+
+  fun toggleTrimPlayPause() {
+    playbackEngine.toggleTrimPlayPause()
+  }
+
+  fun exitTrimPreview() {
+    playbackEngine.exitTrimPreview()
+  }
+
+  fun moveClipByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {
+    timelineEngine.moveClipByDelta(clipId, deltaMs, snap)
+  }
+
+  fun trimClipLeftByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {
+    timelineEngine.trimClipLeftByDelta(clipId, deltaMs, snap)
+    val clip = timelineEngine.timeline.value.videoClips.find { it.id == clipId }
+      ?: timelineEngine.timeline.value.overlayClips.find { it.id == clipId }
+    if (clip != null) {
+      playbackEngine.seekTo(clip.timelineStartMs)
+    }
+  }
+
+  fun trimClipRightByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {
+    timelineEngine.trimClipRightByDelta(clipId, deltaMs, snap)
+    val clip = timelineEngine.timeline.value.videoClips.find { it.id == clipId }
+      ?: timelineEngine.timeline.value.overlayClips.find { it.id == clipId }
+    if (clip != null) {
+      playbackEngine.seekTo((clip.timelineStartMs + clip.durationMs - 1L).coerceAtLeast(clip.timelineStartMs))
+    }
+  }
+
+  fun applyClipTrim(clipId: String, newSourceStartMs: Long, newSourceEndMs: Long) {
+    val success = timelineEngine.trimClipSourceRange(clipId, newSourceStartMs, newSourceEndMs, rippleContiguous = true)
+    playbackEngine.exitTrimPreview()
+    if (success) {
+      val clip = timelineEngine.timeline.value.videoClips.find { it.id == clipId }
+      if (clip != null) {
+        timelineEngine.setPosition(clip.timelineStartMs)
+        playbackEngine.seekTo(clip.timelineStartMs)
+      }
+    }
+  }
+
+  fun resetClipTrim(clipId: String) {
+    val success = timelineEngine.resetClipTrim(clipId)
+    playbackEngine.exitTrimPreview()
+    if (success) {
+      val clip = timelineEngine.timeline.value.videoClips.find { it.id == clipId }
+      if (clip != null) {
+        timelineEngine.setPosition(clip.timelineStartMs)
+        playbackEngine.seekTo(clip.timelineStartMs)
+      }
+    }
+  }
+
+  fun setClipInPointAtPlayhead(clipId: String) {
+    timelineEngine.setClipInPointAtPlayhead(clipId)
+    playbackEngine.exitTrimPreview()
+  }
+
+  fun setClipOutPointAtPlayhead(clipId: String) {
+    timelineEngine.setClipOutPointAtPlayhead(clipId)
+    playbackEngine.exitTrimPreview()
   }
 
   fun deleteProject(id: String) {
