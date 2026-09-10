@@ -490,7 +490,7 @@ class VideoExporter(private val context: Context) {
           masterPcm = ShortArray(0)
         }
         if (isCancelled) {
-          cleanUp(null, null, null, outputFile)
+          cleanUp(null, null, null, null, null, null, null, outputFile)
           _exportState.value = ExportState.Idle
           return@withContext null
         }
@@ -629,7 +629,7 @@ class VideoExporter(private val context: Context) {
           try { eglCore?.release() } catch (ignored: Exception) {}
           try { gpuRenderer?.release() } catch (ignored: Exception) {}
           try { encoderInputSurface?.release() } catch (ignored: Exception) {}
-          cleanUp(videoEncoder, audioEncoder, mediaMuxer, outputFile)
+          cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
           _exportState.value = ExportState.Idle
           return@withContext null
         }
@@ -859,22 +859,22 @@ class VideoExporter(private val context: Context) {
           return@withContext outputFile
         } else {
           _exportState.value = ExportState.Error("Exported MP4 header validation failed")
-          cleanUp(null, null, null, outputFile)
+          cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
           return@withContext null
         }
       } else {
         _exportState.value = ExportState.Error("Export resulted in incomplete or empty file")
-        cleanUp(null, null, null, outputFile)
+        cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
         return@withContext null
       }
     } catch (e: OutOfMemoryError) {
       Log.e(tag, "Export OutOfMemoryError", e)
-      cleanUp(videoEncoder, audioEncoder, mediaMuxer, outputFile)
+      cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
       _exportState.value = ExportState.Error("Out of memory during video rendering")
       return@withContext null
     } catch (e: Exception) {
       Log.e(tag, "Export failed with exception", e)
-      cleanUp(videoEncoder, audioEncoder, mediaMuxer, outputFile)
+      cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
       val errorMsg = when {
         e is MediaCodec.CodecException -> "Encoder failure: ${e.diagnosticInfo}"
         e.message != null -> e.message!!
@@ -1010,16 +1010,25 @@ class VideoExporter(private val context: Context) {
   private fun cleanUp(
     videoEncoder: MediaCodec?,
     audioEncoder: MediaCodec?,
+    surface: Surface?,
+    windowSurface: WindowSurface?,
+    eglCore: EglCore?,
+    gpuRenderer: GpuCompositionRenderer?,
     mediaMuxer: MediaMuxer?,
-    outputFile: File
+    failedFile: File?
   ) {
     try { videoEncoder?.stop() } catch (ignored: Exception) {}
     try { videoEncoder?.release() } catch (ignored: Exception) {}
     try { audioEncoder?.stop() } catch (ignored: Exception) {}
     try { audioEncoder?.release() } catch (ignored: Exception) {}
+    try { surface?.release() } catch (ignored: Exception) {}
+    try { windowSurface?.release() } catch (ignored: Exception) {}
+    try { gpuRenderer?.release() } catch (ignored: Exception) {}
+    try { eglCore?.release() } catch (ignored: Exception) {}
+    try { mediaMuxer?.stop() } catch (ignored: Exception) {}
     try { mediaMuxer?.release() } catch (ignored: Exception) {}
-    if (outputFile.exists()) {
-      outputFile.delete()
+    if (failedFile != null && failedFile.exists()) {
+      failedFile.delete()
     }
   }
 

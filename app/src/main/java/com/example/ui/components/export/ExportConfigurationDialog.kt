@@ -712,9 +712,11 @@ internal fun calculateExportDimensions(res: Resolution, aspect: AspectRatio): Pa
     Resolution.RES_2K -> 2560
     Resolution.RES_4K -> 3840
   }
-  val shortEdge = (longEdge / aspect.ratio).toInt()
-  val w = if (aspect.ratio >= 1.0f) longEdge else shortEdge
-  val h = if (aspect.ratio >= 1.0f) shortEdge else longEdge
+  val isLandscape = aspect.ratio >= 1.0f
+  val ratioMultiplier = if (isLandscape) aspect.ratio else 1.0f / aspect.ratio
+  val shortEdge = (longEdge / ratioMultiplier).toInt()
+  val w = if (isLandscape) longEdge else shortEdge
+  val h = if (isLandscape) shortEdge else longEdge
   val evenW = (w / 2) * 2
   val evenH = (h / 2) * 2
   return Pair(evenW.coerceAtLeast(320), evenH.coerceAtLeast(320))

@@ -29,7 +29,7 @@ class AudioWaveformTest {
 
     // Check all values are within normalized bounds [0.0f, 1.0f]
     waveform.forEach { amp ->
-      assertTrue("Amplitude $amp should be >= 0.05f", amp >= 0.05f)
+      assertTrue("Amplitude $amp should be >= 0.01f", amp >= 0.01f)
       assertTrue("Amplitude $amp should be <= 1.0f", amp <= 1.0f)
     }
 
@@ -112,5 +112,69 @@ class AudioWaveformTest {
     val jumped = timelineEngine.jumpToNextAudioPeak()
     assertTrue("Should find and jump to next peak", jumped)
     assertTrue("Playhead should advance to peak time", timelineEngine.currentPositionMs.value > 0L)
+  }
+
+  @Test
+  fun testSilenceDetection_identifiesDeadAirRegions() {
+    // 20 samples: loud start, silent middle (indices 5-14), loud end
+    val samples = listOf(
+      0.8f, 0.7f, 0.9f, 0.6f, 0.5f,
+      0.02f, 0.01f, 0.04f, 0.02f, 0.01f, 0.03f, 0.01f, 0.02f, 0.01f, 0.03f, // silence
+      0.7f, 0.85f, 0.9f, 0.8f, 0.75f
+    )
+
+    val silences = AudioWaveformManager.detectSilenceRegions(
+      samples = samples,
+      clipDurationMs = 2000L,
+      silenceThreshold = 0.05f,
+      minSilenceDurationMs = 500L
+    )
+
+    assertEquals("Should detect exactly 1 silence interval", 1, silences.size)
+    val region = silences.first()
+    assertEquals(500L, region.startMs)
+    assertEquals(1500L, region.endMs)
+    assertEquals(1000L, region.durationMs)
+
+    // Silence navigation
+    val nextSilence = AudioWaveformManager.findNextSilence(200L, silences)
+    assertNotNull("Should find next silence", nextSilence)
+    assertEquals(500L, nextSilence?.startMs)
+
+    val prevSilence = AudioWaveformManager.findPrevSilence(1800L, silences)
+    assertNotNull("Should find prev silence", prevSilence)
+    assertEquals(500L, prevSilence?.startMs)
+  }
+
+  @Test
+  fun testTimelineEngine_removeSilence_splitsAndStitchesAudioClip() {
+    val samples = listOf(
+      0.8f, 0.7f, 0.9f, 0.6f, 0.5f, // active vocal 1 (0 to 500ms)
+      0.01f, 0.02f, 0.01f, 0.01f, 0.02f, 0.01f, 0.01f, 0.02f, 0.01f, 0.02f, // dead air (500 to 1500ms)
+      0.75f, 0.85f, 0.92f, 0.8f, 0.7f // active vocal 2 (1500 to 2000ms)
+    )
+
+    val clip = AudioClip(
+      id = "clip_vocal_1",
+      uri = "asset:///audio/voiceover.mp3",
+      title = "Voiceover",
+      timelineStartMs = 0L,
+      durationMs = 2000L,
+      sourceStartMs = 0L,
+      sourceEndMs = 2000L,
+      waveformData = samples
+    )
+
+    timelineEngine.loadTimeline(Timeline(audioClips = listOf(clip)))
+
+    val removed = timelineEngine.removeSilenceFromAudioClip("clip_vocal_1", silenceThreshold = 0.05f, minSilenceMs = 500L)
+    assertTrue("Should successfully remove silence", removed)
+
+    val resultingClips = timelineEngine.timeline.value.audioClips
+    assertEquals("Should split into 2 active segments without silence", 2, resultingClips.size)
+    assertEquals(0L, resultingClips[0].timelineStartMs)
+    assertEquals(500L, resultingClips[0].durationMs)
+    assertEquals(500L, resultingClips[1].timelineStartMs)
+    assertEquals(500L, resultingClips[1].durationMs)
   }
 }

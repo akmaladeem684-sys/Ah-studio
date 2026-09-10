@@ -579,6 +579,63 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     playbackEngine.exitTrimPreview()
   }
 
+  // --- Real-time Audio Waveform & Peak/Silence Actions ---
+
+  private val _waveformStyle = MutableStateFlow(com.example.ui.components.timeline.WaveformStyle.MIRRORED_BARS)
+  val waveformStyle: StateFlow<com.example.ui.components.timeline.WaveformStyle> = _waveformStyle.asStateFlow()
+
+  fun cycleWaveformStyle() {
+    val current = _waveformStyle.value
+    val next = when (current) {
+      com.example.ui.components.timeline.WaveformStyle.MIRRORED_BARS -> com.example.ui.components.timeline.WaveformStyle.SOLID_ENVELOPE
+      com.example.ui.components.timeline.WaveformStyle.SOLID_ENVELOPE -> com.example.ui.components.timeline.WaveformStyle.BASELINE_UPWARD
+      com.example.ui.components.timeline.WaveformStyle.BASELINE_UPWARD -> com.example.ui.components.timeline.WaveformStyle.MIRRORED_BARS
+    }
+    _waveformStyle.value = next
+  }
+
+  fun setWaveformStyle(style: com.example.ui.components.timeline.WaveformStyle) {
+    _waveformStyle.value = style
+  }
+
+  fun jumpToNextAudioPeak() {
+    val jumped = timelineEngine.jumpToNextAudioPeak()
+    if (jumped) {
+      playbackEngine.seekTo(timelineEngine.currentPositionMs.value)
+    }
+  }
+
+  fun jumpToPrevAudioPeak() {
+    val jumped = timelineEngine.jumpToPrevAudioPeak()
+    if (jumped) {
+      playbackEngine.seekTo(timelineEngine.currentPositionMs.value)
+    }
+  }
+
+  fun jumpToNextAudioSilence() {
+    val jumped = timelineEngine.jumpToNextAudioSilence()
+    if (jumped) {
+      playbackEngine.seekTo(timelineEngine.currentPositionMs.value)
+    }
+  }
+
+  fun jumpToPrevAudioSilence() {
+    val jumped = timelineEngine.jumpToPrevAudioSilence()
+    if (jumped) {
+      playbackEngine.seekTo(timelineEngine.currentPositionMs.value)
+    }
+  }
+
+  fun removeSilenceInSelectedAudioClip() {
+    val selectedId = (timelineEngine.selectedElement.value as? SelectedTrackElement.Audio)?.clipId
+    if (selectedId != null) {
+      val removed = timelineEngine.removeSilenceFromAudioClip(selectedId)
+      if (removed) {
+        playbackEngine.seekTo(timelineEngine.currentPositionMs.value)
+      }
+    }
+  }
+
   fun deleteProject(id: String) {
     viewModelScope.launch {
       repository.deleteProject(id)

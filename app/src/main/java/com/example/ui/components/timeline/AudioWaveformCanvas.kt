@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.engine.audio.AudioPeak
+import com.example.engine.audio.AudioPeakType
+import com.example.engine.audio.AudioSilenceRegion
 import com.example.ui.theme.*
 import kotlin.math.abs
 import kotlin.math.max
@@ -27,8 +29,8 @@ enum class WaveformStyle {
 
 /**
  * High-performance, custom Canvas audio waveform visualization component.
- * Renders mirrored amplitude bars, RMS energy bodies, transient peak caps,
- * and cut alignment guides to help users align splits with audio beats.
+ * Renders real-time mirrored amplitude bars, RMS energy bodies, transient peak caps,
+ * silence & dead-air shaded zones, clipping warnings, and beat alignment guides.
  */
 @Composable
 fun AudioWaveformCanvas(
@@ -36,12 +38,14 @@ fun AudioWaveformCanvas(
   peaks: List<AudioPeak>,
   clipDurationMs: Long,
   modifier: Modifier = Modifier,
+  silenceRegions: List<AudioSilenceRegion> = emptyList(),
   playheadPosMs: Long? = null,
   trackColor: Color = AudioTrackColor,
   peakColor: Color = AmberAccent,
   crestColor: Color = CyanAccent,
   style: WaveformStyle = WaveformStyle.MIRRORED_BARS,
   showPeakGuides: Boolean = true,
+  showSilenceHighlights: Boolean = true,
   showCenterLine: Boolean = true,
   isMuted: Boolean = false
 ) {
@@ -80,7 +84,18 @@ fun AudioWaveformCanvas(
       val effectiveTrackColor = if (isMuted) trackColor.copy(alpha = 0.3f) else trackColor
       val effectivePeakColor = if (isMuted) peakColor.copy(alpha = 0.35f) else peakColor
 
-      // 1. Center baseline guideline
+      // 1. Draw Silence / Dead-air shaded regions
+      if (showSilenceHighlights && silenceRegions.isNotEmpty() && clipDurationMs > 0L) {
+        drawSilenceRegions(
+          silenceRegions = silenceRegions,
+          clipDurationMs = clipDurationMs,
+          width = width,
+          height = height,
+          isMuted = isMuted
+        )
+      }
+
+      // 2. Center baseline guideline
       if (showCenterLine && style != WaveformStyle.BASELINE_UPWARD) {
         drawLine(
           color = Color.White.copy(alpha = 0.18f),
@@ -90,13 +105,13 @@ fun AudioWaveformCanvas(
         )
       }
 
-      // 2. Determine slot density based on available canvas width
+      // 3. Determine slot density based on available canvas width
       val barWidthPx = 2.5.dp.toPx()
       val gapPx = 1.5.dp.toPx()
       val slotWidthPx = barWidthPx + gapPx
       val totalSlots = max(1, (width / slotWidthPx).toInt())
 
-      // 3. Resample waveform into display buckets using Peak-Preserving Pooling
+      // 4. Resample waveform into display buckets using Peak-Preserving Pooling
       val displayAmps = resamplePeakPreserving(waveformData, totalSlots)
 
       // Calculate playhead pixel position if playhead is within this clip
@@ -107,7 +122,7 @@ fun AudioWaveformCanvas(
 
       val snapDistancePx = 14.dp.toPx()
 
-      // 4. Render Bars or Envelope based on selected style
+      // 5. Render Bars or Envelope based on selected style
       when (style) {
         WaveformStyle.MIRRORED_BARS -> {
           drawMirroredBars(
@@ -146,7 +161,7 @@ fun AudioWaveformCanvas(
         }
       }
 
-      // 5. Draw Transient Peak Indicators and Cut Alignment Guides
+      // 6. Draw Transient Peak Indicators and Cut Alignment Guides
       if (showPeakGuides && clipDurationMs > 0L && !isMuted) {
         drawPeakMarkers(
           peaks = peaks,
@@ -162,14 +177,24 @@ fun AudioWaveformCanvas(
         )
       }
 
-      // 6. Active Playhead Cut Guide Intersection Line
+      // 7. Active Playhead Cut Guide Intersection Line & Peak Snapping Aura
       if (playheadX != null) {
         val isSnappedToPeak = peaks.any { peak ->
           val peakX = (peak.timeMs.toFloat() / clipDurationMs) * width
           abs(peakX - playheadX) <= snapDistancePx
         }
 
-        val cutLineColor = if (isSnappedToPeak) AmberAccent.copy(alpha = pulseAlpha) else CyanAccent.copy(alpha = 0.6f)
+        val isNearSilence = silenceRegions.any { s ->
+          val startX = (s.startMs.toFloat() / clipDurationMs) * width
+          val endX = (s.endMs.toFloat() / clipDurationMs) * width
+          playheadX in (startX - 4f)..(endX + 4f)
+        }
+
+        val cutLineColor = when {
+          isSnappedToPeak -> AmberAccent.copy(alpha = pulseAlpha)
+          isNearSilence -> Color.White.copy(alpha = 0.85f)
+          else -> CyanAccent.copy(alpha = 0.65f)
+        }
         val cutStroke = if (isSnappedToPeak) 2.dp.toPx() else 1.dp.toPx()
 
         drawLine(
@@ -193,6 +218,60 @@ fun AudioWaveformCanvas(
           )
         }
       }
+    }
+  }
+}
+
+/**
+ * Draws shaded silence / dead air background zones with boundary markers.
+ */
+private fun DrawScope.drawSilenceRegions(
+  silenceRegions: List<AudioSilenceRegion>,
+  clipDurationMs: Long,
+  width: Float,
+  height: Float,
+  isMuted: Boolean
+) {
+  val baseAlpha = if (isMuted) 0.15f else 0.38f
+
+  for (region in silenceRegions) {
+    val startX = (region.startMs.toFloat() / clipDurationMs) * width
+    val endX = (region.endMs.toFloat() / clipDurationMs) * width
+    val regionWidth = max(2f, endX - startX)
+
+    if (startX > width || endX < 0f) continue
+
+    // 1. Shaded quiet background
+    drawRect(
+      color = Color.Black.copy(alpha = baseAlpha),
+      topLeft = Offset(startX, 1f),
+      size = Size(regionWidth, height - 2f)
+    )
+
+    // 2. Subtle dashed silence floor lines
+    val centerY = height / 2f
+    drawLine(
+      color = TextTertiary.copy(alpha = 0.45f),
+      start = Offset(startX, centerY),
+      end = Offset(endX, centerY),
+      strokeWidth = 1.dp.toPx(),
+      pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
+    )
+
+    // 3. Boundary tick marks at start & end of silence to indicate cut/trim points
+    if (regionWidth >= 12f) {
+      drawLine(
+        color = TextTertiary.copy(alpha = 0.6f),
+        start = Offset(startX, 2.dp.toPx()),
+        end = Offset(startX, height - 2.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+      )
+      drawLine(
+        color = TextTertiary.copy(alpha = 0.6f),
+        start = Offset(endX, 2.dp.toPx()),
+        end = Offset(endX, height - 2.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+      )
     }
   }
 }
@@ -222,33 +301,50 @@ private fun DrawScope.drawMirroredBars(
     val amp = amps[i].coerceIn(0.04f, 1.0f)
     val halfHeight = maxHalfHeight * amp
     val isHighPeak = amp >= 0.72f
+    val isClipping = amp >= 0.95f
 
     val topY = (centerY - halfHeight).coerceAtLeast(1f)
     val barHeight = (halfHeight * 2f).coerceAtLeast(3f)
 
-    // Gradient bar styling: soft body with bright transient peaks
-    val barBrush = if (isHighPeak && !isMuted) {
-      Brush.verticalGradient(
-        colors = listOf(
-          peakColor,
-          crestColor,
-          trackColor.copy(alpha = 0.85f),
-          crestColor,
-          peakColor
-        ),
-        startY = topY,
-        endY = topY + barHeight
-      )
-    } else {
-      Brush.verticalGradient(
-        colors = listOf(
-          trackColor,
-          trackColor.copy(alpha = 0.65f),
-          trackColor
-        ),
-        startY = topY,
-        endY = topY + barHeight
-      )
+    // Gradient bar styling: soft body with bright transient peaks and clipping alert
+    val barBrush = when {
+      isClipping && !isMuted -> {
+        Brush.verticalGradient(
+          colors = listOf(
+            RedAccent,
+            AmberAccent,
+            trackColor.copy(alpha = 0.9f),
+            AmberAccent,
+            RedAccent
+          ),
+          startY = topY,
+          endY = topY + barHeight
+        )
+      }
+      isHighPeak && !isMuted -> {
+        Brush.verticalGradient(
+          colors = listOf(
+            peakColor,
+            crestColor,
+            trackColor.copy(alpha = 0.85f),
+            crestColor,
+            peakColor
+          ),
+          startY = topY,
+          endY = topY + barHeight
+        )
+      }
+      else -> {
+        Brush.verticalGradient(
+          colors = listOf(
+            trackColor,
+            trackColor.copy(alpha = 0.65f),
+            trackColor
+          ),
+          startY = topY,
+          endY = topY + barHeight
+        )
+      }
     }
 
     drawRoundRect(
@@ -259,15 +355,16 @@ private fun DrawScope.drawMirroredBars(
     )
 
     // Accent crest caps on loud transient spikes
-    if (isHighPeak && !isMuted) {
+    if ((isHighPeak || isClipping) && !isMuted) {
       val capRadius = (barWidthPx / 2f).coerceAtLeast(1f)
+      val capColor = if (isClipping) RedAccent else crestColor
       drawCircle(
-        color = crestColor,
+        color = capColor,
         radius = capRadius,
         center = Offset(x + barWidthPx / 2f, topY + capRadius)
       )
       drawCircle(
-        color = crestColor,
+        color = capColor,
         radius = capRadius,
         center = Offset(x + barWidthPx / 2f, topY + barHeight - capRadius)
       )
@@ -343,7 +440,12 @@ private fun DrawScope.drawBaselineBars(
     if (x + barWidthPx > width) break
     val barH = (maxHeight * amps[i]).coerceAtLeast(3f)
     val isPeak = amps[i] >= 0.75f
-    val color = if (isPeak) peakColor else trackColor
+    val isClipping = amps[i] >= 0.95f
+    val color = when {
+      isClipping -> RedAccent
+      isPeak -> peakColor
+      else -> trackColor
+    }
 
     drawRoundRect(
       color = color,
@@ -355,7 +457,7 @@ private fun DrawScope.drawBaselineBars(
 }
 
 /**
- * Draws peak markers and vertical cut alignment guides along transient peaks.
+ * Draws peak markers, clipping warnings, and vertical cut alignment guides along transient peaks.
  */
 private fun DrawScope.drawPeakMarkers(
   peaks: List<AudioPeak>,
@@ -374,10 +476,15 @@ private fun DrawScope.drawPeakMarkers(
     if (peakX < 0f || peakX > width) continue
 
     val isNearPlayhead = playheadX != null && abs(peakX - playheadX) <= snapDistancePx
-    val markerColor = if (isNearPlayhead) AmberAccent else if (peak.isProminent) crestColor else peakColor.copy(alpha = 0.7f)
+    val markerColor = when {
+      isNearPlayhead -> AmberAccent
+      peak.isClipping -> RedAccent
+      peak.isProminent -> crestColor
+      else -> peakColor.copy(alpha = 0.75f)
+    }
 
     // 1. Subtle dashed vertical guide line along prominent peaks to align cuts
-    if (peak.isProminent || isNearPlayhead) {
+    if (peak.isProminent || isNearPlayhead || peak.isClipping) {
       val guideAlpha = if (isNearPlayhead) 0.85f * pulseAlpha else 0.35f
       drawLine(
         color = markerColor.copy(alpha = guideAlpha),

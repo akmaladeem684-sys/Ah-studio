@@ -108,6 +108,7 @@ fun EditorScreen(
   val activeSampleRate by viewModel.activeSampleRate.collectAsState()
   val activeCanvasColor by viewModel.activeCanvasColor.collectAsState()
   val exportState by viewModel.videoExporter.exportState.collectAsState()
+  val waveformStyle by viewModel.waveformStyle.collectAsState()
 
   val configuration = LocalConfiguration.current
   val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -326,18 +327,19 @@ fun EditorScreen(
           currentPosMs = currentPosMs,
           zoom = multiTrackZoom,
           selectedElement = selectedElement,
-          selectedClipIds = emptySet(),
-          isMultiSelectMode = false,
-          snapIndicatorMs = null,
+          selectedClipIds = selectedClipIds,
+          isMultiSelectMode = isMultiSelectMode,
+          snapIndicatorMs = snapIndicatorMs,
           onSeek = {
             viewModel.timelineEngine.setPosition(it)
             viewModel.playbackEngine.seekTo(it)
           },
           onSelectElement = { viewModel.timelineEngine.selectElement(it) },
-          onToggleClipSelection = { /* selection */ },
+          onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
           onZoomChange = { multiTrackZoom = it },
           onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
           onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
+          onOpenKeyframeTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME) },
           onSplitClip = {
             val clipId = when (val el = selectedElement) {
               is SelectedTrackElement.Video -> el.clipId
@@ -346,7 +348,7 @@ fun EditorScreen(
               else -> null
             }
             if (clipId != null) {
-              viewModel.timelineEngine.splitClipAtPlayhead(clipId)
+              viewModel.timelineEngine.splitSelectedClipAtPlayhead()
             }
           },
           onTrimLeftToPlayhead = {
@@ -370,6 +372,19 @@ fun EditorScreen(
             }
           },
           onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
+          onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
+          onNormalDelete = { viewModel.timelineEngine.normalDelete() },
+          onDuplicateClip = { viewModel.timelineEngine.duplicateClips() },
+          onCopyClip = { viewModel.timelineEngine.copySelectedClips() },
+          onPasteClip = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
+          onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
+          onNextPeak = { viewModel.jumpToNextAudioPeak() },
+          onPrevPeak = { viewModel.jumpToPrevAudioPeak() },
+          onNextSilence = { viewModel.jumpToNextAudioSilence() },
+          onPrevSilence = { viewModel.jumpToPrevAudioSilence() },
+          onRemoveSilence = { viewModel.removeSilenceInSelectedAudioClip() },
+          waveformStyle = waveformStyle,
+          onToggleWaveformStyle = { viewModel.cycleWaveformStyle() },
           onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
           onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
           onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
@@ -884,8 +899,16 @@ fun VideoPreviewSurface(
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .scale(clipTransform?.scale ?: 1f)
-            .rotate(clipTransform?.rotation ?: 0f),
+            .graphicsLayer {
+              clipTransform?.let { t ->
+                scaleX = t.scaleX
+                scaleY = t.scaleY
+                rotationZ = t.rotation
+                translationX = t.posX * size.width
+                translationY = t.posY * size.height
+                alpha = t.opacity
+              }
+            },
           contentAlignment = Alignment.Center
         ) {
           val isRealPlayable = remember(activeClip.uri) {

@@ -184,6 +184,7 @@ fun TimelineClipView(
       AudioWaveformCanvas(
         waveformData = effectiveWaveform,
         peaks = waveformAnalysis?.peaks ?: emptyList(),
+        silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
         clipDurationMs = durationMs,
         playheadPosMs = relPlayheadMs,
         trackColor = trackColor,
@@ -191,6 +192,7 @@ fun TimelineClipView(
         crestColor = CyanAccent,
         style = waveformStyle,
         showPeakGuides = true,
+        showSilenceHighlights = true,
         showCenterLine = true,
         isMuted = isMuted,
         modifier = Modifier.fillMaxSize()
@@ -460,9 +462,30 @@ fun TimelineClipView(
               )
             }
           }
+
+          // Silence badge when silence regions exist
+          if (waveformAnalysis != null && waveformAnalysis.silenceRegions.isNotEmpty() && isSelected) {
+            Spacer(modifier = Modifier.width(3.dp))
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(3.dp))
+                .background(TextTertiary.copy(alpha = 0.25f))
+                .border(0.5.dp, TextTertiary.copy(alpha = 0.6f), RoundedCornerShape(3.dp))
+                .padding(horizontal = 3.dp, vertical = 1.dp)
+            ) {
+              Text(
+                text = "🔇 ${waveformAnalysis.silenceRegions.size}s",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 8.sp,
+                  color = TextSecondary,
+                  fontWeight = FontWeight.Bold
+                )
+              )
+            }
+          }
         }
 
-        // Center / Right beat snap notification
+        // Center / Right beat snap or silence indicator
         if (isPlayheadOnPeak) {
           Box(
             modifier = Modifier
@@ -476,6 +499,24 @@ fun TimelineClipView(
                 fontSize = 8.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.Black
+              )
+            )
+          }
+        } else if (relPlayheadMs != null && waveformAnalysis != null &&
+          AudioWaveformManager.findNearestSilence(relPlayheadMs, waveformAnalysis.silenceRegions, snapThresholdMs = 80L) != null) {
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(3.dp))
+              .background(StudioBorder.copy(alpha = 0.9f))
+              .border(0.5.dp, TextTertiary, RoundedCornerShape(3.dp))
+              .padding(horizontal = 4.dp, vertical = 1.dp)
+          ) {
+            Text(
+              text = "🔇 SILENCE",
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
               )
             )
           }

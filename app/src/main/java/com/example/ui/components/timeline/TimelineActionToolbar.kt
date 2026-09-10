@@ -46,7 +46,13 @@ fun TimelineActionToolbar(
   onToggleMultiSelect: () -> Unit,
   onToggleMagnetic: () -> Unit,
   onOpenTrimTool: (() -> Unit)? = null,
+  onOpenKeyframeTool: (() -> Unit)? = null,
   onNextPeak: (() -> Unit)? = null,
+  onPrevPeak: (() -> Unit)? = null,
+  onNextSilence: (() -> Unit)? = null,
+  onPrevSilence: (() -> Unit)? = null,
+  onRemoveSilence: (() -> Unit)? = null,
+  onToggleWaveformStyle: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val scrollState = rememberScrollState()
@@ -107,15 +113,70 @@ fun TimelineActionToolbar(
         )
       }
 
+      if (onOpenKeyframeTool != null) {
+        TimelineActionButton(
+          icon = Icons.Default.Diamond,
+          label = "Keyframe",
+          enabled = hasSelection,
+          accentColor = PurpleAccent,
+          testTag = "action_keyframe",
+          onClick = onOpenKeyframeTool
+        )
+      }
+
+      if (onPrevPeak != null) {
+        TimelineActionButton(
+          icon = Icons.Default.SkipPrevious,
+          label = "Prev Beat",
+          enabled = true,
+          accentColor = AmberAccent,
+          testTag = "action_prev_peak",
+          onClick = onPrevPeak
+        )
+      }
+
       if (onNextPeak != null) {
         // Audio Beat / Peak alignment jump
         TimelineActionButton(
           icon = Icons.Default.GraphicEq,
-          label = "Peak Snap",
+          label = "Next Beat",
           enabled = true,
           accentColor = AmberAccent,
           testTag = "action_next_peak",
           onClick = onNextPeak
+        )
+      }
+
+      if (onNextSilence != null) {
+        TimelineActionButton(
+          icon = Icons.Default.VolumeOff,
+          label = "Silence",
+          enabled = true,
+          accentColor = TextSecondary,
+          testTag = "action_next_silence",
+          onClick = onNextSilence
+        )
+      }
+
+      if (onRemoveSilence != null) {
+        TimelineActionButton(
+          icon = Icons.Default.AutoFixHigh,
+          label = "Auto-Cut Silence",
+          enabled = hasSelection,
+          accentColor = CyanAccent,
+          testTag = "action_remove_silence",
+          onClick = onRemoveSilence
+        )
+      }
+
+      if (onToggleWaveformStyle != null) {
+        TimelineActionButton(
+          icon = Icons.Default.Tune,
+          label = "Waveform",
+          enabled = true,
+          accentColor = CyanAccent,
+          testTag = "action_toggle_waveform_style",
+          onClick = onToggleWaveformStyle
         )
       }
 
