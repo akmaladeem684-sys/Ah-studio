@@ -1,10 +1,7 @@
 package com.example.engine.export
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.media.*
-import android.net.Uri
 import android.util.Log
 import android.view.Surface
 import com.example.domain.model.*
@@ -185,7 +182,7 @@ class MuxerCoordinator(
 class VideoExporter(private val context: Context) {
 
     private val tag = "VideoExporter"
-    private val audioProcessor = AudioExportProcessor(context)
+    private val audioProcessor: AudioExportProcessor = AudioExportProcessor(context)
 
     private val _exportState = MutableStateFlow<ExportState>(ExportState.Idle)
     val exportState: StateFlow<ExportState> = _exportState.asStateFlow()
@@ -228,6 +225,7 @@ class VideoExporter(private val context: Context) {
             AspectRatio.RATIO_16_9 -> 16f / 9f
             AspectRatio.RATIO_1_1 -> 1f
             AspectRatio.RATIO_4_5 -> 4f / 5f
+            else -> 9f / 16f
         }
         var width = (baseH * ratio).toInt()
         var height = baseH
@@ -292,7 +290,6 @@ class VideoExporter(private val context: Context) {
             windowSurface.makeCurrent()
 
             gpuRenderer = GpuCompositionRenderer(context)
-            gpuRenderer.initGl()
 
             videoEncoder.start()
 
@@ -322,7 +319,7 @@ class VideoExporter(private val context: Context) {
 
                 val currentPtsUs = frame * frameIntervalUs
 
-                gpuRenderer.renderTimelineFrame(timeline, currentPtsUs / 1000L, exportWidth, exportHeight)
+                gpuRenderer.renderFrame(timeline, currentPtsUs / 1000L, exportWidth, exportHeight)
                 windowSurface.setPresentationTime(currentPtsUs * 1000L)
                 windowSurface.swapBuffers()
 
