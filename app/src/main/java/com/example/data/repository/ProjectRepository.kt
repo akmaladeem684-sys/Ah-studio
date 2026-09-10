@@ -168,7 +168,7 @@ class ProjectRepository(private val database: AppDatabase) {
       videoClips = listOf(
         VideoClip(
           id = "sample_clip_1",
-          uri = "asset://nature_stream.mp4",
+          uri = "sample://nature_stream",
           name = "Cinematic Mountain Stream",
           isVideo = true,
           timelineStartMs = 0L,
@@ -180,7 +180,7 @@ class ProjectRepository(private val database: AppDatabase) {
         ),
         VideoClip(
           id = "sample_clip_2",
-          uri = "asset://urban_sunset.mp4",
+          uri = "sample://urban_sunset",
           name = "Golden Hour Skyline",
           isVideo = true,
           timelineStartMs = 4500L,

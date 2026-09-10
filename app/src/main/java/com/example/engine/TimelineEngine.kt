@@ -1815,6 +1815,11 @@ class TimelineEngine {
 
   // --- Sticker Operations ---
 
+  fun updateStickerClip(updated: StickerClip) {
+    val list = _timeline.value.stickerClips.map { if (it.id == updated.id) updated else it }
+    _timeline.value = _timeline.value.copy(stickerClips = list)
+  }
+
   fun addStickerClip(emojiOrAsset: String) {
     recordHistory()
     val newSticker = StickerClip(

@@ -7,6 +7,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -52,10 +53,12 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import com.example.data.presets.StockMediaCatalog
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
 import com.example.engine.SelectedTrackElement
 import com.example.engine.export.ExportState
+import com.example.engine.media.MediaRelinkManager
 import com.example.engine.text.TextLayerRenderer
 import com.example.ui.AppScreen
 import com.example.ui.EditorToolbarTab
@@ -140,6 +143,10 @@ fun EditorScreen(
         EditorTopBar(
           activeResolution = activeResolution,
           exportState = exportState,
+          canUndo = canUndo,
+          canRedo = canRedo,
+          onUndoClick = { viewModel.timelineEngine.undo() },
+          onRedoClick = { viewModel.timelineEngine.redo() },
           onBackClick = {
             viewModel.saveCurrentProject()
             viewModel.navigateTo(AppScreen.HOME)
@@ -260,6 +267,9 @@ fun EditorScreen(
           aspectRatio = aspectRatio,
           selectedElement = selectedElement,
           onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+          onUpdateOverlay = { viewModel.timelineEngine.updateOverlayClip(it) },
+          onUpdateText = { viewModel.timelineEngine.updateTextClip(it) },
+          onUpdateSticker = { viewModel.timelineEngine.updateStickerClip(it) },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = true },
           modifier = Modifier
@@ -396,6 +406,9 @@ fun EditorScreen(
           aspectRatio = aspectRatio,
           selectedElement = selectedElement,
           onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+          onUpdateOverlay = { viewModel.timelineEngine.updateOverlayClip(it) },
+          onUpdateText = { viewModel.timelineEngine.updateTextClip(it) },
+          onUpdateSticker = { viewModel.timelineEngine.updateStickerClip(it) },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = false },
           modifier = Modifier.fillMaxSize()
@@ -487,6 +500,10 @@ fun EditorScreen(
 private fun EditorTopBar(
   activeResolution: Resolution,
   exportState: ExportState,
+  canUndo: Boolean = false,
+  canRedo: Boolean = false,
+  onUndoClick: () -> Unit = {},
+  onRedoClick: () -> Unit = {},
   onBackClick: () -> Unit,
   onSearchClick: () -> Unit,
   onResolutionSelect: (Resolution) -> Unit,
@@ -502,7 +519,7 @@ private fun EditorTopBar(
       .padding(horizontal = 16.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
-    // Left: Close (X) + Search
+    // Left: Close (X) + Search + Undo + Redo
     IconButton(
       onClick = onBackClick,
       modifier = Modifier
@@ -528,6 +545,36 @@ private fun EditorTopBar(
         contentDescription = "Search",
         tint = Color.White,
         modifier = Modifier.size(24.dp)
+      )
+    }
+
+    IconButton(
+      onClick = onUndoClick,
+      enabled = canUndo,
+      modifier = Modifier
+        .size(40.dp)
+        .testTag("top_undo_btn")
+    ) {
+      Icon(
+        imageVector = Icons.AutoMirrored.Filled.Undo,
+        contentDescription = "Undo",
+        tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.35f),
+        modifier = Modifier.size(20.dp)
+      )
+    }
+
+    IconButton(
+      onClick = onRedoClick,
+      enabled = canRedo,
+      modifier = Modifier
+        .size(40.dp)
+        .testTag("top_redo_btn")
+    ) {
+      Icon(
+        imageVector = Icons.AutoMirrored.Filled.Redo,
+        contentDescription = "Redo",
+        tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.35f),
+        modifier = Modifier.size(20.dp)
       )
     }
 
@@ -652,10 +699,14 @@ fun VideoPreviewSurface(
   aspectRatio: AspectRatio,
   selectedElement: SelectedTrackElement = SelectedTrackElement.None,
   onSelectElement: (SelectedTrackElement) -> Unit = {},
+  onUpdateOverlay: (VideoClip) -> Unit = {},
+  onUpdateText: (TextClip) -> Unit = {},
+  onUpdateSticker: (StickerClip) -> Unit = {},
   player: ExoPlayer? = null,
   onToggleFullscreen: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
   // Find current active video clip
   val activeClip = remember(timeline.videoClips, currentPosMs) {
     timeline.videoClips.find {
@@ -725,7 +776,10 @@ fun VideoPreviewSurface(
             .rotate(clipTransform?.rotation ?: 0f),
           contentAlignment = Alignment.Center
         ) {
-          if (activeClip.isVideo && player != null) {
+          val isRealPlayable = remember(activeClip.uri) {
+            MediaRelinkManager.isRealPlayableMedia(context, activeClip.uri)
+          }
+          if (activeClip.isVideo && isRealPlayable && player != null) {
             AndroidView(
               factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -739,12 +793,18 @@ fun VideoPreviewSurface(
               },
               modifier = Modifier.fillMaxSize()
             )
-          } else {
+          } else if (!activeClip.isVideo && activeClip.uri.isNotBlank() && !activeClip.uri.startsWith("stock://") && !activeClip.uri.startsWith("sample://")) {
             AsyncImage(
               model = activeClip.uri,
               contentDescription = activeClip.name,
               contentScale = ContentScale.Fit,
               colorFilter = combinedColorFilter,
+              modifier = Modifier.fillMaxSize()
+            )
+          } else {
+            SyntheticClipPreview(
+              clip = activeClip,
+              currentPosMs = currentPosMs,
               modifier = Modifier.fillMaxSize()
             )
           }
@@ -790,17 +850,42 @@ fun VideoPreviewSurface(
 
       // Active Stickers
       activeStickers.forEach { sticker ->
+        val isStickerSelected = selectedElement is SelectedTrackElement.Sticker &&
+          (selectedElement as SelectedTrackElement.Sticker).clipId == sticker.id
+
         Box(
           modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+            .align(Alignment.Center)
+            .offset(
+              x = (sticker.posX * 140).dp,
+              y = (sticker.posY * 140).dp
+            )
+            .scale(sticker.scale)
+            .rotate(sticker.rotation)
+            .alpha(sticker.opacity)
+            .border(
+              width = if (isStickerSelected) 2.dp else 0.dp,
+              color = if (isStickerSelected) AmberAccent else Color.Transparent,
+              shape = RoundedCornerShape(8.dp)
+            )
+            .padding(8.dp)
+            .pointerInput(sticker.id, isStickerSelected) {
+              detectTransformGestures { _, pan, zoom, rotationChange ->
+                onSelectElement(SelectedTrackElement.Sticker(sticker.id))
+                val newX = (sticker.posX + pan.x / 140f).coerceIn(-1.5f, 1.5f)
+                val newY = (sticker.posY + pan.y / 140f).coerceIn(-1.5f, 1.5f)
+                val newScale = (sticker.scale * zoom).coerceIn(0.2f, 5.0f)
+                val newRot = (sticker.rotation + rotationChange) % 360f
+                onUpdateSticker(sticker.copy(posX = newX, posY = newY, scale = newScale, rotation = newRot))
+              }
+            },
           contentAlignment = Alignment.Center
         ) {
           Text(sticker.emojiOrAsset, fontSize = 42.sp)
         }
       }
 
-      // Active Overlays (Picture-in-Picture / Floating Media with Keyframe Interpolation)
+      // Active Overlays (Picture-in-Picture / Floating Media with Keyframe Interpolation and Direct Manipulation)
       activeOverlays.forEach { overlay ->
         val isOverlaySelected = selectedElement is SelectedTrackElement.Overlay &&
           (selectedElement as SelectedTrackElement.Overlay).clipId == overlay.id
@@ -827,7 +912,16 @@ fun VideoPreviewSurface(
               color = if (isOverlaySelected) AmberAccent else Color.White.copy(alpha = 0.5f),
               shape = RoundedCornerShape(8.dp)
             )
-            .clickable { onSelectElement(SelectedTrackElement.Overlay(overlay.id)) }
+            .pointerInput(overlay.id, isOverlaySelected) {
+              detectTransformGestures { _, pan, zoom, rotationChange ->
+                onSelectElement(SelectedTrackElement.Overlay(overlay.id))
+                val newX = (kf.posX + pan.x / 140f).coerceIn(-1.5f, 1.5f)
+                val newY = (kf.posY + pan.y / 140f).coerceIn(-1.5f, 1.5f)
+                val newScale = (kf.scale * zoom).coerceIn(0.2f, 5.0f)
+                val newRot = ((kf.rotation + rotationChange) % 360f).toInt()
+                onUpdateOverlay(overlay.copy(cropOffsetX = newX, cropOffsetY = newY, cropScale = newScale, rotationDegrees = newRot))
+              }
+            }
         ) {
           AsyncImage(
             model = overlay.uri,
@@ -883,16 +977,25 @@ fun VideoPreviewSurface(
         }
       }
 
-      // Active Text Overlays (Unified rendering with Export engine via TextLayerRenderer)
+      // Active Text Overlays (Unified rendering with Export engine via TextLayerRenderer and Direct Manipulation)
       val context = LocalContext.current
       if (activeTexts.isNotEmpty()) {
         androidx.compose.foundation.Canvas(
           modifier = Modifier
             .fillMaxSize()
-            .pointerInput(activeTexts) {
-              detectTapGestures {
-                activeTexts.lastOrNull()?.let { clip ->
-                  onSelectElement(SelectedTrackElement.Text(clip.id))
+            .pointerInput(activeTexts, selectedElement) {
+              detectTransformGestures { _, pan, zoom, rotationChange ->
+                val targetText = (selectedElement as? SelectedTrackElement.Text)?.let { sel ->
+                  activeTexts.find { it.id == sel.clipId }
+                } ?: activeTexts.lastOrNull()
+
+                if (targetText != null) {
+                  onSelectElement(SelectedTrackElement.Text(targetText.id))
+                  val newX = (targetText.posX + pan.x / 140f).coerceIn(-1.5f, 1.5f)
+                  val newY = (targetText.posY + pan.y / 140f).coerceIn(-1.5f, 1.5f)
+                  val newScale = (targetText.scale * zoom).coerceIn(0.2f, 5.0f)
+                  val newRot = (targetText.rotation + rotationChange) % 360f
+                  onUpdateText(targetText.copy(posX = newX, posY = newY, scale = newScale, rotation = newRot))
                 }
               }
             }
@@ -1720,4 +1823,85 @@ private fun formatDurationShort(timeMs: Long): String {
   val minutes = totalSeconds / 60
   val seconds = totalSeconds % 60
   return String.format("%02d:%02d", minutes, seconds)
+}
+
+@Composable
+private fun SyntheticClipPreview(
+  clip: VideoClip,
+  currentPosMs: Long,
+  modifier: Modifier = Modifier
+) {
+  val stockItem = remember(clip.uri) {
+    val stockId = clip.uri.removePrefix("stock://")
+    StockMediaCatalog.stockItems.find { it.id == stockId }
+  }
+
+  val (startColor, endColor, iconEmoji) = remember(clip.id, clip.name, stockItem) {
+    if (stockItem != null) {
+      Triple(Color(stockItem.gradientStart), Color(stockItem.gradientEnd), stockItem.iconEmoji)
+    } else if (clip.name.contains("Mountain", ignoreCase = true) || clip.name.contains("Stream", ignoreCase = true) || clip.uri.contains("nature", ignoreCase = true)) {
+      Triple(Color(0xFF0077B6), Color(0xFF00B4D8), "🏔️")
+    } else if (clip.name.contains("Skyline", ignoreCase = true) || clip.name.contains("Sunset", ignoreCase = true) || clip.name.contains("Golden", ignoreCase = true) || clip.uri.contains("urban", ignoreCase = true)) {
+      Triple(Color(0xFFE85D04), Color(0xFF7209B7), "🌇")
+    } else {
+      Triple(Color(0xFF1E293B), Color(0xFF0F172A), "🎬")
+    }
+  }
+
+  val relativeClipPosMs = (currentPosMs - clip.timelineStartMs).coerceIn(0L, clip.durationMs)
+  val progress = if (clip.durationMs > 0) relativeClipPosMs.toFloat() / clip.durationMs else 0f
+
+  Box(
+    modifier = modifier
+      .background(Brush.linearGradient(listOf(startColor, endColor)))
+      .drawBehind {
+        val scanY = size.height * ((progress * 3f) % 1f)
+        drawLine(
+          color = Color.White.copy(alpha = 0.08f),
+          start = Offset(0f, scanY),
+          end = Offset(size.width, scanY),
+          strokeWidth = 3f
+        )
+      },
+    contentAlignment = Alignment.Center
+  ) {
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center,
+      modifier = Modifier.padding(16.dp)
+    ) {
+      Box(
+        modifier = Modifier
+          .size(52.dp)
+          .clip(CircleShape)
+          .background(Color.Black.copy(alpha = 0.35f))
+          .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(text = iconEmoji, fontSize = 24.sp)
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        text = clip.name,
+        color = Color.White,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+      Spacer(modifier = Modifier.height(4.dp))
+      Surface(
+        color = Color.Black.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(12.dp)
+      ) {
+        Text(
+          text = "${formatDurationShort(relativeClipPosMs)} / ${formatDurationShort(clip.durationMs)}",
+          color = CyanAccent,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Medium,
+          modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+        )
+      }
+    }
+  }
 }

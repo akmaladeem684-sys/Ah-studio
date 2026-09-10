@@ -12,6 +12,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.domain.model.Timeline
 import com.example.domain.model.VideoClip
+import com.example.engine.media.MediaRelinkManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,12 +67,23 @@ class VideoPlaybackEngine(
       }
 
       override fun onPlayerError(error: PlaybackException) {
-        Log.e(tag, "ExoPlayer error: ${error.message}", error)
-        _playerError.value = "Playback error: ${error.errorCodeName}"
-        // Attempt recovery or fallback
+        Log.w(tag, "ExoPlayer playback warning (recovering safely): ${error.message}")
+        _playerError.value = null
+        try {
+          player.stop()
+          player.clearMediaItems()
+        } catch (ignored: Exception) {}
+        loadedClipId = null
         progressSyncJob?.cancel()
+        if (_isPlaying.value) {
+          startSyntheticPlaybackLoop()
+        }
       }
     })
+  }
+
+  fun isPlayableInPlayer(uriString: String?): Boolean {
+    return MediaRelinkManager.isRealPlayableMedia(context, uriString)
   }
 
   fun updateTimeline(timeline: Timeline) {
@@ -91,13 +103,13 @@ class VideoPlaybackEngine(
       seekTo(0L)
     }
     val clip = findClipAt(currentPosMs)
-    if (clip != null && clip.isVideo && clip.uri.isNotBlank()) {
+    if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
       ensureClipLoaded(clip)
       val sourcePosMs = clip.timelineToSourceMs(currentPosMs)
       player.seekTo(sourcePosMs)
       player.play()
     } else {
-      // If photo/image clip or empty, we drive playback using timer
+      // If photo/image clip, synthetic clip, or empty, drive playback using timer
       player.pause()
       startSyntheticPlaybackLoop()
     }
@@ -135,7 +147,7 @@ class VideoPlaybackEngine(
     val clip = findClipAt(posMs)
     _activeClip.value = clip
 
-    if (clip != null && clip.isVideo && clip.uri.isNotBlank()) {
+    if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
       val needsReload = forceReload || loadedClipId != clip.id
       if (needsReload) {
         ensureClipLoaded(clip)
@@ -153,16 +165,38 @@ class VideoPlaybackEngine(
   }
 
   private fun ensureClipLoaded(clip: VideoClip) {
+    if (!isPlayableInPlayer(clip.uri)) {
+      try {
+        player.stop()
+        player.clearMediaItems()
+      } catch (ignored: Exception) {}
+      loadedClipId = null
+      return
+    }
+
     try {
-      val mediaItem = MediaItem.fromUri(Uri.parse(clip.uri))
+      val parsedUri = Uri.parse(clip.uri)
+      val normalizedUri = if (parsedUri.scheme == "asset") {
+        var path = parsedUri.path ?: ""
+        if (path.startsWith("/")) path = path.substring(1)
+        if (path.isEmpty()) path = parsedUri.authority ?: ""
+        Uri.parse("asset:///$path")
+      } else {
+        parsedUri
+      }
+      val mediaItem = MediaItem.fromUri(normalizedUri)
       player.setMediaItem(mediaItem)
       player.playbackParameters = PlaybackParameters(clip.speed)
       player.volume = if (clip.isMuted) 0f else clip.volume
       player.prepare()
       loadedClipId = clip.id
     } catch (e: Exception) {
-      Log.e(tag, "Failed to load clip URI: ${clip.uri}", e)
-      _playerError.value = "Cannot load clip: ${clip.name}"
+      Log.w(tag, "Failed to load clip URI: ${clip.uri}", e)
+      try {
+        player.stop()
+        player.clearMediaItems()
+      } catch (ignored: Exception) {}
+      loadedClipId = null
     }
   }
 
@@ -225,7 +259,7 @@ class VideoPlaybackEngine(
           val nextClip = findClipAt(currentPosMs)
           if (nextClip != null && nextClip.id != _activeClip.value?.id) {
             syncWithPosition(currentPosMs)
-            if (nextClip.isVideo && nextClip.uri.isNotBlank()) {
+            if (nextClip.isVideo && isPlayableInPlayer(nextClip.uri)) {
               player.play()
               break
             }

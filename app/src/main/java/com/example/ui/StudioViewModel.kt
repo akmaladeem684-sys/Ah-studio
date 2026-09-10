@@ -322,7 +322,20 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     _activeCanvasColor.value = project.canvasColor
 
     val pkg = TimelineSerializer.fromPackageJson(project.timelineJson)
-    val loadedTimeline = pkg?.timeline ?: TimelineSerializer.fromJson(project.timelineJson)
+    val rawTimeline = pkg?.timeline ?: TimelineSerializer.fromJson(project.timelineJson)
+    val appContext = getApplication<Application>().applicationContext
+    val loadedTimeline = rawTimeline.copy(
+      videoClips = rawTimeline.videoClips.map { clip ->
+        if (clip.uri.startsWith("asset://") && !MediaRelinkManager.isRealPlayableMedia(appContext, clip.uri)) {
+          val safeUri = if (clip.name.contains("Mountain", ignoreCase = true) || clip.name.contains("Stream", ignoreCase = true)) {
+            "sample://nature_stream"
+          } else {
+            "sample://urban_sunset"
+          }
+          clip.copy(uri = safeUri)
+        } else clip
+      }
+    )
     if (pkg != null && pkg.settings.sampleRateHz > 0) {
       _activeSampleRate.value = pkg.settings.sampleRateHz
       _activeCanvasColor.value = pkg.settings.canvasBackgroundColor

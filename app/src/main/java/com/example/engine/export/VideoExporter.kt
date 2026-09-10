@@ -8,9 +8,13 @@ import android.media.*
 import android.net.Uri
 import android.util.Log
 import android.view.Surface
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.transformer.*
 import com.example.domain.model.*
 import com.example.engine.composition.ComposedFrame
 import com.example.engine.composition.VideoCompositionEngine
+import com.example.engine.media.MediaRelinkManager
 import com.example.engine.composition.gpu.EglCore
 import com.example.engine.composition.gpu.GpuCompositionRenderer
 import com.example.engine.composition.gpu.WindowSurface
@@ -64,30 +68,59 @@ class MuxerCoordinator(
   var isStarted: Boolean = false
     private set
 
+  private var lastVideoPtsUs: Long = -1L
+  private var lastAudioPtsUs: Long = -1L
+
   private class QueuedPacket(
     val isAudio: Boolean,
     val data: ByteArray,
     val presentationTimeUs: Long,
     val flags: Int
-  )
+  ) : Comparable<QueuedPacket> {
+    override fun compareTo(other: QueuedPacket): Int {
+      return presentationTimeUs.compareTo(other.presentationTimeUs)
+    }
+  }
 
   private val pendingQueue = mutableListOf<QueuedPacket>()
 
   @Synchronized
   fun setVideoFormat(format: MediaFormat) {
     if (videoTrackIndex < 0) {
-      videoTrackIndex = mediaMuxer.addTrack(format)
-      Log.d(tag, "Added video track with index $videoTrackIndex")
-      checkStart()
+      try {
+        videoTrackIndex = mediaMuxer.addTrack(format)
+        Log.d(tag, "Added video track with index $videoTrackIndex")
+        checkStart()
+      } catch (e: Exception) {
+        Log.e(tag, "Failed to add video track to muxer", e)
+      }
     }
   }
 
   @Synchronized
   fun setAudioFormat(format: MediaFormat) {
     if (audioTrackIndex < 0) {
-      audioTrackIndex = mediaMuxer.addTrack(format)
-      Log.d(tag, "Added audio track with index $audioTrackIndex")
-      checkStart()
+      try {
+        audioTrackIndex = mediaMuxer.addTrack(format)
+        Log.d(tag, "Added audio track with index $audioTrackIndex")
+        checkStart()
+      } catch (e: Exception) {
+        Log.e(tag, "Failed to add audio track to muxer", e)
+      }
+    }
+  }
+
+  @Synchronized
+  fun forceStartWithoutAudio() {
+    if (!isStarted && videoTrackIndex >= 0) {
+      Log.w(tag, "Force starting MediaMuxer without audio track")
+      try {
+        mediaMuxer.start()
+        isStarted = true
+        flushPendingQueue()
+      } catch (e: Exception) {
+        Log.e(tag, "Failed to force start MediaMuxer", e)
+      }
     }
   }
 
@@ -97,25 +130,47 @@ class MuxerCoordinator(
 
     if (videoReady && audioReady && !isStarted) {
       Log.d(tag, "Starting MediaMuxer with videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex")
-      mediaMuxer.start()
-      isStarted = true
+      try {
+        mediaMuxer.start()
+        isStarted = true
+        flushPendingQueue()
+      } catch (e: Exception) {
+        Log.e(tag, "Failed to start MediaMuxer", e)
+      }
+    }
+  }
 
-      // Flush any queued packets
-      for (packet in pendingQueue) {
-        val track = if (packet.isAudio) audioTrackIndex else videoTrackIndex
-        if (track >= 0) {
-          val buf = ByteBuffer.wrap(packet.data)
-          val info = MediaCodec.BufferInfo().apply {
-            set(0, packet.data.size, packet.presentationTimeUs, packet.flags)
-          }
-          try {
-            mediaMuxer.writeSampleData(track, buf, info)
-          } catch (e: Exception) {
-            Log.w(tag, "Error flushing queued packet to track $track", e)
-          }
+  private fun flushPendingQueue() {
+    // Sort queued packets chronologically to guarantee proper interleaved timestamp order
+    pendingQueue.sort()
+
+    for (packet in pendingQueue) {
+      val track = if (packet.isAudio) audioTrackIndex else videoTrackIndex
+      if (track >= 0) {
+        val pts = enforceMonotonicPts(packet.isAudio, packet.presentationTimeUs)
+        val buf = ByteBuffer.wrap(packet.data)
+        val info = MediaCodec.BufferInfo().apply {
+          set(0, packet.data.size, pts, packet.flags)
+        }
+        try {
+          mediaMuxer.writeSampleData(track, buf, info)
+        } catch (e: Exception) {
+          Log.w(tag, "Error flushing queued packet to track $track (pts=$pts)", e)
         }
       }
-      pendingQueue.clear()
+    }
+    pendingQueue.clear()
+  }
+
+  private fun enforceMonotonicPts(isAudio: Boolean, requestedPtsUs: Long): Long {
+    return if (isAudio) {
+      val pts = if (requestedPtsUs <= lastAudioPtsUs) lastAudioPtsUs + 1L else requestedPtsUs
+      lastAudioPtsUs = pts
+      pts
+    } else {
+      val pts = if (requestedPtsUs <= lastVideoPtsUs) lastVideoPtsUs + 1L else requestedPtsUs
+      lastVideoPtsUs = pts
+      pts
     }
   }
 
@@ -126,12 +181,23 @@ class MuxerCoordinator(
     }
 
     if (isStarted && videoTrackIndex >= 0) {
-      mediaMuxer.writeSampleData(videoTrackIndex, buffer, info)
+      val pts = enforceMonotonicPts(false, info.presentationTimeUs)
+      info.presentationTimeUs = pts
+      try {
+        mediaMuxer.writeSampleData(videoTrackIndex, buffer, info)
+      } catch (e: Exception) {
+        Log.w(tag, "Error writing video sample (pts=$pts)", e)
+      }
     } else {
       val bytes = ByteArray(info.size)
       buffer.position(info.offset)
       buffer.get(bytes)
       pendingQueue.add(QueuedPacket(false, bytes, info.presentationTimeUs, info.flags))
+
+      // Guard: if audio hasn't started after substantial video frames, force start
+      if (pendingQueue.size > 120 && videoTrackIndex >= 0) {
+        forceStartWithoutAudio()
+      }
     }
   }
 
@@ -142,7 +208,13 @@ class MuxerCoordinator(
     }
 
     if (isStarted && audioTrackIndex >= 0) {
-      mediaMuxer.writeSampleData(audioTrackIndex, buffer, info)
+      val pts = enforceMonotonicPts(true, info.presentationTimeUs)
+      info.presentationTimeUs = pts
+      try {
+        mediaMuxer.writeSampleData(audioTrackIndex, buffer, info)
+      } catch (e: Exception) {
+        Log.w(tag, "Error writing audio sample (pts=$pts)", e)
+      }
     } else {
       val bytes = ByteArray(info.size)
       buffer.position(info.offset)
@@ -182,17 +254,122 @@ class VideoExporter(private val context: Context) {
   }
 
   /**
-   * Production MP4 Exporter using MediaCodec (H.264 AVC video encoder + AAC audio encoder) and MediaMuxer.
+   * Evaluates if a timeline can be exported directly via Media3 Transformer.
+   */
+  fun canExportWithMedia3Transformer(timeline: Timeline): Boolean {
+    if (timeline.videoClips.isEmpty()) return false
+    // Timelines with custom canvas overlays, text layers, or stickers utilize hardware composition engine
+    if (timeline.overlayClips.isNotEmpty() || timeline.textClips.isNotEmpty() || timeline.stickerClips.isNotEmpty()) {
+      return false
+    }
+    // All video clips must refer to physical playable media on device
+    return timeline.videoClips.all { clip ->
+      clip.isVideo && clip.uri.isNotBlank() && MediaRelinkManager.isRealPlayableMedia(context, clip.uri)
+    }
+  }
+
+  /**
+   * High-level MP4 Exporter using Media3 Transformer to guarantee stable container generation,
+   * automated timestamp synchronization, and reliable track index handling.
+   */
+  suspend fun exportWithMedia3Transformer(
+    timeline: Timeline,
+    outputFile: File,
+    config: ExportConfig
+  ): File? = withContext(Dispatchers.Main) {
+    var completed = false
+    var exportError: Throwable? = null
+    val latch = java.util.concurrent.CountDownLatch(1)
+
+    try {
+      _exportState.value = ExportState.Rendering(0.05f, 0, 100, "Configuring Media3 Transformer pipeline...")
+
+      val editedMediaItems = mutableListOf<EditedMediaItem>()
+      for (clip in timeline.videoClips) {
+        val uri = Uri.parse(clip.uri)
+        val mediaItem = MediaItem.Builder().setUri(uri).build()
+        val editedItem = EditedMediaItem.Builder(mediaItem)
+          .setRemoveAudio(clip.isMuted || !clip.hasAudio)
+          .build()
+        editedMediaItems.add(editedItem)
+      }
+
+      if (editedMediaItems.isEmpty()) return@withContext null
+
+      val sequence = EditedMediaItemSequence(editedMediaItems)
+      val composition = Composition.Builder(sequence).build()
+
+      val transformer = Transformer.Builder(context)
+        .setVideoMimeType(MimeTypes.VIDEO_H264)
+        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+        .addListener(object : Transformer.Listener {
+          override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+            completed = true
+            latch.countDown()
+          }
+
+          override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+            exportError = exportException
+            latch.countDown()
+          }
+        })
+        .build()
+
+      transformer.start(composition, outputFile.absolutePath)
+
+      val progressHolder = ProgressHolder()
+      while (latch.count > 0 && !isCancelled) {
+        val state = transformer.getProgress(progressHolder)
+        if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+          val progress = (progressHolder.progress / 100f).coerceIn(0.05f, 0.95f)
+          _exportState.value = ExportState.Rendering(
+            progressPercent = progress,
+            currentFrame = progressHolder.progress,
+            totalFrames = 100,
+            status = "Exporting with Media3 Transformer (${progressHolder.progress}%)"
+          )
+        }
+        kotlinx.coroutines.delay(150)
+      }
+
+      if (isCancelled) {
+        transformer.cancel()
+        _exportState.value = ExportState.Idle
+        if (outputFile.exists()) outputFile.delete()
+        return@withContext null
+      }
+
+      if (exportError != null) {
+        Log.w(tag, "Media3 Transformer error: ${exportError?.message}. Falling back to composition engine.")
+        if (outputFile.exists()) outputFile.delete()
+        return@withContext null
+      }
+
+      if (completed && outputFile.exists() && outputFile.length() > 1024L) {
+        val isValid = validatePlayableMp4(outputFile)
+        if (isValid) {
+          _exportState.value = ExportState.Success(outputFile, timeline.totalDurationMs, outputFile.length())
+          return@withContext outputFile
+        }
+      }
+    } catch (e: Throwable) {
+      Log.w(tag, "Media3 Transformer setup exception: ${e.message}", e)
+      if (outputFile.exists()) outputFile.delete()
+    }
+    return@withContext null
+  }
+
+  /**
+   * Production MP4 Exporter using Media3 Transformer when applicable,
+   * with seamless fallback to the robust hardware composition pipeline.
    */
   suspend fun exportProject(
     projectName: String,
     timeline: Timeline,
-    config: ExportConfig
+    config: ExportConfig = ExportConfig()
   ): File? = withContext(Dispatchers.IO) {
     isCancelled = false
     val totalDurationMs = timeline.totalDurationMs.coerceAtLeast(1000L)
-    val fps = config.frameRate.fps
-    val totalFrames = ((totalDurationMs / 1000f) * fps).toInt().coerceAtLeast(15)
 
     // Verify storage capacity
     val outputDir = File(context.filesDir, "exports").apply { if (!exists()) mkdirs() }
@@ -205,11 +382,38 @@ class VideoExporter(private val context: Context) {
       return@withContext null
     }
 
-    // Determine target dimensions from resolution and timeline aspect ratio
-    val (exportWidth, exportHeight) = getDimensionsForResolution(config.resolution, timeline.aspectRatio)
-
     val sanitizedName = projectName.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
     val outputFile = File(outputDir, "${sanitizedName}_${System.currentTimeMillis()}.mp4")
+
+    // 1. Attempt export via Media3 Transformer if eligible
+    if (canExportWithMedia3Transformer(timeline)) {
+      val transformerResult = exportWithMedia3Transformer(timeline, outputFile, config)
+      if (transformerResult != null) {
+        return@withContext transformerResult
+      }
+      Log.i(tag, "Media3 Transformer pipeline deferred to hardware composition engine")
+    }
+
+    // 2. Hardware composition pipeline with strict MediaCodec & MediaMuxer lifecycle
+    return@withContext exportWithHardwarePipeline(projectName, timeline, config, outputFile)
+  }
+
+  /**
+   * Hardware composition engine using MediaCodec + MediaMuxer with strict lifecycle,
+   * timestamp monotonic synchronization, and precise track index handling.
+   */
+  suspend fun exportWithHardwarePipeline(
+    projectName: String,
+    timeline: Timeline,
+    config: ExportConfig,
+    outputFile: File
+  ): File? = withContext(Dispatchers.IO) {
+    val totalDurationMs = timeline.totalDurationMs.coerceAtLeast(1000L)
+    val fps = config.frameRate.fps
+    val totalFrames = ((totalDurationMs / 1000f) * fps).toInt().coerceAtLeast(15)
+
+    // Determine target dimensions from resolution and timeline aspect ratio
+    val (exportWidth, exportHeight) = getDimensionsForResolution(config.resolution, timeline.aspectRatio)
 
     var mediaMuxer: MediaMuxer? = null
     var videoEncoder: MediaCodec? = null
@@ -233,7 +437,12 @@ class VideoExporter(private val context: Context) {
 
       if (hasAudioSources) {
         _exportState.value = ExportState.Rendering(0.05f, 0, totalFrames, "Mixing audio tracks...")
-        masterPcm = audioProcessor.mixTimelineAudio(timeline, totalDurationMs) { isCancelled }
+        try {
+          masterPcm = audioProcessor.mixTimelineAudio(timeline, totalDurationMs) { isCancelled }
+        } catch (e: Exception) {
+          Log.w(tag, "Audio mixing encountered error: ${e.message}. Continuing with fallback audio.", e)
+          masterPcm = ShortArray(0)
+        }
         if (isCancelled) {
           cleanUp(null, null, null, outputFile)
           _exportState.value = ExportState.Idle
@@ -317,7 +526,11 @@ class VideoExporter(private val context: Context) {
           gpuRenderer = null
           try { encoderInputSurface?.release() } catch (ignored: Exception) {}
           encoderInputSurface = null
-          try { videoEncoder.reset() } catch (ignored: Exception) {}
+
+          // Safely release and recreate fresh encoder instance for byte-buffer pipeline
+          try { videoEncoder.stop() } catch (ignored: Exception) {}
+          try { videoEncoder.release() } catch (ignored: Exception) {}
+          videoEncoder = MediaCodec.createEncoderByType(videoMime)
         }
       }
 
@@ -331,15 +544,21 @@ class VideoExporter(private val context: Context) {
       val audioSampleRate = audioProcessor.sampleRate
       val audioChannels = audioProcessor.channelCount
       if (hasAudio) {
-        val audioMime = MediaFormat.MIMETYPE_AUDIO_AAC
-        val aacFormat = MediaFormat.createAudioFormat(audioMime, audioSampleRate, audioChannels).apply {
-          setInteger(MediaFormat.KEY_BIT_RATE, 192_000)
-          setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-          setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+        try {
+          val audioMime = MediaFormat.MIMETYPE_AUDIO_AAC
+          val aacFormat = MediaFormat.createAudioFormat(audioMime, audioSampleRate, audioChannels).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, 192_000)
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+          }
+          audioEncoder = MediaCodec.createEncoderByType(audioMime)
+          audioEncoder.configure(aacFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          audioEncoder.start()
+        } catch (e: Exception) {
+          Log.w(tag, "Audio encoder configuration failed: ${e.message}. Continuing export video-only.", e)
+          audioEncoder = null
+          hasAudio = false
         }
-        audioEncoder = MediaCodec.createEncoderByType(audioMime)
-        audioEncoder.configure(aacFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        audioEncoder.start()
       }
 
       // 4. Initialize MediaMuxer & MuxerCoordinator

@@ -5,6 +5,7 @@ import android.media.*
 import android.net.Uri
 import android.util.Log
 import com.example.domain.model.AudioClip
+import com.example.engine.media.MediaRelinkManager
 import com.example.domain.model.Timeline
 import com.example.domain.model.TrackType
 import com.example.domain.model.VideoClip
@@ -282,13 +283,18 @@ class AudioExportProcessor(private val context: Context) {
 
   private fun isSynthesizedTrack(uri: String, title: String): Boolean {
     if (uri.startsWith("internal://") || uri.startsWith("sfx_") || uri.startsWith("mus_")) return true
+    if (uri.startsWith("sample://") || uri.startsWith("stock://") || uri.startsWith("demo://") || uri.startsWith("template://")) return true
     if (uri.isBlank()) return true
+    if (!MediaRelinkManager.isRealPlayableMedia(context, uri)) return true
     // Check if matching catalog titles
     val allCatalog = SoundEffectsCatalog.effects.map { it.title } + SoundEffectsCatalog.musicTracks.map { it.title }
     return allCatalog.contains(title)
   }
 
   private fun decodeMediaFile(uriString: String): DecodedPcm? {
+    if (!MediaRelinkManager.isRealPlayableMedia(context, uriString)) {
+      return null
+    }
     val extractor = MediaExtractor()
     var decoder: MediaCodec? = null
     try {
@@ -335,8 +341,10 @@ class AudioExportProcessor(private val context: Context) {
       val bufferInfo = MediaCodec.BufferInfo()
       var isInputEos = false
       var isOutputEos = false
+      var noProgressCount = 0
 
-      while (!isOutputEos) {
+      while (!isOutputEos && noProgressCount < 100) {
+        var hadProgress = false
         if (!isInputEos) {
           val inIndex = decoder.dequeueInputBuffer(5000L)
           if (inIndex >= 0) {
@@ -350,12 +358,14 @@ class AudioExportProcessor(private val context: Context) {
                 decoder.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
                 extractor.advance()
               }
+              hadProgress = true
             }
           }
         }
 
         val outIndex = decoder.dequeueOutputBuffer(bufferInfo, 5000L)
         if (outIndex >= 0) {
+          hadProgress = true
           val outBuf = decoder.getOutputBuffer(outIndex)
           if (outBuf != null && bufferInfo.size > 0) {
             outBuf.position(bufferInfo.offset)
@@ -373,9 +383,16 @@ class AudioExportProcessor(private val context: Context) {
             isOutputEos = true
           }
         } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+          hadProgress = true
           val newFormat = decoder.outputFormat
           outSampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE, outSampleRate)
           outChannels = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT, outChannels)
+        }
+
+        if (hadProgress) {
+          noProgressCount = 0
+        } else {
+          noProgressCount++
         }
       }
 

@@ -17,14 +17,20 @@ object MediaRelinkManager {
   fun isMediaAccessible(context: Context, uriString: String?): Boolean {
     if (uriString.isNullOrBlank()) return false
 
-    // Sample / synthetic demo assets are always accessible
+    // Synthetic demo & internal audio presets are considered accessible for project integrity
     if (uriString.startsWith("demo://") ||
       uriString.startsWith("sample://") ||
-      uriString.startsWith("asset://") ||
+      uriString.startsWith("stock://") ||
       uriString.startsWith("internal://") ||
+      uriString.startsWith("template://") ||
       uriString.startsWith("android.resource://")
     ) {
       return true
+    }
+
+    // Asset scheme check
+    if (uriString.startsWith("asset://") || uriString.startsWith("file:///android_asset/")) {
+      return isAssetAccessible(context, uriString)
     }
 
     return try {
@@ -52,6 +58,72 @@ object MediaRelinkManager {
           uriString.isNotBlank()
         }
       }
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  /**
+   * Verifies if a given URI points to a real, playable file/content stream that can be decoded
+   * by ExoPlayer or MediaCodec without throwing source or file-not-found exceptions.
+   */
+  fun isRealPlayableMedia(context: Context, uriString: String?): Boolean {
+    if (uriString.isNullOrBlank()) return false
+    if (uriString.startsWith("stock://") ||
+      uriString.startsWith("sample://") ||
+      uriString.startsWith("demo://") ||
+      uriString.startsWith("internal://") ||
+      uriString.startsWith("template://")
+    ) {
+      return false
+    }
+
+    return try {
+      val parsedUri = Uri.parse(uriString)
+      when (parsedUri.scheme) {
+        "asset" -> isAssetAccessible(context, uriString)
+        "content" -> {
+          context.contentResolver.openFileDescriptor(parsedUri, "r")?.use { true } ?: false
+        }
+        "file" -> {
+          val path = parsedUri.path ?: ""
+          if (path.startsWith("/android_asset/")) {
+            val assetPath = path.removePrefix("/android_asset/")
+            try {
+              context.assets.open(assetPath).use { true }
+            } catch (e: Exception) {
+              false
+            }
+          } else {
+            val file = File(path)
+            file.exists() && file.canRead() && file.length() > 0L
+          }
+        }
+        "http", "https" -> true
+        null -> {
+          val file = File(uriString)
+          file.exists() && file.canRead() && file.length() > 0L
+        }
+        else -> false
+      }
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  /**
+   * Safely verifies if an asset exists in the app package.
+   */
+  fun isAssetAccessible(context: Context, uriString: String): Boolean {
+    return try {
+      val parsed = Uri.parse(uriString)
+      var path = parsed.path ?: ""
+      if (path.startsWith("/")) path = path.substring(1)
+      if (path.isEmpty() && parsed.scheme == "asset") {
+        path = parsed.authority ?: ""
+      }
+      if (path.isEmpty()) return false
+      context.assets.open(path).use { true }
     } catch (e: Exception) {
       false
     }
