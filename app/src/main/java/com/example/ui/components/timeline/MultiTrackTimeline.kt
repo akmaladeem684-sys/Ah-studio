@@ -32,6 +32,8 @@ import com.example.domain.model.Timeline
 import com.example.domain.model.TrackHeight
 import com.example.domain.model.TrackSettings
 import com.example.domain.model.TrackType
+import com.example.domain.model.Transition
+import com.example.domain.model.TransitionType
 import com.example.domain.model.VideoClip
 import com.example.engine.SelectedTrackElement
 import com.example.ui.components.formatDurationShort
@@ -61,6 +63,11 @@ fun MultiTrackTimeline(
   onReorderVideoClips: ((fromIndex: Int, toIndex: Int) -> Unit)? = null,
   onOpenTrimTool: (() -> Unit)? = null,
   onOpenKeyframeTool: (() -> Unit)? = null,
+  onOpenTransitionsTool: (() -> Unit)? = null,
+  selectedTransitionCutIndex: Int = 0,
+  onSelectTransitionCut: ((Int) -> Unit)? = null,
+  draggedTransitionType: TransitionType? = null,
+  onDropTransition: ((cutIndex: Int, type: TransitionType) -> Unit)? = null,
   onSplitClip: (() -> Unit)? = null,
   onTrimLeftToPlayhead: (() -> Unit)? = null,
   onTrimRightToPlayhead: (() -> Unit)? = null,
@@ -78,6 +85,13 @@ fun MultiTrackTimeline(
   onRemoveSilence: (() -> Unit)? = null,
   waveformStyle: WaveformStyle = WaveformStyle.MIRRORED_BARS,
   onToggleWaveformStyle: (() -> Unit)? = null,
+  fps: Int = 30,
+  isFrameSnapping: Boolean = false,
+  onStepFrames: ((Int) -> Unit)? = null,
+  onSeekToPrevCut: (() -> Unit)? = null,
+  onSeekToNextCut: (() -> Unit)? = null,
+  onFpsChange: ((Int) -> Unit)? = null,
+  onToggleFrameSnapping: (() -> Unit)? = null,
   showTrackHeaders: Boolean = false,
   selectedKeyframeIds: Set<String> = emptySet(),
   onSelectKeyframe: ((String) -> Unit)? = null,
@@ -330,6 +344,7 @@ fun MultiTrackTimeline(
           onToggleMagnetic = { /* magnetic */ },
           onOpenTrimTool = onOpenTrimTool,
           onOpenKeyframeTool = onOpenKeyframeTool,
+          onOpenTransitionsTool = onOpenTransitionsTool,
           onNextPeak = onNextPeak,
           onPrevPeak = onPrevPeak,
           onNextSilence = onNextSilence,
@@ -414,14 +429,17 @@ fun MultiTrackTimeline(
             Box(
               modifier = Modifier
                 .fillMaxWidth()
-                .height(30.dp)
+                .height(34.dp)
                 .horizontalScroll(horizontalScrollState)
             ) {
               AccurateTimecodeRuler(
                 totalDurationMs = totalDuration,
                 currentPosMs = currentPosMs,
                 msPerPixel = msPerPixel,
-                onSeek = onSeek
+                fps = fps,
+                isFrameSnapping = isFrameSnapping,
+                onSeek = onSeek,
+                onDoubleTapSnap = onSeekToNextCut
               )
             }
 
@@ -588,32 +606,81 @@ fun MultiTrackTimeline(
                           for (i in 0 until timeline.videoClips.size - 1) {
                             val clipA = timeline.videoClips[i]
                             val cutPosMs = clipA.timelineStartMs + clipA.durationMs
-                            val cutX = (cutPosMs / msPerPixel).dp - 8.dp
+                            val cutX = (cutPosMs / msPerPixel).dp - 10.dp
                             val existingTransition = timeline.transitions.find { it.clipIndexBefore == i }
+                            val isSelectedCut = i == selectedTransitionCutIndex
+                            val isDropTargetActive = draggedTransitionType != null
 
                             Box(
                               modifier = Modifier
-                                .offset(x = cutX, y = (trackHeightDp - 18.dp) / 2)
-                                .size(16.dp)
+                                .offset(x = cutX, y = (trackHeightDp - 20.dp) / 2)
+                                .size(20.dp)
                                 .rotate(45f)
                                 .background(
-                                  if (existingTransition != null) CyanAccent else StudioSurfaceVariant,
-                                  RoundedCornerShape(2.dp)
+                                  when {
+                                    isDropTargetActive -> PinkAccent.copy(alpha = 0.9f)
+                                    existingTransition != null -> PurpleAccent
+                                    isSelectedCut -> CyanAccent
+                                    else -> StudioSurfaceVariant
+                                  },
+                                  RoundedCornerShape(3.dp)
                                 )
                                 .border(
-                                  1.dp,
-                                  if (existingTransition != null) Color.White else StudioBorder,
-                                  RoundedCornerShape(2.dp)
+                                  if (isSelectedCut || isDropTargetActive) 1.5.dp else 1.dp,
+                                  if (isDropTargetActive) PinkAccent else if (existingTransition != null || isSelectedCut) Color.White else StudioBorder,
+                                  RoundedCornerShape(3.dp)
                                 )
+                                .clickable {
+                                  if (draggedTransitionType != null) {
+                                    onDropTransition?.invoke(i, draggedTransitionType)
+                                  } else {
+                                    onSelectTransitionCut?.invoke(i)
+                                    onOpenTransitionsTool?.invoke()
+                                  }
+                                }
                                 .testTag("transition_badge_$i"),
                               contentAlignment = Alignment.Center
                             ) {
                               Icon(
-                                imageVector = Icons.Default.Transform,
-                                contentDescription = existingTransition?.type?.displayName ?: "Transition",
-                                tint = if (existingTransition != null) Color.Black else TextSecondary,
-                                modifier = Modifier.size(10.dp).rotate(-45f)
+                                imageVector = if (existingTransition != null) Icons.Default.Transform else Icons.Default.Add,
+                                contentDescription = existingTransition?.type?.displayName ?: "Add Transition Cut $i",
+                                tint = if (existingTransition != null || isDropTargetActive || isSelectedCut) Color.White else TextSecondary,
+                                modifier = Modifier.size(11.dp).rotate(-45f)
                               )
+                            }
+
+                            // Optional drop target hint pill if dragging transition
+                            if (isDropTargetActive) {
+                              Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.Black.copy(alpha = 0.92f),
+                                border = BorderStroke(1.dp, PinkAccent),
+                                modifier = Modifier
+                                  .offset(x = cutX - 25.dp, y = trackHeightDp - 14.dp)
+                                  .clickable {
+                                    onDropTransition?.invoke(i, draggedTransitionType)
+                                  }
+                              ) {
+                                Text(
+                                  text = "Drop Cut #${i + 1}",
+                                  style = MaterialTheme.typography.bodySmall.copy(color = PinkAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                              }
+                            } else if (existingTransition != null) {
+                              // Display small duration badge under transition cut
+                              Surface(
+                                shape = RoundedCornerShape(3.dp),
+                                color = Color.Black.copy(alpha = 0.8f),
+                                modifier = Modifier
+                                  .offset(x = cutX - 10.dp, y = trackHeightDp - 14.dp)
+                              ) {
+                                Text(
+                                  text = "${existingTransition.durationMs / 1000f}s",
+                                  style = MaterialTheme.typography.bodySmall.copy(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.SemiBold),
+                                  modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                )
+                              }
                             }
                           }
                         }

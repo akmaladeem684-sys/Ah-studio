@@ -70,6 +70,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.zIndex
 import com.example.ui.StudioViewModel
 import com.example.ui.components.KeyframeAnimationPanel
+import com.example.ui.components.TransitionsPanel
 import com.example.ui.components.trim.VideoTrimmingToolPanel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.formatDurationShort
@@ -109,6 +110,9 @@ fun EditorScreen(
   val activeCanvasColor by viewModel.activeCanvasColor.collectAsState()
   val exportState by viewModel.videoExporter.exportState.collectAsState()
   val waveformStyle by viewModel.waveformStyle.collectAsState()
+  val selectedTransitionCutIndex by viewModel.timelineEngine.selectedTransitionCutIndex.collectAsState()
+  val timelineFps by viewModel.timelineEngine.timelineFps.collectAsState()
+  val isFrameSnapping by viewModel.timelineEngine.isFrameSnapping.collectAsState()
 
   val configuration = LocalConfiguration.current
   val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -121,6 +125,7 @@ fun EditorScreen(
   var showRelinkMediaDialog by remember { mutableStateOf(false) }
   var isFullscreenPreview by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
+  var draggedTransitionType by remember { mutableStateOf<TransitionType?>(null) }
 
   val replaceMediaPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.PickVisualMedia()
@@ -190,7 +195,10 @@ fun EditorScreen(
             EditorToolbarTab.SPEED -> SpeedToolPanel(viewModel)
             EditorToolbarTab.FILTERS -> FiltersToolPanel(viewModel)
             EditorToolbarTab.EFFECTS -> EffectsToolPanel(viewModel)
-            EditorToolbarTab.TRANSITIONS -> TransitionsToolPanel(viewModel)
+            EditorToolbarTab.TRANSITIONS -> TransitionsPanel(
+              viewModel = viewModel,
+              onStartDragTransition = { draggedTransitionType = it }
+            )
             EditorToolbarTab.TEXT -> TextEditorPanel(viewModel)
             EditorToolbarTab.AUDIO -> AudioToolPanel(viewModel)
             EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
@@ -312,13 +320,71 @@ fun EditorScreen(
         }
       }
 
-      // 2. TIMELINE WITH TIMESTAMPS: 40-50dp (45dp)
-      TimelineTimestampsRow(
+      // 2. HIGH-PERFORMANCE PLAYHEAD SCRUBBING BAR: Frame-by-frame gestures, SMPTE timecode & Jog Wheel
+      TimelineScrubberBar(
         currentPosMs = currentPosMs,
         totalDurationMs = timeline.totalDurationMs,
+        fps = timelineFps,
+        isFrameSnapping = isFrameSnapping,
+        onSeekMs = { targetMs ->
+          viewModel.timelineEngine.setPosition(targetMs)
+          viewModel.playbackEngine.seekTo(targetMs)
+        },
+        onStepFrames = { deltaFrames ->
+          viewModel.timelineEngine.stepFrames(deltaFrames)
+          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+        },
+        onSeekToPrevCut = {
+          viewModel.timelineEngine.seekToPreviousCut()
+          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+        },
+        onSeekToNextCut = {
+          viewModel.timelineEngine.seekToNextCut()
+          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+        },
+        onFpsChange = { newFps ->
+          viewModel.timelineEngine.setTimelineFps(newFps)
+        },
+        onToggleFrameSnapping = {
+          viewModel.timelineEngine.toggleFrameSnapping()
+        },
         isMultiTrackView = isMultiTrackTimelineView,
         onToggleMultiTrackView = { isMultiTrackTimelineView = !isMultiTrackTimelineView }
       )
+
+      if (draggedTransitionType != null) {
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+          shape = RoundedCornerShape(8.dp),
+          color = PurpleAccent.copy(alpha = 0.95f),
+          border = BorderStroke(1.dp, Color.White)
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Transform, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Dragging \"${draggedTransitionType?.displayName}\" ➔ Tap any Cut diamond on timeline",
+                style = MaterialTheme.typography.bodySmall.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+              )
+            }
+            IconButton(
+              onClick = { draggedTransitionType = null },
+              modifier = Modifier.size(20.dp)
+            ) {
+              Icon(Icons.Default.Close, contentDescription = "Cancel Drag", tint = Color.White, modifier = Modifier.size(14.dp))
+            }
+          }
+        }
+      }
 
       if (isMultiTrackTimelineView) {
         // STUDIO MULTI-TRACK TIMELINE: Full multi-track video & audio with reordering & volume envelopes
@@ -340,6 +406,16 @@ fun EditorScreen(
           onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
           onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
           onOpenKeyframeTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME) },
+          onOpenTransitionsTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRANSITIONS) },
+          selectedTransitionCutIndex = selectedTransitionCutIndex,
+          onSelectTransitionCut = { cutIdx ->
+            viewModel.timelineEngine.setSelectedTransitionCutIndex(cutIdx)
+          },
+          draggedTransitionType = draggedTransitionType,
+          onDropTransition = { cutIdx, type ->
+            viewModel.timelineEngine.setTransition(cutIdx, type)
+            draggedTransitionType = null
+          },
           onSplitClip = {
             val clipId = when (val el = selectedElement) {
               is SelectedTrackElement.Video -> el.clipId
@@ -385,6 +461,22 @@ fun EditorScreen(
           onRemoveSilence = { viewModel.removeSilenceInSelectedAudioClip() },
           waveformStyle = waveformStyle,
           onToggleWaveformStyle = { viewModel.cycleWaveformStyle() },
+          fps = timelineFps,
+          isFrameSnapping = isFrameSnapping,
+          onStepFrames = { delta ->
+            viewModel.timelineEngine.stepFrames(delta)
+            viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+          },
+          onSeekToPrevCut = {
+            viewModel.timelineEngine.seekToPreviousCut()
+            viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+          },
+          onSeekToNextCut = {
+            viewModel.timelineEngine.seekToNextCut()
+            viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+          },
+          onFpsChange = { viewModel.timelineEngine.setTimelineFps(it) },
+          onToggleFrameSnapping = { viewModel.timelineEngine.toggleFrameSnapping() },
           onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
           onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
           onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },

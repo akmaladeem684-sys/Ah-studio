@@ -47,6 +47,7 @@ fun TimelineActionToolbar(
   onToggleMagnetic: () -> Unit,
   onOpenTrimTool: (() -> Unit)? = null,
   onOpenKeyframeTool: (() -> Unit)? = null,
+  onOpenTransitionsTool: (() -> Unit)? = null,
   onNextPeak: (() -> Unit)? = null,
   onPrevPeak: (() -> Unit)? = null,
   onNextSilence: (() -> Unit)? = null,
@@ -121,6 +122,17 @@ fun TimelineActionToolbar(
           accentColor = PurpleAccent,
           testTag = "action_keyframe",
           onClick = onOpenKeyframeTool
+        )
+      }
+
+      if (onOpenTransitionsTool != null) {
+        TimelineActionButton(
+          icon = Icons.Default.Transform,
+          label = "Transition",
+          enabled = true,
+          accentColor = PurpleAccent,
+          testTag = "action_transition",
+          onClick = onOpenTransitionsTool
         )
       }
 

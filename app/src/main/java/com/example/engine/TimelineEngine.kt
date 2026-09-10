@@ -62,6 +62,12 @@ class TimelineEngine {
   private val _isMagneticEnabled = MutableStateFlow(true)
   val isMagneticEnabled: StateFlow<Boolean> = _isMagneticEnabled.asStateFlow()
 
+  private val _timelineFps = MutableStateFlow(30)
+  val timelineFps: StateFlow<Int> = _timelineFps.asStateFlow()
+
+  private val _isFrameSnapping = MutableStateFlow(false)
+  val isFrameSnapping: StateFlow<Boolean> = _isFrameSnapping.asStateFlow()
+
   // Undo / Redo history
   private val undoStack = ArrayDeque<Timeline>()
   private val redoStack = ArrayDeque<Timeline>()
@@ -80,9 +86,28 @@ class TimelineEngine {
     _selectedClipIds.value = emptySet()
   }
 
+  fun setTimelineFps(fps: Int) {
+    _timelineFps.value = fps.coerceIn(12, 120)
+  }
+
+  fun toggleFrameSnapping() {
+    _isFrameSnapping.value = !_isFrameSnapping.value
+  }
+
+  fun setFrameSnapping(enabled: Boolean) {
+    _isFrameSnapping.value = enabled
+  }
+
   fun setPosition(positionMs: Long) {
     val total = _timeline.value.totalDurationMs
-    val snapped = if (_isSnappingEnabled.value) snapPosition(positionMs) else positionMs
+    val targetPos = if (_isFrameSnapping.value) {
+      val frameDuration = 1000.0 / _timelineFps.value
+      val frameIndex = Math.round(positionMs / frameDuration)
+      (frameIndex * frameDuration).toLong()
+    } else {
+      positionMs
+    }
+    val snapped = if (_isSnappingEnabled.value) snapPosition(targetPos) else targetPos
     _currentPositionMs.value = snapped.coerceIn(0L, total)
   }
 
@@ -99,16 +124,71 @@ class TimelineEngine {
     _currentPositionMs.value = 0L
   }
 
-  fun stepForwardOneFrame(fps: Int = 30) {
+  fun stepForwardOneFrame(fps: Int = _timelineFps.value) {
     pause()
     val frameDuration = 1000L / fps
     setPosition(_currentPositionMs.value + frameDuration)
   }
 
-  fun stepBackwardOneFrame(fps: Int = 30) {
+  fun stepBackwardOneFrame(fps: Int = _timelineFps.value) {
     pause()
     val frameDuration = 1000L / fps
     setPosition(_currentPositionMs.value - frameDuration)
+  }
+
+  fun stepFrames(frameCount: Int, fps: Int = _timelineFps.value) {
+    pause()
+    val frameDuration = 1000L / fps
+    setPosition(_currentPositionMs.value + (frameCount * frameDuration))
+  }
+
+  fun seekToFrame(frameIndex: Long, fps: Int = _timelineFps.value) {
+    pause()
+    val frameDuration = 1000.0 / fps
+    val targetMs = (frameIndex * frameDuration).toLong()
+    setPosition(targetMs)
+  }
+
+  fun getAllCutPositions(): List<Long> {
+    val cuts = mutableSetOf<Long>(0L)
+    _timeline.value.videoClips.forEach { clip ->
+      cuts.add(clip.timelineStartMs)
+      cuts.add(clip.timelineStartMs + clip.durationMs)
+    }
+    _timeline.value.overlayClips.forEach { clip ->
+      cuts.add(clip.timelineStartMs)
+      cuts.add(clip.timelineStartMs + clip.durationMs)
+    }
+    _timeline.value.audioClips.forEach { clip ->
+      cuts.add(clip.timelineStartMs)
+      cuts.add(clip.timelineStartMs + clip.durationMs)
+    }
+    _timeline.value.textClips.forEach { clip ->
+      cuts.add(clip.timelineStartMs)
+      cuts.add(clip.timelineStartMs + clip.durationMs)
+    }
+    _timeline.value.stickerClips.forEach { clip ->
+      cuts.add(clip.timelineStartMs)
+      cuts.add(clip.timelineStartMs + clip.durationMs)
+    }
+    cuts.add(_timeline.value.totalDurationMs)
+    return cuts.sorted()
+  }
+
+  fun seekToPreviousCut() {
+    pause()
+    val current = _currentPositionMs.value
+    val cuts = getAllCutPositions()
+    val prevCut = cuts.filter { it < current - 15L }.maxOrNull() ?: 0L
+    setPosition(prevCut)
+  }
+
+  fun seekToNextCut() {
+    pause()
+    val current = _currentPositionMs.value
+    val cuts = getAllCutPositions()
+    val nextCut = cuts.firstOrNull { it > current + 15L } ?: _timeline.value.totalDurationMs
+    setPosition(nextCut)
   }
 
   fun setZoom(zoom: Float) {
@@ -2200,6 +2280,13 @@ class TimelineEngine {
 
   // --- Transitions ---
 
+  private val _selectedTransitionCutIndex = MutableStateFlow<Int>(0)
+  val selectedTransitionCutIndex: StateFlow<Int> = _selectedTransitionCutIndex.asStateFlow()
+
+  fun setSelectedTransitionCutIndex(cutIndex: Int) {
+    _selectedTransitionCutIndex.value = cutIndex.coerceAtLeast(0)
+  }
+
   fun setTransition(clipIndexBefore: Int, type: TransitionType, durationMs: Long = 500L) {
     recordHistory()
     val current = _timeline.value.transitions.toMutableList()
@@ -2208,6 +2295,61 @@ class TimelineEngine {
       current.add(Transition(clipIndexBefore = clipIndexBefore, type = type, durationMs = durationMs))
     }
     _timeline.value = _timeline.value.copy(transitions = current)
+    _selectedTransitionCutIndex.value = clipIndexBefore
+  }
+
+  fun removeTransition(clipIndexBefore: Int) {
+    recordHistory()
+    val current = _timeline.value.transitions.filter { it.clipIndexBefore != clipIndexBefore }
+    _timeline.value = _timeline.value.copy(transitions = current)
+  }
+
+  fun clearAllTransitions() {
+    recordHistory()
+    _timeline.value = _timeline.value.copy(transitions = emptyList())
+  }
+
+  fun applyTransitionToAllCuts(type: TransitionType, durationMs: Long = 500L) {
+    val count = _timeline.value.videoClips.size
+    if (count <= 1) return
+    recordHistory()
+    val list = mutableListOf<Transition>()
+    if (type != TransitionType.NONE) {
+      for (i in 0 until count - 1) {
+        list.add(Transition(clipIndexBefore = i, type = type, durationMs = durationMs))
+      }
+    }
+    _timeline.value = _timeline.value.copy(transitions = list)
+  }
+
+  fun setTransitionDuration(clipIndexBefore: Int, durationMs: Long) {
+    val existing = _timeline.value.transitions.find { it.clipIndexBefore == clipIndexBefore } ?: return
+    recordHistory()
+    val updated = _timeline.value.transitions.map {
+      if (it.clipIndexBefore == clipIndexBefore) it.copy(durationMs = durationMs) else it
+    }
+    _timeline.value = _timeline.value.copy(transitions = updated)
+  }
+
+  fun addTransitionSoundEffect(cutIndex: Int, soundName: String = "Cinematic Whoosh") {
+    val videoClips = _timeline.value.videoClips
+    if (cutIndex < 0 || cutIndex >= videoClips.size - 1) return
+    val clipA = videoClips[cutIndex]
+    val cutPosMs = clipA.timelineStartMs + clipA.durationMs - 300L
+    val audioClip = com.example.domain.model.AudioClip(
+      id = "sfx_trans_${System.currentTimeMillis()}",
+      uri = "asset:///audio/whoosh.mp3",
+      title = soundName,
+      timelineStartMs = cutPosMs.coerceAtLeast(0L),
+      durationMs = 900L,
+      volume = 0.9f,
+      fadeInMs = 100L,
+      fadeOutMs = 200L
+    )
+    recordHistory()
+    val currentAudio = _timeline.value.audioClips.toMutableList()
+    currentAudio.add(audioClip)
+    _timeline.value = _timeline.value.copy(audioClips = currentAudio)
   }
 
   // --- Keyframe Animation System ---

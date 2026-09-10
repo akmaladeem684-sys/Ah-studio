@@ -1,25 +1,34 @@
 package com.example.ui.components.timeline
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
-import kotlin.math.floor
+import kotlin.math.roundToInt
 
 @Composable
 fun AccurateTimecodeRuler(
@@ -27,75 +36,147 @@ fun AccurateTimecodeRuler(
   currentPosMs: Long,
   msPerPixel: Float,
   onSeek: (Long) -> Unit,
+  fps: Int = 30,
+  isFrameSnapping: Boolean = false,
+  onDoubleTapSnap: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val safeTotalDuration = totalDurationMs.coerceAtLeast(10000L)
   val rulerWidthDp = (safeTotalDuration / msPerPixel).dp
+  val frameDurationMs = 1000.0 / fps
+
+  var isScrubbing by remember { mutableStateOf(false) }
+  var scrubPreviewMs by remember { mutableLongStateOf(currentPosMs) }
 
   // Dynamic tick calculation based on zoom level (msPerPixel)
-  val (majorIntervalMs, minorIntervalMs) = remember(msPerPixel) {
+  val (majorIntervalMs, minorIntervalMs, showFrameTicks) = remember(msPerPixel, fps) {
     when {
-      msPerPixel <= 6f -> 1000L to 200L
-      msPerPixel <= 15f -> 1000L to 500L
-      msPerPixel <= 35f -> 2000L to 1000L
-      msPerPixel <= 80f -> 5000L to 1000L
-      else -> 10000L to 2000L
+      msPerPixel <= 3f -> Triple(500L, (1000L / fps).coerceAtLeast(1L), true) // Sub-frame/Frame precision
+      msPerPixel <= 8f -> Triple(1000L, (1000L / fps).coerceAtLeast(1L), true) // 1 frame precision
+      msPerPixel <= 18f -> Triple(1000L, 200L, false)
+      msPerPixel <= 35f -> Triple(2000L, 500L, false)
+      msPerPixel <= 80f -> Triple(5000L, 1000L, false)
+      else -> Triple(10000L, 2000L, false)
     }
   }
 
   Box(
     modifier = modifier
       .width(rulerWidthDp)
-      .height(30.dp)
+      .height(34.dp)
       .background(StudioSurface)
       .testTag("timeline_timecode_ruler")
-      .pointerInput(safeTotalDuration, msPerPixel) {
-        detectTapGestures { offset ->
-          val clickedMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
-          onSeek(clickedMs)
-        }
+      .pointerInput(safeTotalDuration, msPerPixel, isFrameSnapping, fps) {
+        detectTapGestures(
+          onDoubleTap = { offset ->
+            if (onDoubleTapSnap != null) {
+              onDoubleTapSnap()
+            } else {
+              val rawMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+              val targetMs = if (isFrameSnapping) {
+                (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
+              } else rawMs
+              onSeek(targetMs)
+            }
+          },
+          onTap = { offset ->
+            val rawMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+            val targetMs = if (isFrameSnapping) {
+              (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
+            } else rawMs
+            onSeek(targetMs)
+          }
+        )
       }
-      .pointerInput(safeTotalDuration, msPerPixel) {
-        detectDragGestures { change, _ ->
-          change.consume()
-          val draggedMs = (change.position.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
-          onSeek(draggedMs)
-        }
+      .pointerInput(safeTotalDuration, msPerPixel, isFrameSnapping, fps) {
+        detectDragGestures(
+          onDragStart = { offset ->
+            isScrubbing = true
+            val rawMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+            val targetMs = if (isFrameSnapping) {
+              (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
+            } else rawMs
+            scrubPreviewMs = targetMs
+            onSeek(targetMs)
+          },
+          onDragEnd = {
+            isScrubbing = false
+          },
+          onDragCancel = {
+            isScrubbing = false
+          },
+          onDrag = { change, _ ->
+            change.consume()
+            val rawMs = (change.position.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+            val targetMs = if (isFrameSnapping) {
+              (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
+            } else rawMs
+            scrubPreviewMs = targetMs
+            onSeek(targetMs)
+          }
+        )
       }
   ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
       val canvasWidth = size.width
       val canvasHeight = size.height
 
+      // Subtle ruler top gradient background
+      drawRect(
+        brush = Brush.verticalGradient(
+          listOf(StudioDarkBg, StudioSurface)
+        )
+      )
+
       // Bottom border line
       drawLine(
         color = StudioBorder,
         start = Offset(0f, canvasHeight),
         end = Offset(canvasWidth, canvasHeight),
-        strokeWidth = 1f
+        strokeWidth = 1.dp.toPx()
       )
 
-      val totalTicks = (safeTotalDuration / minorIntervalMs).toInt()
       val textPaint = android.graphics.Paint().apply {
-        color = android.graphics.Color.argb(220, 15, 23, 42) // Dark Slate for high contrast on light surface
+        color = android.graphics.Color.argb(220, 203, 213, 225) // Slate-300 for crisp readability
         textSize = 9.sp.toPx()
         isAntiAlias = true
         typeface = android.graphics.Typeface.MONOSPACE
       }
 
+      val frameTextPaint = android.graphics.Paint().apply {
+        color = android.graphics.Color.argb(190, 6, 182, 212) // Cyan-500 for frame tags
+        textSize = 7.5.sp.toPx()
+        isAntiAlias = true
+        typeface = android.graphics.Typeface.MONOSPACE
+      }
+
+      val totalTicks = (safeTotalDuration / minorIntervalMs).toInt()
+
       for (i in 0..totalTicks) {
         val tickTimeMs = i * minorIntervalMs
         val x = tickTimeMs / msPerPixel
         val isMajor = tickTimeMs % majorIntervalMs == 0L
+        val isHalfMajor = tickTimeMs % (majorIntervalMs / 2) == 0L
 
-        val tickHeight = if (isMajor) canvasHeight * 0.45f else canvasHeight * 0.25f
-        val tickColor = if (isMajor) TextSecondary.copy(alpha = 0.8f) else TextTertiary.copy(alpha = 0.4f)
+        val tickHeight = when {
+          isMajor -> canvasHeight * 0.55f
+          isHalfMajor -> canvasHeight * 0.35f
+          showFrameTicks -> canvasHeight * 0.20f
+          else -> canvasHeight * 0.25f
+        }
+
+        val tickColor = when {
+          isMajor -> TextPrimary.copy(alpha = 0.9f)
+          isHalfMajor -> TextSecondary.copy(alpha = 0.6f)
+          showFrameTicks && (i % 5 == 0) -> CyanAccent.copy(alpha = 0.6f)
+          else -> TextTertiary.copy(alpha = 0.35f)
+        }
 
         drawLine(
           color = tickColor,
           start = Offset(x, canvasHeight - tickHeight),
           end = Offset(x, canvasHeight),
-          strokeWidth = if (isMajor) 1.5f else 1.0f
+          strokeWidth = if (isMajor) 1.5.dp.toPx() else 1.dp.toPx()
         )
 
         if (isMajor) {
@@ -103,23 +184,93 @@ fun AccurateTimecodeRuler(
           drawContext.canvas.nativeCanvas.drawText(
             label,
             x + 4f,
-            canvasHeight - tickHeight - 3f,
+            canvasHeight - tickHeight - 4f,
             textPaint
+          )
+        } else if (showFrameTicks && isHalfMajor && msPerPixel <= 5f) {
+          // Draw frame index mark
+          val frameNum = msToFrameIndex(tickTimeMs, fps)
+          drawContext.canvas.nativeCanvas.drawText(
+            "F$frameNum",
+            x + 3f,
+            canvasHeight - tickHeight - 3f,
+            frameTextPaint
           )
         }
       }
 
       // Draw ruler playhead marker (head of the needle)
       val playheadX = currentPosMs / msPerPixel
+
+      // Needle Handle polygon
+      val headHalfWidth = 7.dp.toPx()
+      val headHeight = canvasHeight * 0.75f
       val headPath = Path().apply {
-        moveTo(playheadX - 6.dp.toPx(), 0f)
-        lineTo(playheadX + 6.dp.toPx(), 0f)
-        lineTo(playheadX + 6.dp.toPx(), canvasHeight * 0.5f)
-        lineTo(playheadX, canvasHeight)
-        lineTo(playheadX - 6.dp.toPx(), canvasHeight * 0.5f)
+        moveTo(playheadX - headHalfWidth, 0f)
+        lineTo(playheadX + headHalfWidth, 0f)
+        lineTo(playheadX + headHalfWidth, headHeight * 0.6f)
+        lineTo(playheadX, headHeight)
+        lineTo(playheadX - headHalfWidth, headHeight * 0.6f)
         close()
       }
-      drawPath(headPath, RedAccent)
+
+      // Draw shadow and playhead head
+      drawPath(headPath, if (isScrubbing) AmberAccent else RedAccent)
+
+      // Inner Grip Ribs on playhead
+      val gripColor = Color.White.copy(alpha = 0.8f)
+      drawLine(
+        color = gripColor,
+        start = Offset(playheadX - 3.dp.toPx(), 4.dp.toPx()),
+        end = Offset(playheadX + 3.dp.toPx(), 4.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+      )
+      drawLine(
+        color = gripColor,
+        start = Offset(playheadX - 3.dp.toPx(), 7.dp.toPx()),
+        end = Offset(playheadX + 3.dp.toPx(), 7.dp.toPx()),
+        strokeWidth = 1.dp.toPx()
+      )
+    }
+
+    // Floating Magnified Frame Tooltip Bubble during Scrubbing
+    if (isScrubbing) {
+      val playheadXDp = (scrubPreviewMs / msPerPixel).dp
+      val frameNum = msToFrameIndex(scrubPreviewMs, fps)
+      val smpte = formatSmpteTimecode(scrubPreviewMs, fps)
+
+      Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = Color.Black.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, AmberAccent),
+        modifier = Modifier
+          .offset(x = (playheadXDp - 45.dp).coerceAtLeast(0.dp), y = 0.dp)
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          Text(
+            text = smpte,
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontFamily = FontFamily.Monospace,
+              fontSize = 8.5.sp,
+              fontWeight = FontWeight.Bold,
+              color = AmberAccent
+            )
+          )
+          Text(
+            text = "F$frameNum",
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontFamily = FontFamily.Monospace,
+              fontSize = 8.sp,
+              fontWeight = FontWeight.Bold,
+              color = CyanAccent
+            )
+          )
+        }
+      }
     }
   }
 }

@@ -332,7 +332,7 @@ class VideoCompositionEngine(private val context: Context) {
       if (frame.activeTransition != null) {
         val tr = frame.activeTransition
         when (tr.type) {
-          TransitionType.FADE -> {
+          TransitionType.FADE, TransitionType.DISSOLVE -> {
             paint.alpha = ((1f - tr.progress) * 255).toInt().coerceIn(0, 255)
             canvas.drawBitmap(mainBitmap, matrix, paint)
           }
@@ -347,9 +347,55 @@ class VideoCompositionEngine(private val context: Context) {
             matrix.postTranslate(-canvasWidth * tr.progress, 0f)
             canvas.drawBitmap(mainBitmap, matrix, paint)
           }
+          TransitionType.SLIDE_RIGHT -> {
+            matrix.postTranslate(canvasWidth * tr.progress, 0f)
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+          }
+          TransitionType.PUSH_UP -> {
+            matrix.postTranslate(0f, -canvasHeight * tr.progress)
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+          }
           TransitionType.ZOOM_IN -> {
-            val zoom = 1f + tr.progress * 0.5f
+            val zoom = 1f + tr.progress * 0.6f
             matrix.postScale(zoom, zoom, canvasWidth / 2f, canvasHeight / 2f)
+            paint.alpha = ((1f - tr.progress * 0.5f) * 255).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+          }
+          TransitionType.ZOOM_OUT -> {
+            val zoom = (1f - tr.progress * 0.4f).coerceAtLeast(0.1f)
+            matrix.postScale(zoom, zoom, canvasWidth / 2f, canvasHeight / 2f)
+            paint.alpha = ((1f - tr.progress * 0.5f) * 255).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+          }
+          TransitionType.SPIN -> {
+            matrix.postRotate(tr.progress * 360f, canvasWidth / 2f, canvasHeight / 2f)
+            val zoom = (1f - tr.progress * 0.5f).coerceAtLeast(0.1f)
+            matrix.postScale(zoom, zoom, canvasWidth / 2f, canvasHeight / 2f)
+            paint.alpha = ((1f - tr.progress) * 255).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+          }
+          TransitionType.BLUR -> {
+            val zoom = 1f + tr.progress * 0.3f
+            matrix.postScale(zoom, zoom, canvasWidth / 2f, canvasHeight / 2f)
+            paint.alpha = ((1f - tr.progress) * 255).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+          }
+          TransitionType.FLASH -> {
+            paint.alpha = 255
+            canvas.drawBitmap(mainBitmap, matrix, paint)
+            // Draw white flash rectangle overlay
+            val flashAlpha = (if (tr.progress < 0.5f) tr.progress * 2f else (1f - tr.progress) * 2f).coerceIn(0f, 1f)
+            val flashPaint = Paint().apply {
+              color = Color.WHITE
+              alpha = (flashAlpha * 240).toInt().coerceIn(0, 255)
+            }
+            canvas.drawRect(0f, 0f, canvasWidth.toFloat(), canvasHeight.toFloat(), flashPaint)
+          }
+          TransitionType.GLITCH -> {
+            val jitterX = if (tr.progress in 0.2f..0.8f) ((Math.random() - 0.5) * 30).toFloat() else 0f
+            val jitterY = if (tr.progress in 0.2f..0.8f) ((Math.random() - 0.5) * 20).toFloat() else 0f
+            matrix.postTranslate(jitterX, jitterY)
+            paint.alpha = ((1f - tr.progress) * 255).toInt().coerceIn(0, 255)
             canvas.drawBitmap(mainBitmap, matrix, paint)
           }
           else -> {
