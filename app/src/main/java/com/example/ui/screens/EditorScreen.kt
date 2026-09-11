@@ -311,7 +311,6 @@ fun EditorScreen(
         }
       }
 
-      var isMultiTrackTimelineView by remember { mutableStateOf(false) }
       var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
 
       LaunchedEffect(timeline.audioClips.isEmpty(), timeline.videoClips.isNotEmpty()) {
@@ -348,8 +347,7 @@ fun EditorScreen(
         onToggleFrameSnapping = {
           viewModel.timelineEngine.toggleFrameSnapping()
         },
-        isMultiTrackView = isMultiTrackTimelineView,
-        onToggleMultiTrackView = { isMultiTrackTimelineView = !isMultiTrackTimelineView }
+        isMultiTrackView = true
       )
 
       if (draggedTransitionType != null) {
@@ -386,144 +384,119 @@ fun EditorScreen(
         }
       }
 
-      if (isMultiTrackTimelineView) {
-        // STUDIO MULTI-TRACK TIMELINE: Full multi-track video & audio with reordering & volume envelopes
-        MultiTrackTimeline(
-          timeline = timeline,
-          currentPosMs = currentPosMs,
-          zoom = multiTrackZoom,
-          selectedElement = selectedElement,
-          selectedClipIds = selectedClipIds,
-          isMultiSelectMode = isMultiSelectMode,
-          snapIndicatorMs = snapIndicatorMs,
-          onSeek = {
-            viewModel.timelineEngine.setPosition(it)
-            viewModel.playbackEngine.seekTo(it)
-          },
-          onSelectElement = { viewModel.timelineEngine.selectElement(it) },
-          onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
-          onZoomChange = { multiTrackZoom = it },
-          onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
-          onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
-          onOpenKeyframeTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME) },
-          onOpenTransitionsTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRANSITIONS) },
-          selectedTransitionCutIndex = selectedTransitionCutIndex,
-          onSelectTransitionCut = { cutIdx ->
-            viewModel.timelineEngine.setSelectedTransitionCutIndex(cutIdx)
-          },
-          draggedTransitionType = draggedTransitionType,
-          onDropTransition = { cutIdx, type ->
-            viewModel.timelineEngine.setTransition(cutIdx, type)
-            draggedTransitionType = null
-          },
-          onSplitClip = {
-            val clipId = when (val el = selectedElement) {
-              is SelectedTrackElement.Video -> el.clipId
-              is SelectedTrackElement.Overlay -> el.clipId
-              is SelectedTrackElement.Audio -> el.clipId
-              else -> null
-            }
-            if (clipId != null) {
-              viewModel.timelineEngine.splitSelectedClipAtPlayhead()
-            }
-          },
-          onTrimLeftToPlayhead = {
-            val clipId = when (val el = selectedElement) {
-              is SelectedTrackElement.Video -> el.clipId
-              is SelectedTrackElement.Overlay -> el.clipId
-              else -> null
-            }
-            if (clipId != null) {
-              viewModel.setClipInPointAtPlayhead(clipId)
-            }
-          },
-          onTrimRightToPlayhead = {
-            val clipId = when (val el = selectedElement) {
-              is SelectedTrackElement.Video -> el.clipId
-              is SelectedTrackElement.Overlay -> el.clipId
-              else -> null
-            }
-            if (clipId != null) {
-              viewModel.setClipOutPointAtPlayhead(clipId)
-            }
-          },
-          onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
-          onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
-          onNormalDelete = { viewModel.timelineEngine.normalDelete() },
-          onDuplicateClip = { viewModel.timelineEngine.duplicateClips() },
-          onCopyClip = { viewModel.timelineEngine.copySelectedClips() },
-          onPasteClip = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
-          onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
-          onNextPeak = { viewModel.jumpToNextAudioPeak() },
-          onPrevPeak = { viewModel.jumpToPrevAudioPeak() },
-          onNextSilence = { viewModel.jumpToNextAudioSilence() },
-          onPrevSilence = { viewModel.jumpToPrevAudioSilence() },
-          onRemoveSilence = { viewModel.removeSilenceInSelectedAudioClip() },
-          waveformStyle = waveformStyle,
-          onToggleWaveformStyle = { viewModel.cycleWaveformStyle() },
-          fps = timelineFps,
-          isFrameSnapping = isFrameSnapping,
-          onStepFrames = { delta ->
-            viewModel.timelineEngine.stepFrames(delta)
-            viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-          },
-          onSeekToPrevCut = {
-            viewModel.timelineEngine.seekToPreviousCut()
-            viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-          },
-          onSeekToNextCut = {
-            viewModel.timelineEngine.seekToNextCut()
-            viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-          },
-          onFpsChange = { viewModel.timelineEngine.setTimelineFps(it) },
-          onToggleFrameSnapping = { viewModel.timelineEngine.toggleFrameSnapping() },
-          onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
-          onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
-          onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
-          onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
-          onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
-          onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
-          onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
-          onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
-          onSelectKeyframe = { viewModel.timelineEngine.selectKeyframe(it) },
-          onMoveKeyframe = { kfId, newTime -> viewModel.timelineEngine.moveKeyframe(kfId, newTime) },
-          onAddAudioKeyframe = { clipId, relTime, vol ->
-            viewModel.timelineEngine.addAudioVolumeKeyframe(clipId, relTime, vol)
-          },
-          onUpdateAudioKeyframe = { clipId, kfId, relTime, vol ->
-            viewModel.timelineEngine.updateAudioVolumeKeyframe(clipId, kfId, relTime, vol)
-          },
-          onDeleteAudioKeyframe = { clipId, kfId ->
-            viewModel.timelineEngine.deleteAudioVolumeKeyframe(clipId, kfId)
-          },
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-        )
-      } else {
-        // 3. FILM STRIP THUMBNAILS: 80-100dp (90dp)
-        FilmstripThumbnailsRow(
-          timeline = timeline,
-          currentPosMs = currentPosMs,
-          onSeek = { viewModel.timelineEngine.setPosition(it) },
-          onScrollLeft = {
-            val newPos = (currentPosMs - 1500L).coerceAtLeast(0L)
-            viewModel.timelineEngine.setPosition(newPos)
-          },
-          onAddMedia = {
-            viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA)
+      // STUDIO MULTI-TRACK TIMELINE: Full multi-track video, audio, text, sticker, and effect tracks
+      MultiTrackTimeline(
+        timeline = timeline,
+        currentPosMs = currentPosMs,
+        zoom = multiTrackZoom,
+        selectedElement = selectedElement,
+        selectedClipIds = selectedClipIds,
+        isMultiSelectMode = isMultiSelectMode,
+        snapIndicatorMs = snapIndicatorMs,
+        onSeek = {
+          viewModel.timelineEngine.setPosition(it)
+          viewModel.playbackEngine.seekTo(it)
+        },
+        onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+        onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
+        onZoomChange = { multiTrackZoom = it },
+        onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
+        onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
+        onOpenKeyframeTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME) },
+        onOpenTransitionsTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRANSITIONS) },
+        selectedTransitionCutIndex = selectedTransitionCutIndex,
+        onSelectTransitionCut = { cutIdx ->
+          viewModel.timelineEngine.setSelectedTransitionCutIndex(cutIdx)
+        },
+        draggedTransitionType = draggedTransitionType,
+        onDropTransition = { cutIdx, type ->
+          viewModel.timelineEngine.setTransition(cutIdx, type)
+          draggedTransitionType = null
+        },
+        onSplitClip = {
+          val clipId = when (val el = selectedElement) {
+            is SelectedTrackElement.Video -> el.clipId
+            is SelectedTrackElement.Overlay -> el.clipId
+            is SelectedTrackElement.Audio -> el.clipId
+            else -> null
           }
-        )
-
-        // 4. AUDIO WAVEFORM & VOLUME ENVELOPE GRAPH: 80-120dp
-        AudioWaveformView(
-          timeline = timeline,
-          currentPosMs = currentPosMs,
-          isPlaying = isPlaying,
-          onSeek = { viewModel.timelineEngine.setPosition(it) },
-          viewModel = viewModel
-        )
-      }
+          if (clipId != null) {
+            viewModel.timelineEngine.splitSelectedClipAtPlayhead()
+          }
+        },
+        onTrimLeftToPlayhead = {
+          val clipId = when (val el = selectedElement) {
+            is SelectedTrackElement.Video -> el.clipId
+            is SelectedTrackElement.Overlay -> el.clipId
+            else -> null
+          }
+          if (clipId != null) {
+            viewModel.setClipInPointAtPlayhead(clipId)
+          }
+        },
+        onTrimRightToPlayhead = {
+          val clipId = when (val el = selectedElement) {
+            is SelectedTrackElement.Video -> el.clipId
+            is SelectedTrackElement.Overlay -> el.clipId
+            else -> null
+          }
+          if (clipId != null) {
+            viewModel.setClipOutPointAtPlayhead(clipId)
+          }
+        },
+        onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
+        onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
+        onNormalDelete = { viewModel.timelineEngine.normalDelete() },
+        onDuplicateClip = { viewModel.timelineEngine.duplicateClips() },
+        onCopyClip = { viewModel.timelineEngine.copySelectedClips() },
+        onPasteClip = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
+        onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
+        onNextPeak = { viewModel.jumpToNextAudioPeak() },
+        onPrevPeak = { viewModel.jumpToPrevAudioPeak() },
+        onNextSilence = { viewModel.jumpToNextAudioSilence() },
+        onPrevSilence = { viewModel.jumpToPrevAudioSilence() },
+        onRemoveSilence = { viewModel.removeSilenceInSelectedAudioClip() },
+        waveformStyle = waveformStyle,
+        onToggleWaveformStyle = { viewModel.cycleWaveformStyle() },
+        fps = timelineFps,
+        isFrameSnapping = isFrameSnapping,
+        onStepFrames = { delta ->
+          viewModel.timelineEngine.stepFrames(delta)
+          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+        },
+        onSeekToPrevCut = {
+          viewModel.timelineEngine.seekToPreviousCut()
+          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+        },
+        onSeekToNextCut = {
+          viewModel.timelineEngine.seekToNextCut()
+          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+        },
+        onFpsChange = { viewModel.timelineEngine.setTimelineFps(it) },
+        onToggleFrameSnapping = { viewModel.timelineEngine.toggleFrameSnapping() },
+        onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
+        onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
+        onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
+        onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
+        onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
+        onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
+        onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
+        onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
+        onSelectKeyframe = { viewModel.timelineEngine.selectKeyframe(it) },
+        onMoveKeyframe = { kfId, newTime -> viewModel.timelineEngine.moveKeyframe(kfId, newTime) },
+        onAddAudioKeyframe = { clipId, relTime, vol ->
+          viewModel.timelineEngine.addAudioVolumeKeyframe(clipId, relTime, vol)
+        },
+        onUpdateAudioKeyframe = { clipId, kfId, relTime, vol ->
+          viewModel.timelineEngine.updateAudioVolumeKeyframe(clipId, kfId, relTime, vol)
+        },
+        onDeleteAudioKeyframe = { clipId, kfId ->
+          viewModel.timelineEngine.deleteAudioVolumeKeyframe(clipId, kfId)
+        },
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f)
+      )
 
       // HIDDEN SIDEBAR (Old layers panel - keep code but hide: 0% width, takes no space)
       Box(
@@ -1730,170 +1703,6 @@ private fun FilmstripThumbnailsRow(
         tint = CyanAccent,
         modifier = Modifier.size(28.dp)
       )
-    }
-  }
-}
-
-// AUDIO WAVEFORM & VOLUME ENVELOPE VIEW: 80-120dp
-@Composable
-private fun AudioWaveformView(
-  timeline: Timeline,
-  currentPosMs: Long,
-  isPlaying: Boolean,
-  onSeek: (Long) -> Unit,
-  viewModel: StudioViewModel? = null
-) {
-  val audioClip = timeline.audioClips.firstOrNull()
-  var isEnvelopeMode by remember { mutableStateOf(true) }
-
-  if (audioClip != null) {
-    AudioVolumeEnvelopeGraph(
-      audioClip = audioClip,
-      clipDurationMs = audioClip.durationMs,
-      currentPlayheadMs = currentPosMs,
-      isEnvelopeMode = isEnvelopeMode,
-      showControlsHeader = true,
-      onToggleEnvelopeMode = { isEnvelopeMode = !isEnvelopeMode },
-      onAddKeyframe = { relTime, vol ->
-        viewModel?.timelineEngine?.addAudioVolumeKeyframe(audioClip.id, relTime, vol)
-      },
-      onUpdateKeyframe = { kfId, newTime, newVol ->
-        viewModel?.timelineEngine?.updateAudioVolumeKeyframe(audioClip.id, kfId, newTime, newVol)
-      },
-      onDeleteKeyframe = { kfId ->
-        viewModel?.timelineEngine?.deleteAudioVolumeKeyframe(audioClip.id, kfId)
-      },
-      onFadeInChanged = { newFadeIn ->
-        viewModel?.timelineEngine?.setAudioFade(audioClip.id, newFadeIn, audioClip.fadeOutMs)
-      },
-      onFadeOutChanged = { newFadeOut ->
-        viewModel?.timelineEngine?.setAudioFade(audioClip.id, audioClip.fadeInMs, newFadeOut)
-      },
-      onApplyPresetFade = { type ->
-        when (type) {
-          "fadeIn" -> viewModel?.timelineEngine?.applyAudioFadeKeyframes(audioClip.id, fadeInMs = 1200L, fadeOutMs = audioClip.fadeOutMs)
-          "fadeOut" -> viewModel?.timelineEngine?.applyAudioFadeKeyframes(audioClip.id, fadeInMs = audioClip.fadeInMs, fadeOutMs = 1200L)
-          else -> viewModel?.timelineEngine?.applyAudioFadeKeyframes(audioClip.id, 1000L, 1000L)
-        }
-      },
-      onResetEnvelope = {
-        viewModel?.timelineEngine?.resetAudioVolumeEnvelope(audioClip.id)
-      },
-      onBaseVolumeChanged = { vol ->
-        viewModel?.timelineEngine?.setAudioClipBaseVolume(audioClip.id, vol)
-      },
-      onSeek = onSeek,
-      modifier = Modifier
-        .fillMaxWidth()
-        .testTag("audio_waveform_envelope_view")
-    )
-  } else {
-    // Fallback: Waveform placeholder with button to add audio track & draw volume envelope
-    val totalDuration = timeline.totalDurationMs.coerceAtLeast(1000L)
-    val progress = (currentPosMs.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
-
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(80.dp)
-        .background(Color.Black)
-        .pointerInput(totalDuration) {
-          detectTapGestures { offset ->
-            val ratio = (offset.x / size.width).coerceIn(0f, 1f)
-            onSeek((ratio * totalDuration).toLong())
-          }
-        }
-        .testTag("waveform_container")
-    ) {
-      Canvas(
-        modifier = Modifier
-          .fillMaxSize()
-          .testTag("waveform_view")
-      ) {
-        val canvasWidth = size.width
-        val canvasHeight = size.height
-        val barCount = 70
-        val barWidth = (canvasWidth / barCount) * 0.55f
-        val barSpacing = canvasWidth / barCount
-        val midY = canvasHeight / 2f
-
-        drawLine(
-          color = Color(0xFF1E293B),
-          start = Offset(0f, midY),
-          end = Offset(canvasWidth, midY),
-          strokeWidth = 1.dp.toPx()
-        )
-
-        for (i in 0 until barCount) {
-          val barX = i * barSpacing + (barSpacing - barWidth) / 2f
-          val normX = i.toFloat() / barCount.toFloat()
-
-          val baseFreq = kotlin.math.sin(normX * 18f + 1.2f) * 0.4f +
-            kotlin.math.sin(normX * 36f) * 0.3f +
-            kotlin.math.sin(normX * 72f) * 0.2f
-          val amp = (kotlin.math.abs(baseFreq) + 0.15f).coerceIn(0.1f, 0.95f)
-          val barHeight = (canvasHeight * 0.75f) * amp
-
-          val isPlayed = (barX / canvasWidth) <= progress
-          val barColor = if (isPlayed) {
-            AudioTrackColor
-          } else {
-            AudioTrackColor.copy(alpha = 0.35f)
-          }
-
-          drawRoundRect(
-            color = barColor,
-            topLeft = Offset(barX, midY - barHeight / 2f),
-            size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx())
-          )
-        }
-      }
-
-      // Playhead line
-      Box(
-        modifier = Modifier
-          .fillMaxHeight()
-          .width(2.dp)
-          .align(Alignment.CenterStart)
-          .graphicsLayer {
-            translationX = progress * this.size.width
-          }
-          .background(CyanAccent)
-          .testTag("playhead")
-      )
-
-      // Overlay prompt: Add Audio Track to draw volume keyframes
-      Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF0F172A).copy(alpha = 0.88f),
-        border = BorderStroke(1.dp, AudioTrackColor.copy(alpha = 0.6f)),
-        modifier = Modifier
-          .align(Alignment.Center)
-          .clickable { viewModel?.timelineEngine?.ensureAudioTrackExists() }
-          .testTag("add_audio_track_prompt")
-      ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Icon(
-            imageVector = Icons.Default.Audiotrack,
-            contentDescription = null,
-            tint = AudioTrackColor,
-            modifier = Modifier.size(16.dp)
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "Enable Audio Track (Draw Volume Keyframes)",
-            style = MaterialTheme.typography.labelSmall.copy(
-              color = Color.White,
-              fontWeight = FontWeight.Bold,
-              fontSize = 11.sp
-            )
-          )
-        }
-      }
     }
   }
 }
