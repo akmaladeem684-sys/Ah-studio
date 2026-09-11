@@ -1,11 +1,7 @@
 package com.example.engine
 
-import com.example.domain.model.AudioClip
-import com.example.domain.model.ClipKeyframe
-import com.example.domain.model.EffectClip
-import com.example.domain.model.KeyframeInterpolation
-import com.example.domain.model.VideoClip
-import kotlin.math.abs
+import com.example.domain.model.*
+import kotlin.math.*
 
 data class InterpolatedClipTransform(
   val scaleX: Float,
@@ -49,6 +45,15 @@ data class InterpolatedClipTransform(
 object KeyframeInterpolator {
 
   fun interpolate(clip: VideoClip, relTimeMs: Long): InterpolatedClipTransform {
+    val base = interpolateBaseKeyframes(clip, relTimeMs)
+    return if (clip.animation.hasAnimation) {
+      applyAnimation(base, clip, relTimeMs)
+    } else {
+      base
+    }
+  }
+
+  private fun interpolateBaseKeyframes(clip: VideoClip, relTimeMs: Long): InterpolatedClipTransform {
     val keyframes = clip.keyframes.sortedBy { it.timeMs }
     if (keyframes.isEmpty()) {
       return InterpolatedClipTransform(
@@ -107,12 +112,290 @@ object KeyframeInterpolator {
     )
   }
 
+  private fun applyAnimation(
+    base: InterpolatedClipTransform,
+    clip: VideoClip,
+    relTimeMs: Long
+  ): InterpolatedClipTransform {
+    val anim = clip.animation
+    var curScaleX = base.scaleX
+    var curScaleY = base.scaleY
+    var curRotation = base.rotation
+    var curPosX = base.posX
+    var curPosY = base.posY
+    var curOpacity = base.opacity
+    var curBlur = base.blur
+    val intensity = anim.intensity
+
+    // 1. In-Animation (Entrance)
+    if (anim.inType != InAnimationType.NONE && relTimeMs < anim.inDurationMs) {
+      val rawT = (relTimeMs.toFloat() / anim.inDurationMs.coerceAtLeast(50L).toFloat()).coerceIn(0f, 1f)
+      val t = evaluateEasing(rawT, anim.easing)
+
+      when (anim.inType) {
+        InAnimationType.NONE -> {}
+        InAnimationType.FADE_IN -> {
+          curOpacity *= t
+        }
+        InAnimationType.ZOOM_IN -> {
+          val s = (0.15f + 0.85f * t)
+          curScaleX *= s
+          curScaleY *= s
+          curOpacity *= min(1f, t * 1.5f)
+        }
+        InAnimationType.ZOOM_OUT -> {
+          val s = (1.85f - 0.85f * t)
+          curScaleX *= s
+          curScaleY *= s
+          curOpacity *= min(1f, t * 1.5f)
+        }
+        InAnimationType.SLIDE_UP -> {
+          curPosY += (1f - t) * 0.8f * intensity
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.SLIDE_DOWN -> {
+          curPosY -= (1f - t) * 0.8f * intensity
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.SLIDE_LEFT -> {
+          curPosX += (1f - t) * 0.8f * intensity
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.SLIDE_RIGHT -> {
+          curPosX -= (1f - t) * 0.8f * intensity
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.SPIN_IN -> {
+          curRotation += (1f - t) * 360f * intensity
+          curScaleX *= t
+          curScaleY *= t
+          curOpacity *= t
+        }
+        InAnimationType.BOUNCE_IN -> {
+          val b = 1f - cos(t * PI.toFloat() * 2.5f) * exp(-t * 3.5f)
+          curScaleX *= b
+          curScaleY *= b
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.POP_IN -> {
+          val pop = if (t < 0.7f) (t / 0.7f * 1.15f) else (1.15f - (t - 0.7f) / 0.3f * 0.15f)
+          curScaleX *= pop
+          curScaleY *= pop
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.FLIP_X -> {
+          curScaleX *= abs(cos((1f - t) * PI.toFloat() * 0.5f))
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.FLIP_Y -> {
+          curScaleY *= abs(cos((1f - t) * PI.toFloat() * 0.5f))
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.SWING_IN -> {
+          curRotation += sin((1f - t) * 6f) * 25f * (1f - t) * intensity
+        }
+        InAnimationType.ELASTIC_IN -> {
+          val p = t - 1f
+          val el = (p * p * (2.70158f * p + 1.70158f) + 1f).coerceAtLeast(0f)
+          curScaleX *= el
+          curScaleY *= el
+        }
+        InAnimationType.GLITCH_IN -> {
+          curPosX += sin(relTimeMs * 0.08f) * 0.04f * (1f - t) * intensity
+          curPosY += cos(relTimeMs * 0.09f) * 0.04f * (1f - t) * intensity
+          curOpacity *= if ((relTimeMs / 50L) % 2L == 0L) 0.4f else 1.0f
+        }
+        InAnimationType.WIPE_IN -> {
+          curScaleX *= t
+          curOpacity *= min(1f, t * 2f)
+        }
+        InAnimationType.BLUR_IN -> {
+          curBlur = max(curBlur, (1f - t) * 0.8f * intensity)
+          curOpacity *= t
+        }
+      }
+    }
+
+    // 2. Out-Animation (Exit)
+    val outStartMs = (clip.durationMs - anim.outDurationMs).coerceAtLeast(0L)
+    if (anim.outType != OutAnimationType.NONE && relTimeMs > outStartMs) {
+      val rawT = ((relTimeMs - outStartMs).toFloat() / anim.outDurationMs.coerceAtLeast(50L).toFloat()).coerceIn(0f, 1f)
+      val t = evaluateEasing(rawT, anim.easing)
+
+      when (anim.outType) {
+        OutAnimationType.NONE -> {}
+        OutAnimationType.FADE_OUT -> {
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.ZOOM_OUT -> {
+          val s = (1f - 0.85f * t)
+          curScaleX *= s
+          curScaleY *= s
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.ZOOM_IN_OUT -> {
+          val s = (1f + 1.2f * t)
+          curScaleX *= s
+          curScaleY *= s
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.SLIDE_UP_OUT -> {
+          curPosY -= t * 0.8f * intensity
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.SLIDE_DOWN_OUT -> {
+          curPosY += t * 0.8f * intensity
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.SLIDE_LEFT_OUT -> {
+          curPosX -= t * 0.8f * intensity
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.SLIDE_RIGHT_OUT -> {
+          curPosX += t * 0.8f * intensity
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.SPIN_OUT -> {
+          curRotation += t * 360f * intensity
+          curScaleX *= (1f - t)
+          curScaleY *= (1f - t)
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.BOUNCE_OUT -> {
+          val b = (1f - t) * (1f + sin(t * 8f) * 0.15f)
+          curScaleX *= b
+          curScaleY *= b
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.POP_OUT -> {
+          val pop = (1f - t * 0.9f)
+          curScaleX *= pop
+          curScaleY *= pop
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.FLIP_X_OUT -> {
+          curScaleX *= abs(cos(t * PI.toFloat() * 0.5f))
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.SWING_OUT -> {
+          curRotation += sin(t * 6f) * 25f * t * intensity
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.GLITCH_OUT -> {
+          curPosX += sin(relTimeMs * 0.08f) * 0.04f * t * intensity
+          curPosY += cos(relTimeMs * 0.09f) * 0.04f * t * intensity
+          curOpacity *= (1f - t) * if ((relTimeMs / 50L) % 2L == 0L) 0.4f else 1.0f
+        }
+        OutAnimationType.WIPE_OUT -> {
+          curScaleX *= (1f - t)
+          curOpacity *= (1f - t)
+        }
+        OutAnimationType.BLUR_OUT -> {
+          curBlur = max(curBlur, t * 0.8f * intensity)
+          curOpacity *= (1f - t)
+        }
+      }
+    }
+
+    // 3. Combo / Loop Animation
+    if (anim.comboType != ComboAnimationType.NONE) {
+      val cycleMs = (relTimeMs * anim.speed).toLong()
+      when (anim.comboType) {
+        ComboAnimationType.NONE -> {}
+        ComboAnimationType.PULSE -> {
+          val pulse = 1.0f + 0.12f * sin(cycleMs * 0.006f) * intensity
+          curScaleX *= pulse
+          curScaleY *= pulse
+        }
+        ComboAnimationType.HEARTBEAT -> {
+          val ph = (cycleMs % 1000L) / 1000f
+          val beat = if (ph < 0.2f) sin(ph / 0.2f * PI.toFloat()) * 0.22f else if (ph in 0.25f..0.45f) sin((ph - 0.25f) / 0.2f * PI.toFloat()) * 0.14f else 0f
+          val s = 1.0f + beat * intensity
+          curScaleX *= s
+          curScaleY *= s
+        }
+        ComboAnimationType.PENDULUM -> {
+          curRotation += sin(cycleMs * 0.004f) * 14f * intensity
+        }
+        ComboAnimationType.FLOAT -> {
+          curPosY += sin(cycleMs * 0.003f) * 0.04f * intensity
+          curPosX += cos(cycleMs * 0.002f) * 0.025f * intensity
+        }
+        ComboAnimationType.SHAKE -> {
+          curPosX += sin(cycleMs * 0.035f) * 0.02f * intensity
+          curPosY += cos(cycleMs * 0.042f) * 0.02f * intensity
+          curRotation += sin(cycleMs * 0.028f) * 3.5f * intensity
+        }
+        ComboAnimationType.JITTER -> {
+          curPosX += (((cycleMs % 73L) / 73f) - 0.5f) * 0.04f * intensity
+          curPosY += (((cycleMs % 59L) / 59f) - 0.5f) * 0.04f * intensity
+        }
+        ComboAnimationType.FLASH_PULSE -> {
+          val flash = 0.6f + 0.4f * (0.5f + 0.5f * sin(cycleMs * 0.015f)) * intensity
+          curOpacity *= flash.coerceIn(0f, 1f)
+        }
+        ComboAnimationType.WAVE -> {
+          curRotation += sin(cycleMs * 0.005f) * 8f * intensity
+          curScaleY *= (1.0f + sin(cycleMs * 0.008f) * 0.08f * intensity)
+        }
+        ComboAnimationType.SPIN_360 -> {
+          curRotation += (cycleMs * 0.15f * intensity) % 360f
+        }
+        ComboAnimationType.BREATHE -> {
+          val br = 1.0f + sin(cycleMs * 0.003f) * 0.08f * intensity
+          curScaleX *= br
+          curScaleY *= br
+        }
+        ComboAnimationType.ZOOM_PULSE -> {
+          val zp = abs(sin(cycleMs * 0.005f))
+          val s = 0.95f + 0.18f * zp * intensity
+          curScaleX *= s
+          curScaleY *= s
+        }
+      }
+    }
+
+    return base.copy(
+      scaleX = curScaleX,
+      scaleY = curScaleY,
+      rotation = curRotation,
+      posX = curPosX,
+      posY = curPosY,
+      opacity = curOpacity.coerceIn(0f, 1f),
+      blur = curBlur.coerceIn(0f, 1f)
+    )
+  }
+
+  private fun evaluateEasing(t: Float, easing: AnimationEasing): Float {
+    val clamped = t.coerceIn(0f, 1f)
+    return when (easing) {
+      AnimationEasing.LINEAR -> clamped
+      AnimationEasing.EASE_IN -> clamped * clamped
+      AnimationEasing.EASE_OUT -> 1f - (1f - clamped) * (1f - clamped)
+      AnimationEasing.EASE_IN_OUT -> {
+        if (clamped < 0.5f) 2f * clamped * clamped
+        else 1f - (-2f * clamped + 2f) * (-2f * clamped + 2f) / 2f
+      }
+      AnimationEasing.OVERSHOOT -> {
+        val s = 1.70158f
+        val p = clamped - 1f
+        (p * p * ((s + 1f) * p + s) + 1f).coerceIn(0f, 1.5f)
+      }
+      AnimationEasing.BOUNCE -> {
+        (1f - cos(clamped * PI.toFloat() * 2.5f) * exp(-clamped * 3.5f)).coerceIn(0f, 1.3f)
+      }
+      AnimationEasing.ELASTIC -> {
+        val p = clamped - 1f
+        (-2.0.pow(10.0 * p) * sin((p - 0.075f) * (2f * PI.toFloat()) / 0.3f)).toFloat().coerceIn(0f, 1.4f)
+      }
+    }
+  }
+
   fun interpolateVolume(keyframes: List<ClipKeyframe>, relTimeMs: Long, defaultVolume: Float = 1.0f): Float {
     if (keyframes.isEmpty()) return defaultVolume
     val sorted = keyframes.sortedBy { it.timeMs }
     if (relTimeMs <= sorted.first().timeMs) return sorted.first().volume
     if (relTimeMs >= sorted.last().timeMs) return sorted.last().volume
-
     var before = sorted.first()
     var after = sorted.last()
     for (i in 0 until sorted.size - 1) {
@@ -122,7 +405,6 @@ object KeyframeInterpolator {
         break
       }
     }
-
     val range = (after.timeMs - before.timeMs).toFloat().coerceAtLeast(1f)
     val rawT = ((relTimeMs - before.timeMs) / range).coerceIn(0f, 1f)
     val factor = computeFactor(before.interpolation, before.customCurvePoints, rawT)
@@ -179,11 +461,9 @@ object KeyframeInterpolator {
   fun solveCubicBezier(p1x: Float, p1y: Float, p2x: Float, p2y: Float, targetX: Float): Float {
     if (targetX <= 0f) return 0f
     if (targetX >= 1f) return 1f
-
     var low = 0f
     var high = 1f
     var t = targetX
-
     // Binary search / bisection for root x(t) = targetX
     for (i in 0 until 14) {
       val currentX = evaluateBezier1D(p1x, p2x, t)
@@ -237,7 +517,6 @@ object KeyframeInterpolator {
       val v = if (last.effectParam > 0f) last.effectParam else last.opacity
       return (v * clip.intensity).coerceIn(0f, 1f)
     }
-
     var before = keyframes.first()
     var after = keyframes.last()
     for (i in 0 until keyframes.size - 1) {
@@ -247,7 +526,6 @@ object KeyframeInterpolator {
         break
       }
     }
-
     val range = (after.timeMs - before.timeMs).toFloat().coerceAtLeast(1f)
     val rawT = ((relTimeMs - before.timeMs) / range).coerceIn(0f, 1f)
     val factor = computeFactor(before.interpolation, before.customCurvePoints, rawT)
@@ -257,3 +535,4 @@ object KeyframeInterpolator {
     return (interpolatedVal * clip.intensity).coerceIn(0f, 1f)
   }
 }
+

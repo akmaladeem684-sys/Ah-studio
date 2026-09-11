@@ -260,8 +260,11 @@ fun TextStudioPanel(
 
   var activeSubTab by remember { mutableStateOf("Templates") } // "Templates", "Urdu Fonts", "English Fonts", "Style & Color", "Motion & Position", "Captions"
   val installedPlugins by viewModel.installedPlugins.collectAsState()
-  val availableFonts = remember(installedPlugins) { FontManager.getAvailableFonts(context) }
-  var fontOptionsList by remember(availableFonts) { mutableStateOf(availableFonts) }
+  var fontOptionsList by remember { mutableStateOf(FontManager.getAvailableFonts(context)) }
+
+  LaunchedEffect(installedPlugins) {
+    fontOptionsList = FontManager.getAvailableFonts(context)
+  }
 
   val fontPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocument()
@@ -565,9 +568,11 @@ private fun TemplatesSubTab(
   onApplyTemplate: (TextClip) -> Unit
 ) {
   val installedPlugins by com.example.engine.plugin.PluginManager.installedPlugins.collectAsState()
+  
+  var pluginTemplates by remember { mutableStateOf(emptyList<TextTemplateItem>()) }
 
   // Dynamically extract and build template presets from all installed and enabled plugins
-  val pluginTemplates = remember(installedPlugins) {
+  LaunchedEffect(installedPlugins) {
     val list = mutableListOf<TextTemplateItem>()
     for (plugin in installedPlugins) {
       if (!plugin.isEnabled) continue
@@ -648,7 +653,7 @@ private fun TemplatesSubTab(
         }
       }
     }
-    list
+    pluginTemplates = list
   }
 
   val allTemplates = remember(pluginTemplates) { TEXT_TEMPLATES + pluginTemplates }

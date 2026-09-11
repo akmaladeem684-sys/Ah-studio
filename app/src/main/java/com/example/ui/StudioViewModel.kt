@@ -75,7 +75,8 @@ enum class EditorToolbarTab {
   KEYFRAME,
   CAPTIONS,
   BACKGROUND,
-  AI_AVATAR
+  AI_AVATAR,
+  ANIMATIONS
 }
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {

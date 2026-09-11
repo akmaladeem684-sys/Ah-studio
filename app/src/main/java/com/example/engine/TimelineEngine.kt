@@ -2822,6 +2822,38 @@ class TimelineEngine {
     _timeline.value = _timeline.value.copy(stickerClips = list)
   }
 
+  fun updateClipAnimation(clipId: String, update: (ClipAnimationSettings) -> ClipAnimationSettings) {
+    recordHistory()
+    val isMain = _timeline.value.videoClips.any { it.id == clipId }
+    if (isMain) {
+      val list = _timeline.value.videoClips.map { clip ->
+        if (clip.id == clipId) clip.copy(animation = update(clip.animation)) else clip
+      }
+      _timeline.value = _timeline.value.copy(videoClips = list)
+    } else {
+      val list = _timeline.value.overlayClips.map { clip ->
+        if (clip.id == clipId) clip.copy(animation = update(clip.animation)) else clip
+      }
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+    }
+  }
+
+  fun setClipInAnimation(clipId: String, inType: InAnimationType) {
+    updateClipAnimation(clipId) { it.copy(inType = inType) }
+  }
+
+  fun setClipOutAnimation(clipId: String, outType: OutAnimationType) {
+    updateClipAnimation(clipId) { it.copy(outType = outType) }
+  }
+
+  fun setClipComboAnimation(clipId: String, comboType: ComboAnimationType) {
+    updateClipAnimation(clipId) { it.copy(comboType = comboType) }
+  }
+
+  fun clearClipAnimation(clipId: String) {
+    updateClipAnimation(clipId) { ClipAnimationSettings() }
+  }
+
   fun deleteSticker(clipId: String) {
     recordHistory()
     val list = _timeline.value.stickerClips.filterNot { it.id == clipId }

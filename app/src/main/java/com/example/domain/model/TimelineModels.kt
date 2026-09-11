@@ -72,6 +72,85 @@ data class ClipKeyframe(
   )
 }
 
+enum class InAnimationType(val displayName: String, val category: String = "Popular") {
+  NONE("None", "Basic"),
+  FADE_IN("Fade In", "Fade & Zoom"),
+  ZOOM_IN("Zoom In", "Fade & Zoom"),
+  ZOOM_OUT("Zoom Out", "Fade & Zoom"),
+  SLIDE_UP("Slide Up", "Slide"),
+  SLIDE_DOWN("Slide Down", "Slide"),
+  SLIDE_LEFT("Slide Left", "Slide"),
+  SLIDE_RIGHT("Slide Right", "Slide"),
+  SPIN_IN("Spin In", "Motion"),
+  BOUNCE_IN("Bounce In", "Motion"),
+  POP_IN("Pop In", "Motion"),
+  FLIP_X("Flip Horizontal", "3D"),
+  FLIP_Y("Flip Vertical", "3D"),
+  SWING_IN("Swing In", "Motion"),
+  ELASTIC_IN("Elastic In", "Dynamic"),
+  GLITCH_IN("Glitch In", "Distortion"),
+  WIPE_IN("Wipe In", "Basic"),
+  BLUR_IN("Blur In", "Blur")
+}
+
+enum class OutAnimationType(val displayName: String, val category: String = "Popular") {
+  NONE("None", "Basic"),
+  FADE_OUT("Fade Out", "Fade & Zoom"),
+  ZOOM_OUT("Zoom Out", "Fade & Zoom"),
+  ZOOM_IN_OUT("Zoom In Disappear", "Fade & Zoom"),
+  SLIDE_UP_OUT("Slide Up", "Slide"),
+  SLIDE_DOWN_OUT("Slide Down", "Slide"),
+  SLIDE_LEFT_OUT("Slide Left", "Slide"),
+  SLIDE_RIGHT_OUT("Slide Right", "Slide"),
+  SPIN_OUT("Spin Out", "Motion"),
+  BOUNCE_OUT("Bounce Out", "Motion"),
+  POP_OUT("Pop Out", "Motion"),
+  FLIP_X_OUT("Flip Out", "3D"),
+  SWING_OUT("Swing Out", "Motion"),
+  GLITCH_OUT("Glitch Out", "Distortion"),
+  WIPE_OUT("Wipe Out", "Basic"),
+  BLUR_OUT("Blur Out", "Blur")
+}
+
+enum class ComboAnimationType(val displayName: String, val category: String = "Loop & Rhythm") {
+  NONE("None", "Basic"),
+  PULSE("Pulse Beat", "Rhythm"),
+  HEARTBEAT("Heartbeat", "Rhythm"),
+  PENDULUM("Pendulum Swing", "Motion"),
+  FLOAT("Floating Drift", "Motion"),
+  SHAKE("Camera Shake", "Distortion"),
+  JITTER("Glitch Jitter", "Distortion"),
+  FLASH_PULSE("Flash Strobe", "Lighting"),
+  WAVE("Wave Wobble", "Motion"),
+  SPIN_360("Spin 360 Loop", "Motion"),
+  BREATHE("Breathe Flow", "Rhythm"),
+  ZOOM_PULSE("Zoom Rhythm", "Rhythm")
+}
+
+enum class AnimationEasing(val displayName: String) {
+  EASE_OUT("Ease Out (Smooth)"),
+  EASE_IN("Ease In (Accelerate)"),
+  EASE_IN_OUT("Ease In-Out"),
+  LINEAR("Linear (Constant)"),
+  OVERSHOOT("Overshoot (Spring)"),
+  BOUNCE("Bounce"),
+  ELASTIC("Elastic")
+}
+
+data class ClipAnimationSettings(
+  val inType: InAnimationType = InAnimationType.NONE,
+  val inDurationMs: Long = 500L,
+  val outType: OutAnimationType = OutAnimationType.NONE,
+  val outDurationMs: Long = 500L,
+  val comboType: ComboAnimationType = ComboAnimationType.NONE,
+  val intensity: Float = 1.0f,
+  val easing: AnimationEasing = AnimationEasing.EASE_OUT,
+  val speed: Float = 1.0f
+) {
+  val hasAnimation: Boolean
+    get() = inType != InAnimationType.NONE || outType != OutAnimationType.NONE || comboType != ComboAnimationType.NONE
+}
+
 data class VideoClip(
   val id: String = UUID.randomUUID().toString(),
   val uri: String = "",
@@ -102,7 +181,8 @@ data class VideoClip(
   val freezeFrameAtMs: Long? = null,
   val sourceTotalDurationMs: Long = 0L,
   val keyframes: List<ClipKeyframe> = emptyList(),
-  val filter: FilterSettings? = null
+  val filter: FilterSettings? = null,
+  val animation: ClipAnimationSettings = ClipAnimationSettings()
 ) {
   val totalMediaDurationMs: Long
     get() = if (sourceTotalDurationMs > 0L) sourceTotalDurationMs else maxOf(sourceEndMs, durationMs)

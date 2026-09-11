@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.zIndex
 import com.example.ui.StudioViewModel
 import com.example.ui.components.KeyframeAnimationPanel
+import com.example.ui.components.animation.AnimationsToolPanel
 import com.example.ui.components.TransitionsPanel
 import com.example.ui.components.trim.VideoTrimmingToolPanel
 import com.example.ui.components.formatDuration
@@ -260,6 +261,7 @@ fun EditorScreen(
             EditorToolbarTab.AI -> GenerateMediaToolPanel(viewModel)
             EditorToolbarTab.AI_AVATAR -> AIAvatarToolPanel(viewModel)
             EditorToolbarTab.BACKGROUND -> BackgroundToolPanel(viewModel)
+            EditorToolbarTab.ANIMATIONS -> AnimationsToolPanel(viewModel)
             null -> {}
           }
         }
@@ -1787,205 +1789,255 @@ private fun FilmstripThumbnailsRow(
   }
 }
 
-// BOTTOM TOOLBAR: CapCut-style horizontal scroll with all tools preserved, icons, labels, AI tags
+// BOTTOM TOOLBAR: Modern 6-column card navigation layout with smooth horizontal side-scroll
 @Composable
 private fun EditorBottomToolbar(
   activeTab: EditorToolbarTab?,
   onTabSelected: (EditorToolbarTab) -> Unit
 ) {
-  Row(
+  BoxWithConstraints(
     modifier = Modifier
       .fillMaxWidth()
-      .height(68.dp)
-      .background(Color(0xFF141416))
-      .border(BorderStroke(0.5.dp, Color(0xFF262628)))
-      .horizontalScroll(rememberScrollState())
-      .padding(horizontal = 6.dp, vertical = 4.dp)
-      .testTag("toolbar_scroll"),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(4.dp)
+      .background(Color(0xFF0C0E15))
+      .drawBehind {
+        // Subtle top border line matching dark video-editor UI
+        drawLine(
+          color = Color(0xFF1E2230),
+          start = Offset(0f, 0f),
+          end = Offset(size.width, 0f),
+          strokeWidth = 1.dp.toPx()
+        )
+      }
   ) {
-    // 1. Edit ✂️
-    EditorToolbarItem(
-      icon = Icons.Default.Edit,
-      label = "Edit",
-      isSelected = activeTab == EditorToolbarTab.EDIT,
-      testTag = "edit_btn",
-      onClick = { onTabSelected(EditorToolbarTab.EDIT) }
-    )
+    val totalWidth = maxWidth
+    val horizontalPadding = 8.dp
+    val itemSpacing = 6.dp
+    // Calculate width dynamically so exactly 6 items fit across the visible screen
+    val calculatedWidth = (totalWidth - (horizontalPadding * 2) - (itemSpacing * 5)) / 6f
+    val itemWidth = calculatedWidth.coerceAtLeast(52.dp)
 
-    // 1b. Trim ✂️
-    EditorToolbarItem(
-      icon = Icons.Default.ContentCut,
-      label = "Trim",
-      isSelected = activeTab == EditorToolbarTab.TRIM,
-      testTag = "trim_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TRIM) }
-    )
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .horizontalScroll(rememberScrollState())
+        .padding(horizontal = horizontalPadding, vertical = 8.dp)
+        .navigationBarsPadding()
+        .testTag("toolbar_scroll"),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(itemSpacing)
+    ) {
+      // 1. Smart Split (Edit) ✂️
+      EditorToolbarItem(
+        icon = Icons.Default.ContentCut,
+        label = "Smart Split",
+        isSelected = activeTab == EditorToolbarTab.EDIT,
+        itemWidth = itemWidth,
+        testTag = "edit_btn",
+        onClick = { onTabSelected(EditorToolbarTab.EDIT) }
+      )
 
-    // 2. Audio 🎵
-    EditorToolbarItem(
-      icon = Icons.Default.Audiotrack,
-      label = "Audio",
-      isSelected = activeTab == EditorToolbarTab.AUDIO,
-      testTag = "audio_btn",
-      onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
-    )
+      // 2. Animations 🎬
+      EditorToolbarItem(
+        icon = Icons.Default.Animation,
+        label = "Animations",
+        isSelected = activeTab == EditorToolbarTab.ANIMATIONS,
+        itemWidth = itemWidth,
+        testTag = "animations_btn",
+        onClick = { onTabSelected(EditorToolbarTab.ANIMATIONS) }
+      )
 
-    // 2b. Volume 🔊
-    EditorToolbarItem(
-      icon = Icons.Default.VolumeUp,
-      label = "Volume",
-      isSelected = activeTab == EditorToolbarTab.VOLUME,
-      testTag = "volume_btn",
-      onClick = { onTabSelected(EditorToolbarTab.VOLUME) }
-    )
+      // 3. Audio Beat (Audio) 🎵
+      EditorToolbarItem(
+        icon = Icons.Default.GraphicEq,
+        label = "Audio Beat",
+        isSelected = activeTab == EditorToolbarTab.AUDIO,
+        itemWidth = itemWidth,
+        testTag = "audio_btn",
+        onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
+      )
 
-    // 3. Text T
-    EditorToolbarItem(
-      icon = Icons.Default.TextFields,
-      label = "Text",
-      isSelected = activeTab == EditorToolbarTab.TEXT,
-      testTag = "text_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
-    )
+      // 4. Speed Curve (Speed) ⚡
+      EditorToolbarItem(
+        icon = Icons.Default.Speed,
+        label = "Speed Curve",
+        isSelected = activeTab == EditorToolbarTab.SPEED,
+        itemWidth = itemWidth,
+        testTag = "speed_btn",
+        onClick = { onTabSelected(EditorToolbarTab.SPEED) }
+      )
 
-    // 4. Effects ⭐
-    EditorToolbarItem(
-      icon = Icons.Default.AutoFixHigh,
-      label = "Effects",
-      isSelected = activeTab == EditorToolbarTab.EFFECTS,
-      testTag = "effects_btn",
-      onClick = { onTabSelected(EditorToolbarTab.EFFECTS) }
-    )
+      // 5. AI Effects (Effects) ✨
+      EditorToolbarItem(
+        icon = Icons.Default.AutoAwesome,
+        label = "AI Effects",
+        isSelected = activeTab == EditorToolbarTab.EFFECTS,
+        itemWidth = itemWidth,
+        testTag = "effects_btn",
+        onClick = { onTabSelected(EditorToolbarTab.EFFECTS) }
+      )
 
-    // 5. Overlay 📦
-    EditorToolbarItem(
-      icon = Icons.Default.Layers,
-      label = "Overlay",
-      isSelected = activeTab == EditorToolbarTab.OVERLAY,
-      testTag = "overlay_btn",
-      onClick = { onTabSelected(EditorToolbarTab.OVERLAY) }
-    )
+      // 5. Text T
+      EditorToolbarItem(
+        icon = Icons.Default.TextFields,
+        label = "Text",
+        isSelected = activeTab == EditorToolbarTab.TEXT,
+        itemWidth = itemWidth,
+        testTag = "text_btn",
+        onClick = { onTabSelected(EditorToolbarTab.TEXT) }
+      )
 
-    // 6. Captions CC
-    EditorToolbarItem(
-      icon = Icons.Default.ClosedCaption,
-      label = "Captions",
-      isSelected = activeTab == EditorToolbarTab.CAPTIONS,
-      testTag = "captions_btn",
-      onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
-    )
+      // 6. Stickers ⭕
+      EditorToolbarItem(
+        icon = Icons.Default.EmojiEmotions,
+        label = "Stickers",
+        isSelected = activeTab == EditorToolbarTab.STICKERS,
+        itemWidth = itemWidth,
+        testTag = "stickers_btn",
+        onClick = { onTabSelected(EditorToolbarTab.STICKERS) }
+      )
 
-    // 7. Filters 🎨
-    EditorToolbarItem(
-      icon = Icons.Default.ColorLens,
-      label = "Filters",
-      isSelected = activeTab == EditorToolbarTab.FILTERS,
-      testTag = "filters_btn",
-      onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
-    )
+      // 7. Overlay 📦
+      EditorToolbarItem(
+        icon = Icons.Default.Layers,
+        label = "Overlay",
+        isSelected = activeTab == EditorToolbarTab.OVERLAY,
+        itemWidth = itemWidth,
+        testTag = "overlay_btn",
+        onClick = { onTabSelected(EditorToolbarTab.OVERLAY) }
+      )
 
-    // 8. Adjust ◯ with sliders
-    EditorToolbarItem(
-      icon = Icons.Default.Tune,
-      label = "Adjust",
-      isSelected = activeTab == EditorToolbarTab.ADJUST,
-      testTag = "adjust_btn",
-      onClick = { onTabSelected(EditorToolbarTab.ADJUST) }
-    )
+      // 8. Filters 🎨
+      EditorToolbarItem(
+        icon = Icons.Default.ColorLens,
+        label = "Filters",
+        isSelected = activeTab == EditorToolbarTab.FILTERS,
+        itemWidth = itemWidth,
+        testTag = "filters_btn",
+        onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
+      )
 
-    // 9. Stickers ⭕
-    EditorToolbarItem(
-      icon = Icons.Default.EmojiEmotions,
-      label = "Stickers",
-      isSelected = activeTab == EditorToolbarTab.STICKERS,
-      testTag = "stickers_btn",
-      onClick = { onTabSelected(EditorToolbarTab.STICKERS) }
-    )
+      // 9. Adjust ◯
+      EditorToolbarItem(
+        icon = Icons.Default.Tune,
+        label = "Adjust",
+        isSelected = activeTab == EditorToolbarTab.ADJUST,
+        itemWidth = itemWidth,
+        testTag = "adjust_btn",
+        onClick = { onTabSelected(EditorToolbarTab.ADJUST) }
+      )
 
-    // 10. Generate media ⊕ (AI tag)
-    EditorToolbarItem(
-      icon = Icons.Default.VideoLibrary,
-      label = "Generate media",
-      isSelected = activeTab == EditorToolbarTab.AI,
-      testTag = "generate_media_btn",
-      badgeText = "AI",
-      onClick = { onTabSelected(EditorToolbarTab.AI) }
-    )
+      // 10. Trim ✂️
+      EditorToolbarItem(
+        icon = Icons.Default.Crop,
+        label = "Trim",
+        isSelected = activeTab == EditorToolbarTab.TRIM,
+        itemWidth = itemWidth,
+        testTag = "trim_btn",
+        onClick = { onTabSelected(EditorToolbarTab.TRIM) }
+      )
 
-    // 11. AI avatar 👤 (Purple diamond tag)
-    EditorToolbarItem(
-      icon = Icons.Default.AccountBox,
-      label = "AI avatar",
-      isSelected = activeTab == EditorToolbarTab.AI_AVATAR,
-      testTag = "ai_avatar_btn",
-      badgeIcon = Icons.Default.Diamond,
-      onClick = { onTabSelected(EditorToolbarTab.AI_AVATAR) }
-    )
+      // 11. Captions CC
+      EditorToolbarItem(
+        icon = Icons.Default.ClosedCaption,
+        label = "Captions",
+        isSelected = activeTab == EditorToolbarTab.CAPTIONS,
+        itemWidth = itemWidth,
+        testTag = "captions_btn",
+        onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
+      )
 
-    // 12. Aspect ratio □
-    EditorToolbarItem(
-      icon = Icons.Default.CropSquare,
-      label = "Aspect ratio",
-      isSelected = activeTab == EditorToolbarTab.CANVAS,
-      testTag = "aspect_ratio_btn",
-      onClick = { onTabSelected(EditorToolbarTab.CANVAS) }
-    )
+      // 12. Transitions 🔄
+      EditorToolbarItem(
+        icon = Icons.Default.Transform,
+        label = "Transitions",
+        isSelected = activeTab == EditorToolbarTab.TRANSITIONS,
+        itemWidth = itemWidth,
+        testTag = "transitions_btn",
+        onClick = { onTabSelected(EditorToolbarTab.TRANSITIONS) }
+      )
 
-    // 13. Background ▨
-    EditorToolbarItem(
-      icon = Icons.Default.Texture,
-      label = "Background",
-      isSelected = activeTab == EditorToolbarTab.BACKGROUND,
-      testTag = "background_btn",
-      onClick = { onTabSelected(EditorToolbarTab.BACKGROUND) }
-    )
+      // 13. Volume 🔊
+      EditorToolbarItem(
+        icon = Icons.Default.VolumeUp,
+        label = "Volume",
+        isSelected = activeTab == EditorToolbarTab.VOLUME,
+        itemWidth = itemWidth,
+        testTag = "volume_btn",
+        onClick = { onTabSelected(EditorToolbarTab.VOLUME) }
+      )
 
-    // 14. Speed ⚡
-    EditorToolbarItem(
-      icon = Icons.Default.Speed,
-      label = "Speed",
-      isSelected = activeTab == EditorToolbarTab.SPEED,
-      testTag = "speed_btn",
-      onClick = { onTabSelected(EditorToolbarTab.SPEED) }
-    )
+      // 14. Generate media ⊕ (AI tag)
+      EditorToolbarItem(
+        icon = Icons.Default.VideoLibrary,
+        label = "AI Media",
+        isSelected = activeTab == EditorToolbarTab.AI,
+        itemWidth = itemWidth,
+        testTag = "generate_media_btn",
+        badgeText = "AI",
+        onClick = { onTabSelected(EditorToolbarTab.AI) }
+      )
 
-    // 15. Transitions 🔄
-    EditorToolbarItem(
-      icon = Icons.Default.Transform,
-      label = "Transitions",
-      isSelected = activeTab == EditorToolbarTab.TRANSITIONS,
-      testTag = "transitions_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TRANSITIONS) }
-    )
+      // 15. AI avatar 👤
+      EditorToolbarItem(
+        icon = Icons.Default.AccountBox,
+        label = "AI Avatar",
+        isSelected = activeTab == EditorToolbarTab.AI_AVATAR,
+        itemWidth = itemWidth,
+        testTag = "ai_avatar_btn",
+        badgeIcon = Icons.Default.Diamond,
+        onClick = { onTabSelected(EditorToolbarTab.AI_AVATAR) }
+      )
 
-    // 16. Chroma Key 🟩
-    EditorToolbarItem(
-      icon = Icons.Default.FilterFrames,
-      label = "Chroma",
-      isSelected = activeTab == EditorToolbarTab.CHROMA,
-      testTag = "chroma_btn",
-      onClick = { onTabSelected(EditorToolbarTab.CHROMA) }
-    )
+      // 16. Canvas / Aspect ratio □
+      EditorToolbarItem(
+        icon = Icons.Default.CropSquare,
+        label = "Canvas",
+        isSelected = activeTab == EditorToolbarTab.CANVAS,
+        itemWidth = itemWidth,
+        testTag = "aspect_ratio_btn",
+        onClick = { onTabSelected(EditorToolbarTab.CANVAS) }
+      )
 
-    // 17. Keyframe 💎
-    EditorToolbarItem(
-      icon = Icons.Default.Diamond,
-      label = "Keyframe",
-      isSelected = activeTab == EditorToolbarTab.KEYFRAME,
-      testTag = "keyframe_btn",
-      onClick = { onTabSelected(EditorToolbarTab.KEYFRAME) }
-    )
+      // 17. Background ▨
+      EditorToolbarItem(
+        icon = Icons.Default.Texture,
+        label = "Background",
+        isSelected = activeTab == EditorToolbarTab.BACKGROUND,
+        itemWidth = itemWidth,
+        testTag = "background_btn",
+        onClick = { onTabSelected(EditorToolbarTab.BACKGROUND) }
+      )
 
-    // 18. Media / Add ➕
-    EditorToolbarItem(
-      icon = Icons.Default.AddPhotoAlternate,
-      label = "Media",
-      isSelected = activeTab == EditorToolbarTab.MEDIA,
-      testTag = "add_btn",
-      onClick = { onTabSelected(EditorToolbarTab.MEDIA) }
-    )
+      // 18. Chroma Key 🟩
+      EditorToolbarItem(
+        icon = Icons.Default.FilterFrames,
+        label = "Chroma",
+        isSelected = activeTab == EditorToolbarTab.CHROMA,
+        itemWidth = itemWidth,
+        testTag = "chroma_btn",
+        onClick = { onTabSelected(EditorToolbarTab.CHROMA) }
+      )
+
+      // 19. Keyframe 💎
+      EditorToolbarItem(
+        icon = Icons.Default.Diamond,
+        label = "Keyframe",
+        isSelected = activeTab == EditorToolbarTab.KEYFRAME,
+        itemWidth = itemWidth,
+        testTag = "keyframe_btn",
+        onClick = { onTabSelected(EditorToolbarTab.KEYFRAME) }
+      )
+
+      // 20. Media / Add ➕
+      EditorToolbarItem(
+        icon = Icons.Default.AddPhotoAlternate,
+        label = "Media",
+        isSelected = activeTab == EditorToolbarTab.MEDIA,
+        itemWidth = itemWidth,
+        testTag = "add_btn",
+        onClick = { onTabSelected(EditorToolbarTab.MEDIA) }
+      )
+    }
   }
 }
 
@@ -1994,22 +2046,40 @@ private fun EditorToolbarItem(
   icon: ImageVector,
   label: String,
   isSelected: Boolean,
+  itemWidth: androidx.compose.ui.unit.Dp,
   testTag: String,
   badgeText: String? = null,
   badgeIcon: ImageVector? = null,
   onClick: () -> Unit
 ) {
-  Box(
+  val activeBorderColor = Color(0xFFE5A93C) // Warm golden amber as in screenshot
+  val inactiveBorderColor = Color(0xFF222636) // Dark modern slate border
+  val activeBgColor = Color(0xFF1B1D27) // Subtle dark warm tint
+  val inactiveBgColor = Color(0xFF131620) // Deep dark card background
+  val activeIconColor = Color(0xFFE5A93C)
+  val inactiveIconColor = Color(0xFF8E95A5)
+  val activeTextColor = Color.White
+  val inactiveTextColor = Color(0xFF8E95A5)
+
+  Surface(
     modifier = Modifier
-      .defaultMinSize(minWidth = 62.dp, minHeight = 56.dp)
-      .clip(RoundedCornerShape(8.dp))
+      .width(itemWidth)
+      .height(68.dp)
+      .clip(RoundedCornerShape(14.dp))
       .clickable(onClick = onClick)
-      .background(if (isSelected) CyanAccent.copy(alpha = 0.2f) else Color.Transparent)
-      .padding(horizontal = 6.dp, vertical = 4.dp)
       .testTag(testTag),
-    contentAlignment = Alignment.Center
+    shape = RoundedCornerShape(14.dp),
+    color = if (isSelected) activeBgColor else inactiveBgColor,
+    border = BorderStroke(
+      width = if (isSelected) 1.75.dp else 1.dp,
+      color = if (isSelected) activeBorderColor else inactiveBorderColor
+    ),
+    tonalElevation = if (isSelected) 4.dp else 0.dp
   ) {
     Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 2.dp, vertical = 6.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center
     ) {
@@ -2017,21 +2087,21 @@ private fun EditorToolbarItem(
         Icon(
           imageVector = icon,
           contentDescription = label,
-          tint = if (isSelected) CyanAccent else Color.White,
+          tint = if (isSelected) activeIconColor else inactiveIconColor,
           modifier = Modifier.size(24.dp)
         )
         if (badgeText != null) {
           Surface(
-            color = CyanAccent,
+            color = activeBorderColor,
             shape = RoundedCornerShape(3.dp),
-            modifier = Modifier.offset(x = 10.dp, y = (-5).dp)
+            modifier = Modifier.offset(x = 8.dp, y = (-4).dp)
           ) {
             Text(
               text = badgeText,
               color = Color.Black,
-              fontSize = 8.sp,
+              fontSize = 7.5.sp,
               fontWeight = FontWeight.Black,
-              modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.5.dp)
+              modifier = Modifier.padding(horizontal = 2.5.dp, vertical = 0.5.dp)
             )
           }
         } else if (badgeIcon != null) {
@@ -2040,20 +2110,22 @@ private fun EditorToolbarItem(
             contentDescription = null,
             tint = PurpleAccent,
             modifier = Modifier
-              .size(10.dp)
-              .offset(x = 8.dp, y = (-4).dp)
+              .size(9.dp)
+              .offset(x = 6.dp, y = (-3).dp)
           )
         }
       }
-      Spacer(modifier = Modifier.height(3.dp))
+      Spacer(modifier = Modifier.height(5.dp))
       Text(
         text = label,
         style = MaterialTheme.typography.labelSmall.copy(
-          fontSize = 11.sp,
-          color = if (isSelected) CyanAccent else Color(0xFFE2E2E2),
-          fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+          fontSize = 10.5.sp,
+          color = if (isSelected) activeTextColor else inactiveTextColor,
+          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+          textAlign = TextAlign.Center
         ),
-        maxLines = 1
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
       )
     }
   }
