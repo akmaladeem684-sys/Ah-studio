@@ -153,6 +153,8 @@ data class TextClip(
   val fontSizeSp: Float = 24f,
   val fontWeight: Int = 700,
   val isItalic: Boolean = false,
+  val isUnderline: Boolean = false,
+  val isAllCaps: Boolean = false,
   val alignment: String = "Center",
   val letterSpacing: Float = 0f,
   val lineSpacing: Float = 1.0f,

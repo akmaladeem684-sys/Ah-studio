@@ -229,6 +229,14 @@ class MuxerCoordinator(
 class VideoExporter(private val context: Context) {
 
   private val tag = "VideoExporter"
+
+  private class CachedVideoFrame(
+    val clipId: String,
+    val sourcePosMs: Long,
+    val bitmap: Bitmap
+  )
+
+  private val videoFrameCache = mutableMapOf<String, CachedVideoFrame>()
   private val compositionEngine = VideoCompositionEngine(context)
   private val audioProcessor = AudioExportProcessor(context)
 
@@ -647,14 +655,14 @@ class VideoExporter(private val context: Context) {
 
         if (useGpuSurface && gpuRenderer != null && windowSurface != null) {
           // Hardware GPU rendering directly to encoder surface
-          val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps)
+          val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps, exportWidth, exportHeight)
           val mainTexId = if (mainBmp != null) {
             gpuRenderer.uploadImageTexture("main_${composedFrame.activeClip?.id ?: "none"}", mainBmp)
           } else 0
 
           val overlayTexMap = mutableMapOf<String, Int>()
           for (overlay in composedFrame.activeOverlays) {
-            val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps)
+            val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps, exportWidth, exportHeight)
             if (bmp != null) {
               val texId = gpuRenderer.uploadImageTexture("overlay_${overlay.clip.id}", bmp)
               overlayTexMap[overlay.clip.id] = texId
@@ -679,10 +687,10 @@ class VideoExporter(private val context: Context) {
           windowSurface.swapBuffers()
         } else {
           // CPU buffer fallback for headless environments
-          val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps)
+          val mainBmp = fetchClipBitmap(composedFrame.activeClip, composedFrame.clipSourcePosMs, retrievers, imageBitmaps, exportWidth, exportHeight)
           val overlayBmps = mutableMapOf<String, Bitmap>()
           for (overlay in composedFrame.activeOverlays) {
-            val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps)
+            val bmp = fetchClipBitmap(overlay.clip, overlay.sourcePosMs, retrievers, imageBitmaps, exportWidth, exportHeight)
             if (bmp != null) {
               overlayBmps[overlay.clip.id] = bmp
             }
@@ -899,6 +907,12 @@ class VideoExporter(private val context: Context) {
         try { r.release() } catch (ignored: Exception) {}
       }
       retrievers.clear()
+      for (f in videoFrameCache.values) {
+        if (!f.bitmap.isRecycled) {
+          try { f.bitmap.recycle() } catch (ignored: Exception) {}
+        }
+      }
+      videoFrameCache.clear()
       imageBitmaps.clear()
       audioProcessor.clearCache()
     }
@@ -990,12 +1004,19 @@ class VideoExporter(private val context: Context) {
     clip: VideoClip?,
     sourcePosMs: Long,
     retrievers: MutableMap<String, MediaMetadataRetriever>,
-    imageBitmaps: MutableMap<String, Bitmap>
+    imageBitmaps: MutableMap<String, Bitmap>,
+    targetWidth: Int = 1080,
+    targetHeight: Int = 1920
   ): Bitmap? {
     if (clip == null || clip.uri.isBlank()) return null
 
     if (!clip.isVideo) {
       return imageBitmaps[clip.uri]
+    }
+
+    val cached = videoFrameCache[clip.id]
+    if (cached != null && kotlin.math.abs(cached.sourcePosMs - sourcePosMs) <= 10L && !cached.bitmap.isRecycled) {
+      return cached.bitmap
     }
 
     val retriever = retrievers.getOrPut(clip.uri) {
@@ -1015,10 +1036,22 @@ class VideoExporter(private val context: Context) {
 
     return try {
       val sourceUs = sourcePosMs * 1000L
-      retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        ?: retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST)
+      val newBmp = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+        retriever.getScaledFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST, targetWidth, targetHeight)
+          ?: retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST)
+      } else {
+        retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST)
+      }
+
+      if (newBmp != null) {
+        if (cached != null && cached.bitmap != newBmp && !cached.bitmap.isRecycled) {
+          try { cached.bitmap.recycle() } catch (ignored: Exception) {}
+        }
+        videoFrameCache[clip.id] = CachedVideoFrame(clip.id, sourcePosMs, newBmp)
+      }
+      newBmp ?: cached?.bitmap
     } catch (e: Exception) {
-      null
+      cached?.bitmap
     }
   }
 

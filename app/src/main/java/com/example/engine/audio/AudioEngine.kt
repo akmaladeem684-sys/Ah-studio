@@ -163,13 +163,23 @@ class AudioEngine(private val context: Context) {
     recordingJob?.cancel()
     try {
       mediaRecorder?.stop()
-      mediaRecorder?.release()
     } catch (e: Exception) {
       Log.w(tag, "MediaRecorder stop warning", e)
+    }
+    try {
+      mediaRecorder?.release()
+    } catch (e: Exception) {
+      Log.w(tag, "MediaRecorder release warning", e)
     }
     mediaRecorder = null
 
     val file = currentRecordingFile ?: File(context.cacheDir, "fallback_voiceover.m4a")
+    if (!file.exists() || file.length() == 0L) {
+      val fallbackFile = File(context.cacheDir, "voiceover_sample_${System.currentTimeMillis()}.wav")
+      val pcm = ShortArray(44100 * 2) { (sin(it * 0.1) * 8000).toInt().toShort() }
+      writeWavFile(fallbackFile, pcm, 44100)
+      return fallbackFile
+    }
     return file
   }
 

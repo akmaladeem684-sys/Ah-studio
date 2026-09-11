@@ -6,14 +6,14 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import java.io.File
 import java.io.FileOutputStream
 
 data class FontOption(
   val id: String,
   val name: String,
+  val category: String = "English", // "Urdu", "English", "Custom"
+  val nativeSample: String = "",
   val isCustom: Boolean = false,
   val filePath: String? = null
 )
@@ -22,18 +22,31 @@ object FontManager {
   private const val TAG = "FontManager"
   private const val FONTS_DIR = "custom_fonts"
 
-  val BUILT_IN_FONTS = listOf(
-    FontOption("Default", "System Default"),
-    FontOption("Sans-Serif", "Modern Sans"),
-    FontOption("Serif", "Classic Serif"),
-    FontOption("Monospace", "Monospace Code"),
-    FontOption("Impact", "Impact Display"),
-    FontOption("Bebas", "Bebas Headline"),
-    FontOption("Montserrat", "Montserrat Geometric"),
-    FontOption("Playfair", "Playfair Editorial"),
-    FontOption("Cinematic", "Cinematic Wide"),
-    FontOption("Cursive", "Creative Script")
+  val URDU_FONTS = listOf(
+    FontOption("jameel_nastaliq", "Jameel Noori Nastaliq", "Urdu", "جمیل نوری نستعلیق"),
+    FontOption("nastaleeq", "Urdu Calligraphy Nastaleeq", "Urdu", "اردو خطاطی نستعلیق"),
+    FontOption("alvi_nastaliq", "Alvi Nastaleeq", "Urdu", "علوی نستعلیق"),
+    FontOption("urdu_naskh", "Urdu Naskh Modern", "Urdu", "نسخ اردو"),
+    FontOption("gulzar", "Gulzar Urdu", "Urdu", "گلزار اردو"),
+    FontOption("lateef", "Lateef Urdu Script", "Urdu", "لطیف اردو"),
+    FontOption("scheherazade", "Scheherazade Urdu", "Urdu", "شہربانو اردو"),
+    FontOption("kasheeda", "Kasheeda Calligraphy", "Urdu", "کشیدہ اردو")
   )
+
+  val ENGLISH_FONTS = listOf(
+    FontOption("Sans-Serif", "Modern Sans", "English", "Modern Sans"),
+    FontOption("Serif", "Classic Serif", "English", "Classic Serif"),
+    FontOption("Monospace", "Monospace Code", "English", "Monospace"),
+    FontOption("Impact", "Impact Display", "English", "IMPACT BOLD"),
+    FontOption("Bebas", "Bebas Headline", "English", "BEBAS HEADER"),
+    FontOption("Montserrat", "Montserrat Geometric", "English", "Montserrat"),
+    FontOption("Playfair", "Playfair Editorial", "English", "Playfair"),
+    FontOption("Cinematic", "Cinematic Wide", "English", "CINEMATIC"),
+    FontOption("Cursive", "Creative Script", "English", "Creative Cursive"),
+    FontOption("Futuristic", "Cyber Tech", "English", "CYBERPUNK")
+  )
+
+  val BUILT_IN_FONTS = URDU_FONTS + ENGLISH_FONTS
 
   fun getAvailableFonts(context: Context): List<FontOption> {
     val fonts = mutableListOf<FontOption>()
@@ -49,6 +62,8 @@ object FontManager {
           FontOption(
             id = f.name,
             name = "$displayName (Imported)",
+            category = "Custom",
+            nativeSample = "Custom Font",
             isCustom = true,
             filePath = f.absolutePath
           )
@@ -66,6 +81,8 @@ object FontManager {
         FontOption(
           id = fontItem.id,
           name = "🧩 ${fontItem.name} (${plugin.manifest.name})",
+          category = "Custom",
+          nativeSample = fontItem.name,
           isCustom = true,
           filePath = fontFile?.absolutePath
         )
@@ -101,6 +118,8 @@ object FontManager {
       return FontOption(
         id = destination.name,
         name = destination.nameWithoutExtension.replace('_', ' ') + " (Imported)",
+        category = "Custom",
+        nativeSample = "Imported",
         isCustom = true,
         filePath = destination.absolutePath
       )
@@ -136,13 +155,30 @@ object FontManager {
       }
     }
 
-    // 2. Try built-in typefaces
-    val baseTypeface = when (fontFamily.lowercase()) {
-      "sans-serif", "sans", "montserrat" -> Typeface.SANS_SERIF
-      "serif", "playfair", "cinematic" -> Typeface.SERIF
-      "monospace", "code" -> Typeface.MONOSPACE
-      "impact", "bebas" -> Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-      "cursive", "script" -> {
+    // 2. Map Urdu / English built-in typefaces
+    val lower = fontFamily.lowercase()
+    val baseTypeface = when {
+      // Urdu / Arabic font mappings
+      lower.contains("nastaliq") || lower.contains("nastaleeq") || lower.contains("jameel") || lower.contains("alvi") || lower.contains("kasheeda") -> {
+        try {
+          Typeface.create("sans-serif-arabic", Typeface.BOLD)
+        } catch (_: Exception) {
+          Typeface.create(Typeface.SERIF, Typeface.BOLD)
+        }
+      }
+      lower.contains("naskh") || lower.contains("scheherazade") || lower.contains("lateef") || lower.contains("gulzar") -> {
+        try {
+          Typeface.create("sans-serif-arabic", Typeface.NORMAL)
+        } catch (_: Exception) {
+          Typeface.SERIF
+        }
+      }
+      // English font mappings
+      lower.contains("sans-serif") || lower.contains("sans") || lower.contains("montserrat") -> Typeface.SANS_SERIF
+      lower.contains("serif") || lower.contains("playfair") || lower.contains("cinematic") -> Typeface.SERIF
+      lower.contains("monospace") || lower.contains("code") -> Typeface.MONOSPACE
+      lower.contains("impact") || lower.contains("bebas") || lower.contains("futuristic") -> Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+      lower.contains("cursive") || lower.contains("script") -> {
         try {
           Typeface.create("cursive", Typeface.NORMAL)
         } catch (_: Exception) {
@@ -176,12 +212,12 @@ object FontManager {
       }
     }
 
-    return when (fontFamily.lowercase()) {
-      "sans-serif", "sans", "montserrat", "impact", "bebas" -> FontFamily.SansSerif
-      "serif", "playfair", "cinematic" -> FontFamily.Serif
-      "monospace", "code" -> FontFamily.Monospace
-      "cursive", "script" -> FontFamily.Cursive
-      else -> FontFamily.Default
+    val lower = fontFamily.lowercase()
+    return when {
+      lower.contains("nastaliq") || lower.contains("nastaleeq") || lower.contains("jameel") || lower.contains("serif") || lower.contains("playfair") -> FontFamily.Serif
+      lower.contains("monospace") || lower.contains("code") -> FontFamily.Monospace
+      lower.contains("cursive") || lower.contains("script") -> FontFamily.Cursive
+      else -> FontFamily.SansSerif
     }
   }
 }

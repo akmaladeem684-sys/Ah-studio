@@ -1,5 +1,11 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,12 +32,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.domain.model.*
 import com.example.engine.SelectedTrackElement
 import com.example.engine.audio.SoundEffectsCatalog
@@ -39,6 +47,7 @@ import com.example.ui.StudioViewModel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.text.TextStudioPanel
 import com.example.ui.theme.*
+import java.io.File
 
 @Composable
 fun EditToolPanel(
@@ -179,12 +188,49 @@ fun VolumeSliderSection(
 
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+          // Decrease Volume Button (-)
+          IconButton(
+            onClick = {
+              val newVol = (sliderVal - 0.10f).coerceIn(0f, 3.0f)
+              sliderVal = newVol
+              viewModel.timelineEngine.setClipVolume(targetClipId, newVol)
+            },
+            modifier = Modifier
+              .size(30.dp)
+              .clip(CircleShape)
+              .background(StudioSurface)
+              .border(1.dp, StudioBorder, CircleShape)
+              .testTag("volume_decrease_btn")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Remove,
+              contentDescription = "Decrease Volume",
+              tint = TextPrimary,
+              modifier = Modifier.size(16.dp)
+            )
+          }
+
+          // Clickable Percentage Display Chip
           Surface(
+            onClick = {
+              val nextVol = when {
+                isMuted || sliderVal == 0f -> 1.0f
+                sliderVal < 0.5f -> 0.5f
+                sliderVal < 1.0f -> 1.0f
+                sliderVal < 1.5f -> 1.5f
+                sliderVal < 2.0f -> 2.0f
+                sliderVal < 3.0f -> 3.0f
+                else -> 1.0f
+              }
+              sliderVal = nextVol
+              viewModel.timelineEngine.setClipVolume(targetClipId, nextVol)
+            },
             shape = RoundedCornerShape(6.dp),
             color = if (isMuted || sliderVal == 0f) RedAccent.copy(alpha = 0.2f) else GreenAccent.copy(alpha = 0.2f),
-            border = BorderStroke(1.dp, if (isMuted || sliderVal == 0f) RedAccent else GreenAccent)
+            border = BorderStroke(1.dp, if (isMuted || sliderVal == 0f) RedAccent else GreenAccent),
+            modifier = Modifier.testTag("volume_percentage_chip")
           ) {
             Text(
               text = if (isMuted || sliderVal == 0f) "Muted" else "${(sliderVal * 100).toInt()}%",
@@ -193,23 +239,55 @@ fun VolumeSliderSection(
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp
               ),
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
             )
           }
 
+          // Increase Volume Button (+)
           IconButton(
-            onClick = { viewModel.timelineEngine.toggleClipMute(targetClipId) },
+            onClick = {
+              val newVol = if (isMuted || sliderVal == 0f) 1.0f else (sliderVal + 0.10f).coerceIn(0f, 3.0f)
+              sliderVal = newVol
+              viewModel.timelineEngine.setClipVolume(targetClipId, newVol)
+            },
             modifier = Modifier
-              .size(32.dp)
+              .size(30.dp)
+              .clip(CircleShape)
+              .background(GreenAccent.copy(alpha = 0.25f))
+              .border(1.dp, GreenAccent, CircleShape)
+              .testTag("volume_increase_btn")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Add,
+              contentDescription = "Increase Volume",
+              tint = GreenAccent,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+
+          // Mute / Speaker Toggle Button
+          IconButton(
+            onClick = {
+              if (isMuted || sliderVal == 0f) {
+                val newVol = if (currentVol > 0f) currentVol else 1.0f
+                sliderVal = newVol
+                viewModel.timelineEngine.setClipVolume(targetClipId, newVol)
+              } else {
+                viewModel.timelineEngine.toggleClipMute(targetClipId)
+              }
+            },
+            modifier = Modifier
+              .size(30.dp)
               .clip(CircleShape)
               .background(StudioSurface)
+              .border(1.dp, StudioBorder, CircleShape)
               .testTag("volume_mute_btn")
           ) {
             Icon(
               imageVector = if (isMuted || sliderVal == 0f) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
               contentDescription = "Mute Toggle",
               tint = if (isMuted || sliderVal == 0f) RedAccent else GreenAccent,
-              modifier = Modifier.size(18.dp)
+              modifier = Modifier.size(16.dp)
             )
           }
         }
@@ -221,7 +299,7 @@ fun VolumeSliderSection(
           sliderVal = newValue
           viewModel.timelineEngine.setClipVolume(targetClipId, newValue)
         },
-        valueRange = 0f..2.0f,
+        valueRange = 0f..3.0f,
         colors = SliderDefaults.colors(
           thumbColor = GreenAccent,
           activeTrackColor = GreenAccent,
@@ -235,7 +313,8 @@ fun VolumeSliderSection(
         0.5f to "50%",
         1.0f to "100%",
         1.5f to "150%",
-        2.0f to "200% Boost"
+        2.0f to "200% Boost",
+        3.0f to "300% Max"
       )
 
       Row(
@@ -262,7 +341,7 @@ fun VolumeSliderSection(
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                 fontSize = 10.sp
               ),
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+              modifier = Modifier.padding(horizontal = 5.dp, vertical = 4.dp)
             )
           }
         }
@@ -1093,9 +1172,50 @@ fun AudioToolPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
-  var selectedTab by remember { mutableStateOf("SFX") } // "SFX", "Music", "Voiceover"
+  val context = LocalContext.current
+  var selectedTab by remember { mutableStateOf("Import") } // "Import", "Voiceover", "SFX", "Music"
   val isRecording by viewModel.audioEngine.isRecording.collectAsState()
   val recordDuration by viewModel.audioEngine.recordingDurationMs.collectAsState()
+
+  // Mic permission launcher for voice recording
+  val micPermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+  ) { isGranted ->
+    if (isGranted) {
+      viewModel.audioEngine.startVoiceRecording {}
+    } else {
+      Toast.makeText(context, "Microphone permission required to record audio", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  // File picker launcher for importing audio files directly from device
+  val audioPickerLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.GetContent()
+  ) { uri: Uri? ->
+    if (uri != null) {
+      try {
+        val fileName = getFileNameFromUri(context, uri) ?: "Imported Audio"
+        val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(context, uri.toString())
+        val durationMs = if (metadata.durationMs > 0L) metadata.durationMs else 6000L
+
+        val fileObj = try {
+          val path = uri.path
+          if (path != null && File(path).exists()) File(path) else null
+        } catch (e: Exception) { null }
+        val waveform = if (fileObj != null) viewModel.audioEngine.extractWaveformFromFile(fileObj) else null
+
+        viewModel.timelineEngine.addAudioClip(
+          title = fileName,
+          durationMs = durationMs,
+          uri = uri.toString(),
+          waveformData = waveform
+        )
+        Toast.makeText(context, "Imported \"$fileName\" to audio track!", Toast.LENGTH_SHORT).show()
+      } catch (e: Exception) {
+        Toast.makeText(context, "Failed to import audio: ${e.message}", Toast.LENGTH_SHORT).show()
+      }
+    }
+  }
 
   Column(
     modifier = modifier
@@ -1118,28 +1238,183 @@ fun AudioToolPanel(
       }
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Filter Chips Row
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      FilterChip(
+        selected = selectedTab == "Import",
+        onClick = { selectedTab = "Import" },
+        label = { Text("Import Audio") },
+        leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp)) },
+        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = GreenAccent, selectedLabelColor = Color.Black)
+      )
+      FilterChip(
+        selected = selectedTab == "Voiceover",
+        onClick = { selectedTab = "Voiceover" },
+        label = { Text("Voiceover Record") },
+        leadingIcon = { Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp)) },
+        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RedAccent, selectedLabelColor = Color.White)
+      )
       FilterChip(
         selected = selectedTab == "SFX",
         onClick = { selectedTab = "SFX" },
         label = { Text("Sound Effects") },
+        leadingIcon = { Icon(Icons.Default.GraphicEq, contentDescription = null, modifier = Modifier.size(16.dp)) },
         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
       )
       FilterChip(
         selected = selectedTab == "Music",
         onClick = { selectedTab = "Music" },
         label = { Text("Music Tracks") },
+        leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(16.dp)) },
         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PurpleAccent, selectedLabelColor = Color.White)
-      )
-      FilterChip(
-        selected = selectedTab == "Voiceover",
-        onClick = { selectedTab = "Voiceover" },
-        label = { Text("Voiceover Record") },
-        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RedAccent, selectedLabelColor = Color.White)
       )
     }
 
     when (selectedTab) {
+      "Import" -> {
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp)),
+          colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+          border = BorderStroke(1.dp, GreenAccent.copy(alpha = 0.5f))
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Icon(Icons.Default.AudioFile, contentDescription = null, tint = GreenAccent, modifier = Modifier.size(26.dp))
+              Text(
+                "Add Audio Files From Device",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+              )
+            }
+            Text(
+              "Select MP3, WAV, AAC, M4A, OGG, or FLAC files directly from your phone's storage to add background music or voice clips.",
+              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, textAlign = TextAlign.Center)
+            )
+            Button(
+              onClick = { audioPickerLauncher.launch("audio/*") },
+              colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = Color.Black),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Browse & Import Audio", fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+      "Voiceover" -> {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(StudioSurfaceVariant)
+            .padding(16.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Icon(
+              if (isRecording) Icons.Default.RadioButtonChecked else Icons.Default.Mic,
+              contentDescription = null,
+              tint = if (isRecording) RedAccent else CyanAccent,
+              modifier = Modifier.size(24.dp)
+            )
+            Text(
+              text = if (isRecording) "Recording Voiceover: ${formatDuration(recordDuration)}" else "Record Voiceover",
+              style = MaterialTheme.typography.titleSmall.copy(
+                color = if (isRecording) RedAccent else TextPrimary,
+                fontWeight = FontWeight.Bold
+              )
+            )
+          }
+
+          if (isRecording) {
+            val currentDb by viewModel.audioEngine.currentDecibels.collectAsState()
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp),
+              horizontalArrangement = Arrangement.Center,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              val normalizedAmp = ((currentDb + 60f) / 60f).coerceIn(0.1f, 1.0f)
+              repeat(16) { index ->
+                val barHeight = (12 * normalizedAmp * (0.5f + 0.5f * kotlin.math.sin(index * 0.8f + System.currentTimeMillis() * 0.005f))).dp.coerceAtLeast(4.dp)
+                Box(
+                  modifier = Modifier
+                    .padding(horizontal = 2.dp)
+                    .width(4.dp)
+                    .height(barHeight)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(RedAccent)
+                )
+              }
+            }
+          } else {
+            Text(
+              "Tap record to capture live audio from your microphone at current playhead.",
+              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, textAlign = TextAlign.Center)
+            )
+          }
+
+          Button(
+            onClick = {
+              if (isRecording) {
+                val finalDuration = if (recordDuration > 200L) recordDuration else 2000L
+                val file = viewModel.audioEngine.stopVoiceRecording()
+                val waveform = viewModel.audioEngine.extractWaveformFromFile(file)
+                viewModel.timelineEngine.addAudioClip(
+                  title = "Voiceover",
+                  durationMs = finalDuration,
+                  uri = file.absolutePath,
+                  waveformData = waveform
+                )
+                Toast.makeText(context, "Voiceover recorded and saved!", Toast.LENGTH_SHORT).show()
+              } else {
+                val hasPermission = ContextCompat.checkSelfPermission(
+                  context, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (hasPermission) {
+                  viewModel.audioEngine.startVoiceRecording {}
+                } else {
+                  micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+              }
+            },
+            colors = ButtonDefaults.buttonColors(
+              containerColor = if (isRecording) RedAccent else CyanAccent,
+              contentColor = Color.Black
+            ),
+            shape = CircleShape,
+            modifier = Modifier.size(60.dp)
+          ) {
+            Icon(
+              if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+              contentDescription = "Mic Record",
+              modifier = Modifier.size(28.dp)
+            )
+          }
+        }
+      }
       "SFX" -> {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
           items(SoundEffectsCatalog.effects) { sfx ->
@@ -1216,33 +1491,6 @@ fun AudioToolPanel(
                 }
               }
             }
-          }
-        }
-      }
-      "Voiceover" -> {
-        Column(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Text(
-            text = if (isRecording) "Recording Voiceover: ${formatDuration(recordDuration)}" else "Ready to Record Audio",
-            style = MaterialTheme.typography.bodyMedium.copy(color = if (isRecording) RedAccent else TextPrimary, fontWeight = FontWeight.Bold)
-          )
-          Button(
-            onClick = {
-              if (isRecording) {
-                val file = viewModel.audioEngine.stopVoiceRecording()
-                viewModel.timelineEngine.addAudioClip("Voiceover Recording", 4000L, file.absolutePath)
-              } else {
-                viewModel.audioEngine.startVoiceRecording {}
-              }
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = if (isRecording) RedAccent else CyanAccent, contentColor = Color.Black),
-            shape = CircleShape,
-            modifier = Modifier.size(56.dp)
-          ) {
-            Icon(if (isRecording) Icons.Default.Stop else Icons.Default.Mic, contentDescription = "Mic")
           }
         }
       }

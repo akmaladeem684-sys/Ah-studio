@@ -6,8 +6,11 @@ import android.util.Log
 import com.example.domain.plugin.InstalledPlugin
 import com.example.domain.plugin.PluginCategory
 import com.example.domain.plugin.PluginItemManifest
+import com.example.domain.plugin.PluginLifecycleState
 import com.example.domain.plugin.PluginManifest
+import com.example.domain.plugin.PluginModule
 import com.example.domain.plugin.PluginValidationResult
+import com.example.domain.plugin.StandardPluginModule
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,12 +31,63 @@ object PluginManager {
   private val _installedPlugins = MutableStateFlow<List<InstalledPlugin>>(emptyList())
   val installedPlugins: StateFlow<List<InstalledPlugin>> = _installedPlugins.asStateFlow()
 
+  private val activeModules = mutableMapOf<String, PluginModule>()
   private var isInitialized = false
 
   fun initialize(context: Context) {
     if (isInitialized) return
     isInitialized = true
     loadRegistry(context)
+    
+    // Initialize loaded modules
+    for (plugin in _installedPlugins.value) {
+      val module = StandardPluginModule(plugin)
+      module.onInitialize(context)
+      if (plugin.isEnabled) {
+        module.onEnable()
+      } else {
+        module.onDisable()
+      }
+      activeModules[plugin.manifest.id] = module
+    }
+  }
+
+  /**
+   * Registers a custom or dynamically loaded PluginModule.
+   */
+  fun registerModule(context: Context, module: PluginModule) {
+    module.onInitialize(context)
+    if (module.state == PluginLifecycleState.ENABLED) {
+      module.onEnable()
+    }
+    activeModules[module.id] = module
+    Log.d(TAG, "Registered PluginModule: ${module.id} (${module.name})")
+  }
+
+  /**
+   * Unregisters and unloads a PluginModule.
+   */
+  fun unregisterModule(pluginId: String) {
+    activeModules[pluginId]?.let { module ->
+      module.onDisable()
+      module.onUnload()
+      activeModules.remove(pluginId)
+      Log.d(TAG, "Unregistered PluginModule: $pluginId")
+    }
+  }
+
+  /**
+   * Returns all currently active loaded PluginModules.
+   */
+  fun getLoadedModules(): List<PluginModule> {
+    return activeModules.values.toList()
+  }
+
+  /**
+   * Retrieves specific PluginModule by ID.
+   */
+  fun getModule(pluginId: String): PluginModule? {
+    return activeModules[pluginId]
   }
 
   /**
@@ -173,6 +227,9 @@ object PluginManager {
       currentList.add(installedPlugin)
       _installedPlugins.value = currentList
 
+      val module = StandardPluginModule(installedPlugin)
+      registerModule(context, module)
+
       saveRegistry(context)
 
       Log.d(TAG, "Successfully installed plugin '${manifest.name}' v${manifest.version} with ${manifest.items.size} assets.")
@@ -191,6 +248,7 @@ object PluginManager {
   fun uninstallPlugin(context: Context, pluginId: String): Boolean {
     val plugin = _installedPlugins.value.find { it.manifest.id == pluginId } ?: return false
     try {
+      unregisterModule(pluginId)
       val dir = File(plugin.installDirAbsolutePath)
       if (dir.exists()) {
         dir.deleteRecursively()
@@ -211,6 +269,11 @@ object PluginManager {
       if (it.manifest.id == pluginId) it.copy(isEnabled = enabled) else it
     }
     _installedPlugins.value = newList
+    
+    activeModules[pluginId]?.let { module ->
+      if (enabled) module.onEnable() else module.onDisable()
+    }
+    
     saveRegistry(context)
   }
 

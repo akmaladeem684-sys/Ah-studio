@@ -35,10 +35,10 @@ class GpuCompositionRenderer(private val context: Context) {
 
   // Full-screen quad geometry: (x, y, u, v)
   private val quadVertices = floatArrayOf(
-    -1.0f, -1.0f,  0.0f, 0.0f,
-     1.0f, -1.0f,  1.0f, 0.0f,
-    -1.0f,  1.0f,  0.0f, 1.0f,
-     1.0f,  1.0f,  1.0f, 1.0f
+    -1.0f, -1.0f,  0.0f, 1.0f,
+     1.0f, -1.0f,  1.0f, 1.0f,
+    -1.0f,  1.0f,  0.0f, 0.0f,
+     1.0f,  1.0f,  1.0f, 0.0f
   )
 
   private val vertexBuffer: FloatBuffer = ByteBuffer
@@ -231,9 +231,24 @@ class GpuCompositionRenderer(private val context: Context) {
     if (clip != null) {
       val kf = frame.activeClipTransform ?: KeyframeInterpolator.interpolate(clip, frame.timelinePosMs - clip.timelineStartMs)
 
-      // Crop & aspect scale with keyframe scaleX & scaleY
-      val scaleX = (if (clip.flipHorizontal) -clip.cropScale else clip.cropScale) * kf.scaleX
-      val scaleY = (if (clip.flipVertical) -clip.cropScale else clip.cropScale) * kf.scaleY
+      val cachedMain = imageTextureCache.values.find { it.texId == textureId }
+      val texW = cachedMain?.width ?: if (clip.width > 0) clip.width else viewportWidth
+      val texH = cachedMain?.height ?: if (clip.height > 0) clip.height else viewportHeight
+      val texAspect = texW.toFloat() / max(1, texH)
+      val vpAspect = viewportWidth.toFloat() / max(1, viewportHeight)
+
+      val baseScaleX: Float
+      val baseScaleY: Float
+      if (texAspect > vpAspect) {
+        baseScaleX = texAspect / vpAspect
+        baseScaleY = 1.0f
+      } else {
+        baseScaleX = 1.0f
+        baseScaleY = vpAspect / texAspect
+      }
+
+      val scaleX = baseScaleX * (if (clip.flipHorizontal) -clip.cropScale else clip.cropScale) * kf.scaleX
+      val scaleY = baseScaleY * (if (clip.flipVertical) -clip.cropScale else clip.cropScale) * kf.scaleY
 
       Matrix.translateM(mvpMatrix, 0, clip.cropOffsetX + kf.posX, clip.cropOffsetY + kf.posY, 0f)
       Matrix.rotateM(mvpMatrix, 0, (clip.rotationDegrees.toFloat() + kf.rotation) % 360f, 0f, 0f, 1f)
@@ -303,11 +318,20 @@ class GpuCompositionRenderer(private val context: Context) {
     val program = program2D
     GLES20.glUseProgram(program)
 
+    val cachedOverlay = imageTextureCache[overlay.clip.id] ?: imageTextureCache.values.find { it.texId == textureId }
+    val ovW = cachedOverlay?.width ?: if (overlay.clip.width > 0) overlay.clip.width else viewportWidth
+    val ovH = cachedOverlay?.height ?: if (overlay.clip.height > 0) overlay.clip.height else viewportHeight
+    val ovAspect = ovW.toFloat() / max(1, ovH)
+    val vpAspect = viewportWidth.toFloat() / max(1, viewportHeight)
+
+    val baseScaleY = overlay.scaleY * 0.5f
+    val baseScaleX = baseScaleY * (ovAspect / vpAspect)
+
     Matrix.setIdentityM(mvpMatrix, 0)
     // Map overlay position (-1..1), scaleX & scaleY, and rotation
     Matrix.translateM(mvpMatrix, 0, overlay.posX, overlay.posY, 0f)
     Matrix.rotateM(mvpMatrix, 0, overlay.rotation, 0f, 0f, 1f)
-    Matrix.scaleM(mvpMatrix, 0, overlay.scaleX * 0.5f, overlay.scaleY * 0.5f, 1f)
+    Matrix.scaleM(mvpMatrix, 0, baseScaleX, baseScaleY, 1f)
 
     Matrix.setIdentityM(texMatrix, 0)
 
@@ -629,6 +653,9 @@ class GpuCompositionRenderer(private val context: Context) {
 
   fun uploadImageTexture(id: String, bitmap: Bitmap): Int {
     val existing = imageTextureCache[id]
+    if (existing != null && existing.hash == bitmap.generationId && existing.width == bitmap.width && existing.height == bitmap.height) {
+      return existing.texId
+    }
     val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, existing?.texId ?: 0)
     imageTextureCache[id] = CachedTexture(texId, bitmap.width, bitmap.height, bitmap.generationId)
     return texId

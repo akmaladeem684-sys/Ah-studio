@@ -2148,74 +2148,142 @@ class TimelineEngine {
   // --- Audio Operations ---
 
   fun setClipVolume(clipId: String? = null, volume: Float): Boolean {
-    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: _timeline.value.videoClips.firstOrNull()?.id ?: return false
-    val element = findTrackElementForClip(targetId) ?: SelectedTrackElement.Video(targetId)
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: _timeline.value.videoClips.firstOrNull()?.id ?: _timeline.value.audioClips.firstOrNull()?.id ?: return false
     val clampedVol = volume.coerceIn(0f, 3.0f)
     recordHistory()
-    return when (element) {
-      is SelectedTrackElement.Video -> {
-        val list = _timeline.value.videoClips.map { clip ->
-          if (clip.id == targetId) clip.copy(volume = clampedVol, isMuted = clampedVol == 0f) else clip
-        }
-        _timeline.value = _timeline.value.copy(videoClips = list)
-        true
-      }
-      is SelectedTrackElement.Overlay -> {
-        val list = _timeline.value.overlayClips.map { clip ->
-          if (clip.id == targetId) clip.copy(volume = clampedVol, isMuted = clampedVol == 0f) else clip
-        }
-        _timeline.value = _timeline.value.copy(overlayClips = list)
-        true
-      }
-      is SelectedTrackElement.Audio -> {
-        val list = _timeline.value.audioClips.map { clip ->
-          if (clip.id == targetId) clip.copy(volume = clampedVol, isMuted = clampedVol == 0f) else clip
-        }
-        _timeline.value = _timeline.value.copy(audioClips = list)
-        true
-      }
-      else -> false
+
+    var updated = false
+    val newVideoClips = _timeline.value.videoClips.map { clip ->
+      if (clip.id == targetId) {
+        updated = true
+        clip.copy(volume = clampedVol, isMuted = clampedVol == 0f)
+      } else clip
     }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(videoClips = newVideoClips)
+      return true
+    }
+
+    val newOverlayClips = _timeline.value.overlayClips.map { clip ->
+      if (clip.id == targetId) {
+        updated = true
+        clip.copy(volume = clampedVol, isMuted = clampedVol == 0f)
+      } else clip
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(overlayClips = newOverlayClips)
+      return true
+    }
+
+    val newAudioClips = _timeline.value.audioClips.map { clip ->
+      if (clip.id == targetId) {
+        updated = true
+        clip.copy(volume = clampedVol, isMuted = clampedVol == 0f)
+      } else clip
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(audioClips = newAudioClips)
+      return true
+    }
+
+    // Fallback if targetId wasn't matched explicitly
+    val fallbackVideoClips = _timeline.value.videoClips.map { clip ->
+      clip.copy(volume = clampedVol, isMuted = clampedVol == 0f)
+    }
+    _timeline.value = _timeline.value.copy(videoClips = fallbackVideoClips)
+    return true
   }
 
   fun toggleClipMute(clipId: String? = null): Boolean {
     val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: _timeline.value.videoClips.firstOrNull()?.id ?: return false
-    val element = findTrackElementForClip(targetId) ?: SelectedTrackElement.Video(targetId)
     recordHistory()
-    return when (element) {
-      is SelectedTrackElement.Video -> {
-        val list = _timeline.value.videoClips.map { clip ->
-          if (clip.id == targetId) clip.copy(isMuted = !clip.isMuted) else clip
-        }
-        _timeline.value = _timeline.value.copy(videoClips = list)
-        true
-      }
-      is SelectedTrackElement.Overlay -> {
-        val list = _timeline.value.overlayClips.map { clip ->
-          if (clip.id == targetId) clip.copy(isMuted = !clip.isMuted) else clip
-        }
-        _timeline.value = _timeline.value.copy(overlayClips = list)
-        true
-      }
-      is SelectedTrackElement.Audio -> {
-        val list = _timeline.value.audioClips.map { clip ->
-          if (clip.id == targetId) clip.copy(isMuted = !clip.isMuted) else clip
-        }
-        _timeline.value = _timeline.value.copy(audioClips = list)
-        true
-      }
-      else -> false
+
+    var updated = false
+    val newVideoClips = _timeline.value.videoClips.map { clip ->
+      if (clip.id == targetId) {
+        updated = true
+        val newMute = !clip.isMuted
+        val newVol = if (newMute) clip.volume else (if (clip.volume == 0f) 1.0f else clip.volume)
+        clip.copy(isMuted = newMute, volume = newVol)
+      } else clip
     }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(videoClips = newVideoClips)
+      return true
+    }
+
+    val newOverlayClips = _timeline.value.overlayClips.map { clip ->
+      if (clip.id == targetId) {
+        updated = true
+        val newMute = !clip.isMuted
+        val newVol = if (newMute) clip.volume else (if (clip.volume == 0f) 1.0f else clip.volume)
+        clip.copy(isMuted = newMute, volume = newVol)
+      } else clip
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(overlayClips = newOverlayClips)
+      return true
+    }
+
+    val newAudioClips = _timeline.value.audioClips.map { clip ->
+      if (clip.id == targetId) {
+        updated = true
+        val newMute = !clip.isMuted
+        val newVol = if (newMute) clip.volume else (if (clip.volume == 0f) 1.0f else clip.volume)
+        clip.copy(isMuted = newMute, volume = newVol)
+      } else clip
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(audioClips = newAudioClips)
+      return true
+    }
+
+    val fallbackVideoClips = _timeline.value.videoClips.map { clip ->
+      val newMute = !clip.isMuted
+      val newVol = if (newMute) clip.volume else (if (clip.volume == 0f) 1.0f else clip.volume)
+      clip.copy(isMuted = newMute, volume = newVol)
+    }
+    _timeline.value = _timeline.value.copy(videoClips = fallbackVideoClips)
+    return true
   }
 
-  fun addAudioClip(title: String, durationMs: Long = 8000L, uri: String = "internal://$title") {
+  fun increaseClipVolume(clipId: String? = null, step: Float = 0.10f): Boolean {
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: _timeline.value.videoClips.firstOrNull()?.id ?: return false
+    val currentVol = when (val el = findTrackElementForClip(targetId)) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == targetId }?.volume ?: 1.0f
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == targetId }?.volume ?: 1.0f
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == targetId }?.volume ?: 1.0f
+      else -> 1.0f
+    }
+    val newVol = (currentVol + step).coerceIn(0f, 3.0f)
+    return setClipVolume(targetId, newVol)
+  }
+
+  fun decreaseClipVolume(clipId: String? = null, step: Float = 0.10f): Boolean {
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: _timeline.value.videoClips.firstOrNull()?.id ?: return false
+    val currentVol = when (val el = findTrackElementForClip(targetId)) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == targetId }?.volume ?: 1.0f
+      is SelectedTrackElement.Overlay -> _timeline.value.overlayClips.find { it.id == targetId }?.volume ?: 1.0f
+      is SelectedTrackElement.Audio -> _timeline.value.audioClips.find { it.id == targetId }?.volume ?: 1.0f
+      else -> 1.0f
+    }
+    val newVol = (currentVol - step).coerceIn(0f, 3.0f)
+    return setClipVolume(targetId, newVol)
+  }
+
+  fun addAudioClip(
+    title: String,
+    durationMs: Long = 8000L,
+    uri: String = "internal://$title",
+    waveformData: List<Float>? = null
+  ) {
     recordHistory()
     val newAudio = AudioClip(
       title = title,
       uri = uri,
       timelineStartMs = _currentPositionMs.value,
       durationMs = durationMs,
-      waveformData = com.example.engine.audio.SoundEffectsCatalog.generateWaveform(title)
+      waveformData = waveformData ?: com.example.engine.audio.SoundEffectsCatalog.generateWaveform(title)
     )
     val list = _timeline.value.audioClips.toMutableList()
     list.add(newAudio)

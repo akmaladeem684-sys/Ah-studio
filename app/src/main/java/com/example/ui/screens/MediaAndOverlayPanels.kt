@@ -968,7 +968,7 @@ private fun RowScope.PositionPresetButton(
 // Helper Utilities for resolving Media Uris
 // -----------------------------------------------------------------------------------------
 
-private fun getFileNameFromUri(context: Context, uri: Uri): String? {
+fun getFileNameFromUri(context: Context, uri: Uri): String? {
   return try {
     var result: String? = null
     if (uri.scheme == "content") {

@@ -140,7 +140,8 @@ object TextLayerRenderer {
     if (width <= 0 || height <= 0 || clip.opacity <= 0f) return
 
     val state = evaluateAnimation(clip, currentPosMs)
-    if (state.opacity <= 0f || state.visibleText.isEmpty()) return
+    val rawText = if (clip.isAllCaps) state.visibleText.uppercase() else state.visibleText
+    if (state.opacity <= 0f || rawText.isEmpty()) return
 
     // Reference scaling base (360 width standard)
     val scaleFactor = width.toFloat() / 360f
@@ -160,6 +161,7 @@ object TextLayerRenderer {
       this.letterSpacing = clip.letterSpacing / 10f
       this.color = clip.textColor.toInt()
       this.alpha = (state.opacity * 255).toInt().coerceIn(0, 255)
+      this.isUnderlineText = clip.isUnderline
     }
 
     // Alignment setup
@@ -180,7 +182,7 @@ object TextLayerRenderer {
     val isHighlightWord = clip.subtitleStyle.equals("HighlightWord", true) || clip.subtitleStyle.equals("Highlight word", true)
     val isAnimatedCaptions = clip.subtitleStyle.equals("Animated", true) || clip.subtitleStyle.equals("Animated captions", true)
 
-    val lines = state.visibleText.split("\n")
+    val lines = rawText.split("\n")
     val fontMetrics = paint.fontMetrics
     val lineHeight = (fontMetrics.descent - fontMetrics.ascent) * clip.lineSpacing
     val totalTextHeight = lines.size * lineHeight
