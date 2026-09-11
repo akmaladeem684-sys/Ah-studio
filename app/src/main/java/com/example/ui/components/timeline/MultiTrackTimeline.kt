@@ -581,6 +581,8 @@ fun MultiTrackTimeline(
                           clipIndex = index,
                           totalClipsInTrack = timeline.videoClips.size,
                           isVideoClip = true,
+                          uri = clip.uri,
+                          isVideo = clip.isVideo,
                           isBeingReordered = isBeingReordered,
                           onSelect = {
                             if (isMultiSelectMode) onToggleClipSelection(clip.id)
@@ -745,6 +747,9 @@ fun MultiTrackTimeline(
                           isMultiSelected = isMulti,
                           isLocked = false,
                           speed = clip.speed,
+                          isVideoClip = clip.isVideo,
+                          uri = clip.uri,
+                          isVideo = clip.isVideo,
                           onSelect = {
                             if (isMultiSelectMode) onToggleClipSelection(clip.id)
                             else {

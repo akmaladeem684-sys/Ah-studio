@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.media.*
 import android.net.Uri
+import android.os.Bundle
 import android.util.Log
 import android.view.Surface
 import androidx.media3.common.MediaItem
@@ -14,12 +16,11 @@ import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.*
 import com.example.domain.model.*
-import com.example.engine.composition.ComposedFrame
 import com.example.engine.composition.VideoCompositionEngine
-import com.example.engine.media.MediaRelinkManager
 import com.example.engine.composition.gpu.EglCore
 import com.example.engine.composition.gpu.GpuCompositionRenderer
 import com.example.engine.composition.gpu.WindowSurface
+import com.example.engine.media.MediaRelinkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,11 +32,18 @@ import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
 
+enum class CodecProfile(val label: String, val mimeType: String) {
+  AUTO("Auto (Best Performance)", "auto"),
+  H264_AVC("H.264 / AVC (Universal)", MediaFormat.MIMETYPE_VIDEO_AVC),
+  H265_HEVC("H.265 / HEVC (High Efficiency 4K)", MediaFormat.MIMETYPE_VIDEO_HEVC)
+}
+
 data class ExportConfig(
   val resolution: Resolution = Resolution.RES_1080P,
   val frameRate: FrameRate = FrameRate.FPS_30,
   val quality: ExportQuality = ExportQuality.HIGH,
-  val customBitrateKbps: Int = 12000
+  val customBitrateKbps: Int = 12000,
+  val codecProfile: CodecProfile = CodecProfile.AUTO
 )
 
 sealed class ExportState {
@@ -44,7 +52,9 @@ sealed class ExportState {
     val progressPercent: Float,
     val currentFrame: Int,
     val totalFrames: Int,
-    val status: String = "Encoding video..."
+    val status: String = "Encoding video...",
+    val fps: Float = 0f,
+    val estimatedRemainingSec: Int = 0
   ) : ExportState()
   data class Success(val file: File, val durationMs: Long, val fileSizeBytes: Long) : ExportState()
   data class Error(val message: String) : ExportState()
@@ -54,8 +64,9 @@ sealed class ExportState {
  * MuxerCoordinator manages dynamic track registration and sample writing to MediaMuxer.
  * It ensures:
  * 1. Tracks are registered before MediaMuxer is started.
- * 2. Exact track indices returned by MediaMuxer are stored and used (never hardcoded 0).
- * 3. Samples produced prior to muxer start are safely buffered and flushed.
+ * 2. Exact track indices returned by MediaMuxer are stored and used.
+ * 3. CODEC_CONFIG packets are filtered out (CSD is supplied via MediaFormat).
+ * 4. Microsecond-accurate monotonic timestamps prevent video freezes and playback stalls.
  */
 class MuxerCoordinator(
   private val mediaMuxer: MediaMuxer,
@@ -113,109 +124,106 @@ class MuxerCoordinator(
   }
 
   @Synchronized
-  fun forceStartWithoutAudio() {
-    if (!isStarted && videoTrackIndex >= 0) {
-      Log.w(tag, "Force starting MediaMuxer without audio track")
-      try {
-        mediaMuxer.start()
-        isStarted = true
-        flushPendingQueue()
-      } catch (e: Exception) {
-        Log.e(tag, "Failed to force start MediaMuxer", e)
-      }
-    }
-  }
-
   private fun checkStart() {
+    if (isStarted) return
     val videoReady = videoTrackIndex >= 0
     val audioReady = !hasAudio || audioTrackIndex >= 0
 
-    if (videoReady && audioReady && !isStarted) {
-      Log.d(tag, "Starting MediaMuxer with videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex")
+    if (videoReady && audioReady) {
       try {
         mediaMuxer.start()
         isStarted = true
-        flushPendingQueue()
+        Log.d(tag, "MediaMuxer started successfully")
+        flushPending()
       } catch (e: Exception) {
         Log.e(tag, "Failed to start MediaMuxer", e)
       }
     }
   }
 
-  private fun flushPendingQueue() {
-    // Sort queued packets chronologically to guarantee proper interleaved timestamp order
+  @Synchronized
+  private fun flushPending() {
     pendingQueue.sort()
-
     for (packet in pendingQueue) {
-      val track = if (packet.isAudio) audioTrackIndex else videoTrackIndex
-      if (track >= 0) {
-        val pts = enforceMonotonicPts(packet.isAudio, packet.presentationTimeUs)
-        val buf = ByteBuffer.wrap(packet.data)
-        val info = MediaCodec.BufferInfo().apply {
+      val trackIndex = if (packet.isAudio) audioTrackIndex else videoTrackIndex
+      if (trackIndex >= 0) {
+        val lastPts = if (packet.isAudio) lastAudioPtsUs else lastVideoPtsUs
+        var pts = packet.presentationTimeUs
+        if (pts < 0L) pts = 0L
+        if (pts <= lastPts) {
+          pts = lastPts + 1L // 1 microsecond nudge only to maintain strictly monotonic order
+        }
+
+        val bufferInfo = MediaCodec.BufferInfo().apply {
           set(0, packet.data.size, pts, packet.flags)
         }
+        val byteBuffer = ByteBuffer.wrap(packet.data)
         try {
-          mediaMuxer.writeSampleData(track, buf, info)
+          mediaMuxer.writeSampleData(trackIndex, byteBuffer, bufferInfo)
+          if (packet.isAudio) {
+            lastAudioPtsUs = pts
+          } else {
+            lastVideoPtsUs = pts
+          }
         } catch (e: Exception) {
-          Log.w(tag, "Error flushing queued packet to track $track (pts=$pts)", e)
+          Log.w(tag, "Failed to write queued sample", e)
         }
       }
     }
     pendingQueue.clear()
   }
 
-  private fun enforceMonotonicPts(isAudio: Boolean, requestedPtsUs: Long): Long {
-    return if (isAudio) {
-      val pts = if (requestedPtsUs <= lastAudioPtsUs) lastAudioPtsUs + 1L else requestedPtsUs
-      lastAudioPtsUs = pts
-      pts
-    } else {
-      val pts = if (requestedPtsUs <= lastVideoPtsUs) lastVideoPtsUs + 1L else requestedPtsUs
-      lastVideoPtsUs = pts
-      pts
-    }
-  }
-
   @Synchronized
   fun writeVideoSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+    // Ignore codec config buffers (CSD) and empty buffers
     if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0 || info.size <= 0) {
       return
     }
 
     if (isStarted && videoTrackIndex >= 0) {
-      val pts = enforceMonotonicPts(false, info.presentationTimeUs)
-      info.presentationTimeUs = pts
+      var pts = info.presentationTimeUs
+      if (pts < 0L) pts = 0L
+      if (pts <= lastVideoPtsUs) {
+        pts = lastVideoPtsUs + 1L
+      }
+      val correctedInfo = MediaCodec.BufferInfo().apply {
+        set(info.offset, info.size, pts, info.flags)
+      }
       try {
-        mediaMuxer.writeSampleData(videoTrackIndex, buffer, info)
+        mediaMuxer.writeSampleData(videoTrackIndex, buffer, correctedInfo)
+        lastVideoPtsUs = pts
       } catch (e: Exception) {
-        Log.w(tag, "Error writing video sample (pts=$pts)", e)
+        Log.w(tag, "Failed to write video sample", e)
       }
     } else {
       val bytes = ByteArray(info.size)
       buffer.position(info.offset)
       buffer.get(bytes)
       pendingQueue.add(QueuedPacket(false, bytes, info.presentationTimeUs, info.flags))
-
-      // Guard: if audio hasn't started after substantial video frames, force start
-      if (pendingQueue.size > 120 && videoTrackIndex >= 0) {
-        forceStartWithoutAudio()
-      }
     }
   }
 
   @Synchronized
   fun writeAudioSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+    // Ignore codec config buffers and empty buffers
     if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0 || info.size <= 0) {
       return
     }
 
     if (isStarted && audioTrackIndex >= 0) {
-      val pts = enforceMonotonicPts(true, info.presentationTimeUs)
-      info.presentationTimeUs = pts
+      var pts = info.presentationTimeUs
+      if (pts < 0L) pts = 0L
+      if (pts <= lastAudioPtsUs) {
+        pts = lastAudioPtsUs + 1L
+      }
+      val correctedInfo = MediaCodec.BufferInfo().apply {
+        set(info.offset, info.size, pts, info.flags)
+      }
       try {
-        mediaMuxer.writeSampleData(audioTrackIndex, buffer, info)
+        mediaMuxer.writeSampleData(audioTrackIndex, buffer, correctedInfo)
+        lastAudioPtsUs = pts
       } catch (e: Exception) {
-        Log.w(tag, "Error writing audio sample (pts=$pts)", e)
+        Log.w(tag, "Failed to write audio sample", e)
       }
     } else {
       val bytes = ByteArray(info.size)
@@ -226,6 +234,12 @@ class MuxerCoordinator(
   }
 }
 
+/**
+ * High-Performance, Professional Video Rendering & Export Engine.
+ * Supports 4K UHD, 2K QHD, 1080p FHD, 60fps, complex multi-layer compositions,
+ * GPU hardware surface rendering, memory-bounded bitmap pooling, orientation stabilization,
+ * and sample-accurate multi-track audio mixing with smooth, freeze-free gallery playback.
+ */
 class VideoExporter(private val context: Context) {
 
   private val tag = "VideoExporter"
@@ -236,6 +250,7 @@ class VideoExporter(private val context: Context) {
     val bitmap: Bitmap
   )
 
+  private val bitmapPool = RenderBitmapPool(maxPoolSizeBytes = 128 * 1024 * 1024L)
   private val videoFrameCache = mutableMapOf<String, CachedVideoFrame>()
   private val compositionEngine = VideoCompositionEngine(context)
   private val audioProcessor = AudioExportProcessor(context)
@@ -252,13 +267,14 @@ class VideoExporter(private val context: Context) {
       config.customBitrateKbps * 1000L
     } else {
       val baseBitrate = when (config.resolution) {
-        Resolution.RES_480P -> 2_000_000L
-        Resolution.RES_720P -> 4_500_000L
-        Resolution.RES_1080P -> 8_500_000L
-        Resolution.RES_2K -> 14_000_000L
-        Resolution.RES_4K -> 25_000_000L
+        Resolution.RES_480P -> 2_500_000L
+        Resolution.RES_720P -> 5_000_000L
+        Resolution.RES_1080P -> 10_000_000L
+        Resolution.RES_2K -> 18_000_000L
+        Resolution.RES_4K -> 35_000_000L
       }
-      (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f)).toLong()
+      val codecMultiplier = if (config.codecProfile == CodecProfile.H265_HEVC) 0.75f else 1.0f
+      (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f) * codecMultiplier).toLong()
     }
     return (effectiveBitrate * durationSec / 8).toLong()
   }
@@ -272,8 +288,13 @@ class VideoExporter(private val context: Context) {
    */
   fun canExportWithMedia3Transformer(timeline: Timeline): Boolean {
     if (timeline.videoClips.isEmpty()) return false
-    // Timelines with custom canvas overlays, text layers, or stickers utilize hardware composition engine
-    if (timeline.overlayClips.isNotEmpty() || timeline.textClips.isNotEmpty() || timeline.stickerClips.isNotEmpty()) {
+    // Timelines with custom canvas overlays, text layers, stickers, animations, or effects use composition engine
+    if (timeline.overlayClips.isNotEmpty() ||
+        timeline.textClips.isNotEmpty() ||
+        timeline.stickerClips.isNotEmpty() ||
+        timeline.effectClips.isNotEmpty() ||
+        timeline.videoClips.any { it.animation.hasAnimation || it.keyframes.isNotEmpty() }
+    ) {
       return false
     }
     // All video clips must refer to physical playable media on device
@@ -283,8 +304,7 @@ class VideoExporter(private val context: Context) {
   }
 
   /**
-   * High-level MP4 Exporter using Media3 Transformer to guarantee stable container generation,
-   * automated timestamp synchronization, and reliable track index handling.
+   * High-level MP4 Exporter using Media3 Transformer when applicable.
    */
   suspend fun exportWithMedia3Transformer(
     timeline: Timeline,
@@ -304,11 +324,11 @@ class VideoExporter(private val context: Context) {
         config.customBitrateKbps * 1000
       } else {
         val baseBitrate = when (config.resolution) {
-          Resolution.RES_480P -> 2_000_000L
-          Resolution.RES_720P -> 4_500_000L
-          Resolution.RES_1080P -> 8_500_000L
-          Resolution.RES_2K -> 14_000_000L
-          Resolution.RES_4K -> 25_000_000L
+          Resolution.RES_480P -> 2_500_000L
+          Resolution.RES_720P -> 5_000_000L
+          Resolution.RES_1080P -> 10_000_000L
+          Resolution.RES_2K -> 18_000_000L
+          Resolution.RES_4K -> 35_000_000L
         }
         (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f)).toInt()
       }
@@ -372,15 +392,20 @@ class VideoExporter(private val context: Context) {
       transformer.start(composition, outputFile.absolutePath)
 
       val progressHolder = ProgressHolder()
-      while (latch.count > 0 && !isCancelled) {
-        val state = transformer.getProgress(progressHolder)
-        if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-          val progress = (progressHolder.progress / 100f).coerceIn(0.05f, 0.95f)
+      val startTime = System.currentTimeMillis()
+      while (!completed && exportError == null && !isCancelled) {
+        val status = transformer.getProgress(progressHolder)
+        if (status == Transformer.PROGRESS_STATE_AVAILABLE) {
+          val progress = (progressHolder.progress / 100f).coerceIn(0f, 1f)
+          val elapsedSec = (System.currentTimeMillis() - startTime) / 1000f
+          val etaSec = if (progress > 0.05f) ((elapsedSec / progress) - elapsedSec).toInt().coerceAtLeast(0) else 0
           _exportState.value = ExportState.Rendering(
             progressPercent = progress,
             currentFrame = progressHolder.progress,
             totalFrames = 100,
-            status = "Exporting with Media3 Transformer (${progressHolder.progress}%)"
+            status = "Exporting with Media3 Transformer (${progressHolder.progress}%)",
+            fps = 0f,
+            estimatedRemainingSec = etaSec
           )
         }
         kotlinx.coroutines.delay(150)
@@ -429,15 +454,16 @@ class VideoExporter(private val context: Context) {
     val outputDir = File(context.filesDir, "exports").apply { if (!exists()) mkdirs() }
     val estimatedBytes = calculateEstimatedSizeBytes(totalDurationMs, config)
     val usableSpace = outputDir.usableSpace
-    if (usableSpace < estimatedBytes + 15 * 1024 * 1024L) {
+    if (usableSpace < estimatedBytes + 20 * 1024 * 1024L) {
       _exportState.value = ExportState.Error(
-        "Insufficient storage space. Need at least ${((estimatedBytes / (1024 * 1024)) + 15)} MB free."
+        "Insufficient storage space. Need at least ${((estimatedBytes / (1024 * 1024)) + 20)} MB free."
       )
       return@withContext null
     }
 
     val sanitizedName = projectName.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
-    val outputFile = File(outputDir, "${sanitizedName}_${System.currentTimeMillis()}.mp4")
+    val resLabel = config.resolution.label.lowercase()
+    val outputFile = File(outputDir, "${sanitizedName}_${resLabel}_${System.currentTimeMillis()}.mp4")
 
     // 1. Attempt export via Media3 Transformer if eligible
     if (canExportWithMedia3Transformer(timeline)) {
@@ -454,7 +480,7 @@ class VideoExporter(private val context: Context) {
 
   /**
    * Hardware composition engine using MediaCodec + MediaMuxer with strict lifecycle,
-   * timestamp monotonic synchronization, and precise track index handling.
+   * timestamp monotonic synchronization, 4K/2K resolution capability, and precise track index handling.
    */
   suspend fun exportWithHardwarePipeline(
     projectName: String,
@@ -464,9 +490,9 @@ class VideoExporter(private val context: Context) {
   ): File? = withContext(Dispatchers.IO) {
     val totalDurationMs = timeline.totalDurationMs.coerceAtLeast(1000L)
     val fps = config.frameRate.fps
-    val totalFrames = ((totalDurationMs / 1000f) * fps).toInt().coerceAtLeast(15)
+    val totalFrames = ((totalDurationMs / 1000.0) * fps).toInt().coerceAtLeast(15)
 
-    // Determine target dimensions from resolution and timeline aspect ratio
+    // Determine target dimensions from resolution and timeline aspect ratio aligned to 16px
     val (exportWidth, exportHeight) = getDimensionsForResolution(config.resolution, timeline.aspectRatio)
 
     var mediaMuxer: MediaMuxer? = null
@@ -490,7 +516,7 @@ class VideoExporter(private val context: Context) {
       var hasAudio = false
 
       if (hasAudioSources) {
-        _exportState.value = ExportState.Rendering(0.05f, 0, totalFrames, "Mixing audio tracks...")
+        _exportState.value = ExportState.Rendering(0.05f, 0, totalFrames, "Mixing multi-track audio...")
         try {
           masterPcm = audioProcessor.mixTimelineAudio(timeline, totalDurationMs) { isCancelled }
         } catch (e: Exception) {
@@ -522,17 +548,31 @@ class VideoExporter(private val context: Context) {
         }
       }
 
-      // 2. Initialize Video Encoder (H.264 / AVC)
-      _exportState.value = ExportState.Rendering(0.08f, 0, totalFrames, "Configuring hardware encoders...")
-      val videoMime = MediaFormat.MIMETYPE_VIDEO_AVC
+      // 2. Initialize Video Encoder (HEVC or AVC)
+      _exportState.value = ExportState.Rendering(0.08f, 0, totalFrames, "Configuring hardware encoders for ${config.resolution.label}...")
+      val videoMime = selectVideoCodecMime(config, exportWidth, exportHeight)
       val bitrate = (calculateEstimatedSizeBytes(totalDurationMs, config) * 8 / (totalDurationMs / 1000f)).toInt()
-        .coerceIn(1_500_000, 20_000_000)
+        .coerceIn(1_500_000, 50_000_000)
 
       val videoFormat = MediaFormat.createVideoFormat(videoMime, exportWidth, exportHeight).apply {
         setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
         setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
         setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second keyframe interval for instant seek & smooth playback
+        try {
+          setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+        } catch (ignored: Exception) {}
+        if (videoMime == MediaFormat.MIMETYPE_VIDEO_AVC) {
+          try {
+            if (exportWidth >= 2160 || exportHeight >= 2160) {
+              setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+              setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel51)
+            } else {
+              setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+              setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel41)
+            }
+          } catch (ignored: Exception) {}
+        }
       }
 
       videoEncoder = MediaCodec.createEncoderByType(videoMime)
@@ -568,7 +608,7 @@ class VideoExporter(private val context: Context) {
 
           videoEncoder.start()
           useGpuSurface = true
-          Log.i(tag, "GPU hardware surface composition pipeline activated ($exportWidth x $exportHeight @ ${fps}fps)")
+          Log.i(tag, "GPU hardware surface composition pipeline activated ($exportWidth x $exportHeight @ ${fps}fps via $videoMime)")
         } catch (e: Throwable) {
           Log.w(tag, "GPU surface initialization fallback to buffer pipeline: ${e.message}")
           useGpuSurface = false
@@ -581,7 +621,6 @@ class VideoExporter(private val context: Context) {
           try { encoderInputSurface?.release() } catch (ignored: Exception) {}
           encoderInputSurface = null
 
-          // Safely release and recreate fresh encoder instance for byte-buffer pipeline
           try { videoEncoder.stop() } catch (ignored: Exception) {}
           try { videoEncoder.release() } catch (ignored: Exception) {}
           videoEncoder = MediaCodec.createEncoderByType(videoMime)
@@ -628,15 +667,46 @@ class VideoExporter(private val context: Context) {
       val coordinator = MuxerCoordinator(mediaMuxer, hasAudio)
 
       val frameDurationUs = 1_000_000L / fps
-      val frameDurationMs = 1000L / fps
 
-      val frameBitmap = if (!useGpuSurface) Bitmap.createBitmap(exportWidth, exportHeight, Bitmap.Config.ARGB_8888) else null
+      val frameBitmap = if (!useGpuSurface) bitmapPool.acquire(exportWidth, exportHeight, Bitmap.Config.ARGB_8888) else null
       val frameCanvas = if (frameBitmap != null) Canvas(frameBitmap) else null
       val pixelBuffer = if (!useGpuSurface) IntArray(exportWidth * exportHeight) else null
       val yuvBuffer = if (!useGpuSurface) ByteArray(exportWidth * exportHeight * 3 / 2) else null
 
       val totalAudioFrames = masterPcm.size / audioChannels
       var fedAudioFrames = 0
+      val renderStartTime = System.currentTimeMillis()
+      var lastFpsCheckTime = renderStartTime
+      var lastFpsCheckFrame = 0
+      var currentThroughputFps = 0f
+
+      // Pre-prime the Audio Encoder with the initial buffer so format is ready immediately on frame 0
+      if (hasAudio && audioEncoder != null) {
+        val primeFrames = min(4096, totalAudioFrames)
+        if (primeFrames > 0) {
+          val inputBufferIndex = audioEncoder.dequeueInputBuffer(10000L)
+          if (inputBufferIndex >= 0) {
+            val inputBuffer = audioEncoder.getInputBuffer(inputBufferIndex)
+            if (inputBuffer != null) {
+              inputBuffer.clear()
+              val byteBuffer = ByteBuffer.allocate(primeFrames * audioChannels * 2).order(ByteOrder.LITTLE_ENDIAN)
+              val endIdx = primeFrames * audioChannels
+              for (i in 0 until endIdx) {
+                if (i < masterPcm.size) {
+                  byteBuffer.putShort(masterPcm[i])
+                } else {
+                  byteBuffer.putShort(0)
+                }
+              }
+              byteBuffer.flip()
+              inputBuffer.put(byteBuffer)
+              audioEncoder.queueInputBuffer(inputBufferIndex, 0, primeFrames * audioChannels * 2, 0L, 0)
+              fedAudioFrames = primeFrames
+            }
+          }
+          drainAudioEncoder(audioEncoder, coordinator, false)
+        }
+      }
 
       // 5. Main Interleaved Video & Audio Encoding Loop
       for (frameIndex in 0 until totalFrames) {
@@ -646,12 +716,24 @@ class VideoExporter(private val context: Context) {
           try { gpuRenderer?.release() } catch (ignored: Exception) {}
           try { encoderInputSurface?.release() } catch (ignored: Exception) {}
           cleanUp(videoEncoder, audioEncoder, encoderInputSurface, windowSurface, eglCore, gpuRenderer, mediaMuxer, outputFile)
+          bitmapPool.release(frameBitmap)
           _exportState.value = ExportState.Idle
           return@withContext null
         }
 
-        val timelinePosMs = frameIndex * frameDurationMs
+        val timelinePosMs = (frameIndex.toDouble() * 1000.0 / fps).toLong()
         val composedFrame = compositionEngine.evaluateFrame(timeline, timelinePosMs)
+        val ptsUs = (frameIndex.toLong() * 1_000_000L) / fps
+
+        // Request keyframe on frame 0 to guarantee instant playback in gallery
+        if (frameIndex == 0) {
+          try {
+            val syncParams = Bundle().apply {
+              putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+            }
+            videoEncoder.setParameters(syncParams)
+          } catch (ignored: Exception) {}
+        }
 
         if (useGpuSurface && gpuRenderer != null && windowSurface != null) {
           // Hardware GPU rendering directly to encoder surface
@@ -682,7 +764,7 @@ class VideoExporter(private val context: Context) {
             chromaKey = timeline.chromaKey
           )
 
-          val ptsNs = frameIndex * frameDurationUs * 1000L
+          val ptsNs = ptsUs * 1000L
           windowSurface.setPresentationTime(ptsNs)
           windowSurface.swapBuffers()
         } else {
@@ -718,14 +800,13 @@ class VideoExporter(private val context: Context) {
             var videoFed = false
             var attempts = 0
             while (!videoFed && attempts < 50) {
-              val inIndex = videoEncoder.dequeueInputBuffer(10_000L)
-              if (inIndex >= 0) {
-                val inBuf = videoEncoder.getInputBuffer(inIndex)
-                if (inBuf != null) {
-                  inBuf.clear()
-                  inBuf.put(yuvBuffer)
-                  val ptsUs = frameIndex * frameDurationUs
-                  videoEncoder.queueInputBuffer(inIndex, 0, yuvBuffer.size, ptsUs, 0)
+              val inputBufferIndex = videoEncoder.dequeueInputBuffer(5000L)
+              if (inputBufferIndex >= 0) {
+                val inputBuffer = videoEncoder.getInputBuffer(inputBufferIndex)
+                if (inputBuffer != null) {
+                  inputBuffer.clear()
+                  inputBuffer.put(yuvBuffer)
+                  videoEncoder.queueInputBuffer(inputBufferIndex, 0, yuvBuffer.size, ptsUs, 0)
                   videoFed = true
                 }
               } else {
@@ -736,25 +817,36 @@ class VideoExporter(private val context: Context) {
           }
         }
 
-        // Drain video encoder
+        // Drain Video Encoder Output Samples
         drainVideoEncoder(videoEncoder, coordinator, false)
 
-        // Feed corresponding audio packets up to current timeline position
+        // Feed Audio Pro-rata with Microsecond Precision (Zero Drift)
         if (hasAudio && audioEncoder != null) {
-          val targetAudioFrames = (((frameIndex + 1).toLong() * totalAudioFrames) / totalFrames).toInt()
-          while (fedAudioFrames < targetAudioFrames && fedAudioFrames < totalAudioFrames) {
-            val framesToFeed = min(1024, totalAudioFrames - fedAudioFrames)
-            val inIndex = audioEncoder.dequeueInputBuffer(5000L)
-            if (inIndex >= 0) {
-              val inBuf = audioEncoder.getInputBuffer(inIndex)
-              if (inBuf != null) {
-                inBuf.clear()
-                inBuf.order(ByteOrder.LITTLE_ENDIAN)
-                val shortBuf = inBuf.asShortBuffer()
-                shortBuf.put(masterPcm, fedAudioFrames * audioChannels, framesToFeed * audioChannels)
-                val byteSize = framesToFeed * audioChannels * 2
+          val targetAudioFrames = (((frameIndex + 1).toLong() * audioSampleRate) / fps).toInt().coerceAtMost(totalAudioFrames)
+          while (fedAudioFrames < targetAudioFrames) {
+            val framesToFeed = min(1024, targetAudioFrames - fedAudioFrames)
+            if (framesToFeed <= 0) break
+
+            val inputBufferIndex = audioEncoder.dequeueInputBuffer(5000L)
+            if (inputBufferIndex >= 0) {
+              val inputBuffer = audioEncoder.getInputBuffer(inputBufferIndex)
+              if (inputBuffer != null) {
+                inputBuffer.clear()
+                val byteBuffer = ByteBuffer.allocate(framesToFeed * audioChannels * 2).order(ByteOrder.LITTLE_ENDIAN)
+                val startIdx = fedAudioFrames * audioChannels
+                val endIdx = (fedAudioFrames + framesToFeed) * audioChannels
+                for (i in startIdx until endIdx) {
+                  if (i < masterPcm.size) {
+                    byteBuffer.putShort(masterPcm[i])
+                  } else {
+                    byteBuffer.putShort(0)
+                  }
+                }
+                byteBuffer.flip()
+                inputBuffer.put(byteBuffer)
+
                 val audioPtsUs = (fedAudioFrames.toLong() * 1_000_000L) / audioSampleRate
-                audioEncoder.queueInputBuffer(inIndex, 0, byteSize, audioPtsUs, 0)
+                audioEncoder.queueInputBuffer(inputBufferIndex, 0, framesToFeed * audioChannels * 2, audioPtsUs, 0)
                 fedAudioFrames += framesToFeed
               }
             } else {
@@ -765,86 +857,71 @@ class VideoExporter(private val context: Context) {
           drainAudioEncoder(audioEncoder, coordinator, false)
         }
 
-        // Update progress
-        if (frameIndex % max(1, totalFrames / 40) == 0 || frameIndex == totalFrames - 1) {
-          val progress = 0.1f + (0.85f * (frameIndex.toFloat() / totalFrames))
-          _exportState.value = ExportState.Rendering(
-            progressPercent = progress.coerceIn(0f, 0.95f),
-            currentFrame = frameIndex + 1,
-            totalFrames = totalFrames,
-            status = "Rendering frame ${frameIndex + 1}/$totalFrames"
-          )
+        // Calculate Render FPS throughput & Time Remaining
+        val now = System.currentTimeMillis()
+        if (now - lastFpsCheckTime >= 500L) {
+          val framesDiff = frameIndex - lastFpsCheckFrame
+          val timeDiffSec = (now - lastFpsCheckTime) / 1000f
+          currentThroughputFps = if (timeDiffSec > 0f) framesDiff / timeDiffSec else 0f
+          lastFpsCheckTime = now
+          lastFpsCheckFrame = frameIndex
         }
+
+        val progress = ((frameIndex + 1).toFloat() / totalFrames).coerceIn(0f, 1f)
+        val elapsedSec = (now - renderStartTime) / 1000f
+        val estRemainingSec = if (progress > 0.03f) ((elapsedSec / progress) - elapsedSec).toInt().coerceAtLeast(0) else 0
+
+        _exportState.value = ExportState.Rendering(
+          progressPercent = progress,
+          currentFrame = frameIndex + 1,
+          totalFrames = totalFrames,
+          status = "Rendering ${config.resolution.label} Frame ${frameIndex + 1}/$totalFrames...",
+          fps = currentThroughputFps,
+          estimatedRemainingSec = estRemainingSec
+        )
       }
 
-      // 6. Signal End-Of-Stream to Video Encoder
+      bitmapPool.release(frameBitmap)
+
+      // 6. Signal End of Stream & Drain Final Buffers
+      _exportState.value = ExportState.Rendering(0.95f, totalFrames, totalFrames, "Finalizing MP4 container...")
       if (useGpuSurface) {
-        try {
-          videoEncoder.signalEndOfInputStream()
-        } catch (e: Exception) {
-          Log.w(tag, "signalEndOfInputStream: ${e.message}")
-        }
+        videoEncoder.signalEndOfInputStream()
       } else {
-        val videoEosPtsUs = totalFrames * frameDurationUs
-        var videoEosQueued = false
-        var eosAttempts = 0
-        while (!videoEosQueued && eosAttempts < 100) {
-          val inIndex = videoEncoder.dequeueInputBuffer(10_000L)
-          if (inIndex >= 0) {
-            videoEncoder.queueInputBuffer(inIndex, 0, 0, videoEosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-            videoEosQueued = true
+        var eosFed = false
+        var attempts = 0
+        while (!eosFed && attempts < 50) {
+          val inputBufferIndex = videoEncoder.dequeueInputBuffer(5000L)
+          if (inputBufferIndex >= 0) {
+            val eosPtsUs = (totalFrames.toLong() * 1_000_000L) / fps
+            videoEncoder.queueInputBuffer(inputBufferIndex, 0, 0, eosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            eosFed = true
           } else {
-            drainVideoEncoder(videoEncoder, coordinator, false)
-            eosAttempts++
+            drainVideoEncoder(videoEncoder, coordinator, true)
+            attempts++
           }
         }
       }
-
-      // Drain video encoder until EOS
       drainVideoEncoder(videoEncoder, coordinator, true)
 
-      // 7. Signal End-Of-Stream to Audio Encoder
       if (hasAudio && audioEncoder != null) {
-        // Feed any remaining audio samples
-        while (fedAudioFrames < totalAudioFrames) {
-          val framesToFeed = min(1024, totalAudioFrames - fedAudioFrames)
-          val inIndex = audioEncoder.dequeueInputBuffer(10_000L)
-          if (inIndex >= 0) {
-            val inBuf = audioEncoder.getInputBuffer(inIndex)
-            if (inBuf != null) {
-              inBuf.clear()
-              inBuf.order(ByteOrder.LITTLE_ENDIAN)
-              val shortBuf = inBuf.asShortBuffer()
-              shortBuf.put(masterPcm, fedAudioFrames * audioChannels, framesToFeed * audioChannels)
-              val byteSize = framesToFeed * audioChannels * 2
-              val audioPtsUs = (fedAudioFrames.toLong() * 1_000_000L) / audioSampleRate
-              audioEncoder.queueInputBuffer(inIndex, 0, byteSize, audioPtsUs, 0)
-              fedAudioFrames += framesToFeed
-            }
+        var audioEosFed = false
+        var attempts = 0
+        while (!audioEosFed && attempts < 50) {
+          val inputBufferIndex = audioEncoder.dequeueInputBuffer(5000L)
+          if (inputBufferIndex >= 0) {
+            val audioPtsUs = (fedAudioFrames.toLong() * 1_000_000L) / audioSampleRate
+            audioEncoder.queueInputBuffer(inputBufferIndex, 0, 0, audioPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            audioEosFed = true
           } else {
-            drainAudioEncoder(audioEncoder, coordinator, false)
+            drainAudioEncoder(audioEncoder, coordinator, true)
+            attempts++
           }
         }
-
-        // Send Audio EOS
-        var audioEosQueued = false
-        var audioEosAttempts = 0
-        val audioEosPtsUs = (totalAudioFrames.toLong() * 1_000_000L) / audioSampleRate
-        while (!audioEosQueued && audioEosAttempts < 100) {
-          val inIndex = audioEncoder.dequeueInputBuffer(10_000L)
-          if (inIndex >= 0) {
-            audioEncoder.queueInputBuffer(inIndex, 0, 0, audioEosPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-            audioEosQueued = true
-          } else {
-            drainAudioEncoder(audioEncoder, coordinator, false)
-            audioEosAttempts++
-          }
-        }
-
         drainAudioEncoder(audioEncoder, coordinator, true)
       }
 
-      // 8. Finalize Muxer
+      // Stop Muxer safely
       if (coordinator.isStarted) {
         try {
           mediaMuxer.stop()
@@ -868,7 +945,6 @@ class VideoExporter(private val context: Context) {
       // Validate output file
       val finalSize = outputFile.length()
       if (finalSize > 1024L) {
-        // Validate playable media headers
         val isValid = validatePlayableMp4(outputFile)
         if (isValid) {
           _exportState.value = ExportState.Success(outputFile, totalDurationMs, finalSize)
@@ -909,17 +985,19 @@ class VideoExporter(private val context: Context) {
       retrievers.clear()
       for (f in videoFrameCache.values) {
         if (!f.bitmap.isRecycled) {
-          try { f.bitmap.recycle() } catch (ignored: Exception) {}
+          bitmapPool.release(f.bitmap)
         }
       }
       videoFrameCache.clear()
       imageBitmaps.clear()
+      bitmapPool.clear()
       audioProcessor.clearCache()
     }
   }
 
   fun release() {
     isCancelled = true
+    bitmapPool.clear()
     audioProcessor.clearCache()
   }
 
@@ -927,6 +1005,35 @@ class VideoExporter(private val context: Context) {
     val currentState = _exportState.value
     if (currentState is ExportState.Success) {
       _exportState.value = currentState.copy(file = file, fileSizeBytes = file.length())
+    }
+  }
+
+  private fun selectVideoCodecMime(config: ExportConfig, width: Int, height: Int): String {
+    if (config.codecProfile == CodecProfile.H265_HEVC) {
+      if (hasEncoderForMime(MediaFormat.MIMETYPE_VIDEO_HEVC)) {
+        return MediaFormat.MIMETYPE_VIDEO_HEVC
+      }
+    } else if (config.codecProfile == CodecProfile.AUTO) {
+      // For 4K resolution (either width or height >= 2160), prefer HEVC if supported
+      if ((width >= 2160 || height >= 2160) && hasEncoderForMime(MediaFormat.MIMETYPE_VIDEO_HEVC)) {
+        return MediaFormat.MIMETYPE_VIDEO_HEVC
+      }
+    }
+    return MediaFormat.MIMETYPE_VIDEO_AVC
+  }
+
+  private fun hasEncoderForMime(mime: String): Boolean {
+    return try {
+      val count = MediaCodecList.getCodecCount()
+      for (i in 0 until count) {
+        val info = MediaCodecList.getCodecInfoAt(i)
+        if (info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }) {
+          return true
+        }
+      }
+      false
+    } catch (e: Exception) {
+      false
     }
   }
 
@@ -946,9 +1053,17 @@ class VideoExporter(private val context: Context) {
         val newFormat = encoder.outputFormat
         coordinator.setVideoFormat(newFormat)
       } else if (outputBufferIndex >= 0) {
-        val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
-        if (outputBuffer != null) {
-          coordinator.writeVideoSample(outputBuffer, bufferInfo)
+        // Skip codec configuration buffers (CSD is supplied via MediaFormat)
+        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+          encoder.releaseOutputBuffer(outputBufferIndex, false)
+          continue
+        }
+
+        if (bufferInfo.size > 0) {
+          val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
+          if (outputBuffer != null) {
+            coordinator.writeVideoSample(outputBuffer, bufferInfo)
+          }
         }
         encoder.releaseOutputBuffer(outputBufferIndex, false)
         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -974,9 +1089,17 @@ class VideoExporter(private val context: Context) {
         val newFormat = encoder.outputFormat
         coordinator.setAudioFormat(newFormat)
       } else if (outputBufferIndex >= 0) {
-        val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
-        if (outputBuffer != null) {
-          coordinator.writeAudioSample(outputBuffer, bufferInfo)
+        // Skip codec configuration buffers
+        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+          encoder.releaseOutputBuffer(outputBufferIndex, false)
+          continue
+        }
+
+        if (bufferInfo.size > 0) {
+          val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
+          if (outputBuffer != null) {
+            coordinator.writeAudioSample(outputBuffer, bufferInfo)
+          }
         }
         encoder.releaseOutputBuffer(outputBufferIndex, false)
         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -1015,7 +1138,7 @@ class VideoExporter(private val context: Context) {
     }
 
     val cached = videoFrameCache[clip.id]
-    if (cached != null && kotlin.math.abs(cached.sourcePosMs - sourcePosMs) <= 10L && !cached.bitmap.isRecycled) {
+    if (cached != null && kotlin.math.abs(cached.sourcePosMs - sourcePosMs) <= 12L && !cached.bitmap.isRecycled) {
       return cached.bitmap
     }
 
@@ -1036,20 +1159,38 @@ class VideoExporter(private val context: Context) {
 
     return try {
       val sourceUs = sourcePosMs * 1000L
-      val newBmp = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+      var rawBmp = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
         retriever.getScaledFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST, targetWidth, targetHeight)
           ?: retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST)
       } else {
         retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST)
       }
 
-      if (newBmp != null) {
-        if (cached != null && cached.bitmap != newBmp && !cached.bitmap.isRecycled) {
-          try { cached.bitmap.recycle() } catch (ignored: Exception) {}
-        }
-        videoFrameCache[clip.id] = CachedVideoFrame(clip.id, sourcePosMs, newBmp)
+      // Check orientation metadata from source video and correct rotation
+      val orientationDegrees = try {
+        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+      } catch (e: Exception) {
+        0
       }
-      newBmp ?: cached?.bitmap
+
+      val orientedBmp = if (rawBmp != null && orientationDegrees != 0) {
+        val matrix = Matrix().apply { postRotate(orientationDegrees.toFloat()) }
+        val rotated = Bitmap.createBitmap(rawBmp, 0, 0, rawBmp.width, rawBmp.height, matrix, true)
+        if (rotated != rawBmp) {
+          try { rawBmp.recycle() } catch (ignored: Exception) {}
+        }
+        rotated
+      } else {
+        rawBmp
+      }
+
+      if (orientedBmp != null) {
+        if (cached != null && cached.bitmap != orientedBmp && !cached.bitmap.isRecycled) {
+          bitmapPool.release(cached.bitmap)
+        }
+        videoFrameCache[clip.id] = CachedVideoFrame(clip.id, sourcePosMs, orientedBmp)
+      }
+      orientedBmp ?: cached?.bitmap
     } catch (e: Exception) {
       cached?.bitmap
     }
@@ -1080,7 +1221,7 @@ class VideoExporter(private val context: Context) {
     }
   }
 
-  private fun getDimensionsForResolution(res: Resolution, aspect: AspectRatio): Pair<Int, Int> {
+  fun getDimensionsForResolution(res: Resolution, aspect: AspectRatio): Pair<Int, Int> {
     val shortSide = res.width
     val longSide = res.height
 
@@ -1093,9 +1234,10 @@ class VideoExporter(private val context: Context) {
       AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
     }
 
-    val evenW = ((w + 1) / 2) * 2
-    val evenH = ((h + 1) / 2) * 2
-    return Pair(evenW.coerceIn(320, 3840), evenH.coerceIn(320, 3840))
+    // Align dimensions to 16-pixel macroblock boundaries for standard hardware encoder compatibility
+    val alignedW = ((w + 15) / 16) * 16
+    val alignedH = ((h + 15) / 16) * 16
+    return Pair(alignedW.coerceIn(320, 3840), alignedH.coerceIn(320, 3840))
   }
 
   private fun encodeYUV420SemiPlanar(yuv420sp: ByteArray, argb: IntArray, width: Int, height: Int) {

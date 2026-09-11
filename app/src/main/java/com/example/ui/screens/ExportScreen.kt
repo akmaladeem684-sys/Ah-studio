@@ -10,8 +10,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -31,6 +33,7 @@ import androidx.core.content.FileProvider
 import com.example.domain.model.ExportQuality
 import com.example.domain.model.FrameRate
 import com.example.domain.model.Resolution
+import com.example.engine.export.CodecProfile
 import com.example.engine.export.ExportConfig
 import com.example.engine.export.ExportState
 import com.example.ui.AppScreen
@@ -57,15 +60,17 @@ fun ExportScreen(
   var selectedResolution by remember { mutableStateOf(defaultRes) }
   var selectedFps by remember { mutableStateOf(defaultFps) }
   var selectedQuality by remember { mutableStateOf(ExportQuality.HIGH) }
+  var selectedCodec by remember { mutableStateOf(CodecProfile.AUTO) }
   var customBitrateKbps by remember { mutableIntStateOf(12000) }
   var showConfigDialog by remember { mutableStateOf(false) }
 
-  val config = remember(selectedResolution, selectedFps, selectedQuality, customBitrateKbps) {
+  val config = remember(selectedResolution, selectedFps, selectedQuality, customBitrateKbps, selectedCodec) {
     ExportConfig(
       resolution = selectedResolution,
       frameRate = selectedFps,
       quality = selectedQuality,
-      customBitrateKbps = customBitrateKbps
+      customBitrateKbps = customBitrateKbps,
+      codecProfile = selectedCodec
     )
   }
 
@@ -105,18 +110,25 @@ fun ExportScreen(
       modifier = Modifier
         .fillMaxSize()
         .padding(padding)
-        .padding(20.dp),
-      verticalArrangement = Arrangement.spacedBy(20.dp)
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
       when (val state = exportState) {
         is ExportState.Idle -> {
           // Export Configuration Options
           Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+              .fillMaxWidth()
+              .weight(1f, fill = false),
             colors = CardDefaults.cardColors(containerColor = StudioSurface),
             border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, StudioBorder.copy(alpha = 0.4f))))
           ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(
+              modifier = Modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+              verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
               // Engine banner with Dialog shortcut
               Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -134,7 +146,7 @@ fun ExportScreen(
                     Icon(Icons.Default.Speed, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                      text = "Media3 Transformer",
+                      text = "Hardware Video Engine",
                       style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = CyanAccentDark
@@ -155,7 +167,25 @@ fun ExportScreen(
 
               // Resolution
               Column {
-                Text("Resolution", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("Resolution", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+                  if (selectedResolution == Resolution.RES_4K || selectedResolution == Resolution.RES_2K) {
+                    Surface(
+                      shape = RoundedCornerShape(4.dp),
+                      color = GoldAccent
+                    ) {
+                      Text(
+                        text = "ULTRA HD",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                      )
+                    }
+                  }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                   items(Resolution.values()) { res ->
@@ -165,6 +195,40 @@ fun ExportScreen(
                       label = { Text(res.label) },
                       colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
                     )
+                  }
+                }
+              }
+
+              // Codec Selection
+              Column {
+                Text("Video Codec", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  CodecProfile.values().forEach { codec ->
+                    val isSelected = selectedCodec == codec
+                    Surface(
+                      onClick = { selectedCodec = codec },
+                      shape = RoundedCornerShape(8.dp),
+                      color = if (isSelected) GreenAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
+                      border = BorderStroke(1.dp, if (isSelected) GreenAccent else StudioBorder),
+                      modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                    ) {
+                      Box(contentAlignment = Alignment.Center) {
+                        Text(
+                          text = when (codec) {
+                            CodecProfile.AUTO -> "Auto"
+                            CodecProfile.H264_AVC -> "H.264"
+                            CodecProfile.H265_HEVC -> "H.265 (4K)"
+                          },
+                          style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) GreenAccent else TextPrimary
+                          )
+                        )
+                      }
+                    }
                   }
                 }
               }
@@ -262,7 +326,7 @@ fun ExportScreen(
           Spacer(modifier = Modifier.weight(1f))
 
           PrimaryPillButton(
-            text = "Start Export",
+            text = "Start Render & Export",
             icon = Icons.Default.FileUpload,
             onClick = { viewModel.startExport(config) },
             modifier = Modifier
@@ -272,48 +336,103 @@ fun ExportScreen(
         }
 
         is ExportState.Rendering -> {
-          // Live Rendering Progress Screen
+          // Live High-Performance Rendering Progress Screen
           Box(
             modifier = Modifier
               .fillMaxWidth()
               .weight(1f),
             contentAlignment = Alignment.Center
           ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-              Box(
-                modifier = Modifier
-                  .size(120.dp)
-                  .clip(CircleShape)
-                  .background(StudioSurface),
-                contentAlignment = Alignment.Center
+            Card(
+              modifier = Modifier.fillMaxWidth(0.92f),
+              colors = CardDefaults.cardColors(containerColor = StudioSurface),
+              border = BorderStroke(1.dp, StudioBorder),
+              shape = RoundedCornerShape(20.dp)
+            ) {
+              Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
               ) {
-                CircularProgressIndicator(
-                  progress = { state.progressPercent },
-                  modifier = Modifier.fillMaxSize(),
-                  color = CyanAccent,
-                  strokeWidth = 8.dp,
-                  trackColor = StudioBorder
-                )
+                Box(
+                  modifier = Modifier
+                    .size(130.dp)
+                    .clip(CircleShape)
+                    .background(StudioSurfaceVariant),
+                  contentAlignment = Alignment.Center
+                ) {
+                  CircularProgressIndicator(
+                    progress = { state.progressPercent },
+                    modifier = Modifier.fillMaxSize(),
+                    color = CyanAccent,
+                    strokeWidth = 9.dp,
+                    trackColor = StudioBorder
+                  )
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                      text = "${(state.progressPercent * 100).toInt()}%",
+                      style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+                    )
+                    if (state.fps > 0f) {
+                      Text(
+                        text = "${state.fps.toInt()} FPS",
+                        style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
+                      )
+                    }
+                  }
+                }
+
                 Text(
-                  text = "${(state.progressPercent * 100).toInt()}%",
-                  style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+                  text = state.status,
+                  style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
+                  maxLines = 2
                 )
-              }
 
-              Text(
-                text = "Rendering Video...",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-              )
-              Text(
-                text = "Frame ${state.currentFrame} of ${state.totalFrames}",
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-              )
+                // Stats Chips
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = StudioSurfaceVariant
+                  ) {
+                    Column(
+                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                      horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                      Text("Frames", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
+                      Text("${state.currentFrame}/${state.totalFrames}", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
+                    }
+                  }
 
-              Button(
-                onClick = { viewModel.videoExporter.cancelExport() },
-                colors = ButtonDefaults.buttonColors(containerColor = StudioSurfaceVariant, contentColor = RedAccent)
-              ) {
-                Text("Cancel Export")
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = StudioSurfaceVariant
+                  ) {
+                    Column(
+                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                      horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                      Text("Estimated Time", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
+                      val etaText = if (state.estimatedRemainingSec > 0) "${state.estimatedRemainingSec}s" else "Finishing..."
+                      Text(etaText, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = GoldAccent))
+                    }
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Button(
+                  onClick = { viewModel.videoExporter.cancelExport() },
+                  colors = ButtonDefaults.buttonColors(containerColor = StudioSurfaceVariant, contentColor = RedAccent),
+                  shape = RoundedCornerShape(10.dp),
+                  modifier = Modifier.fillMaxWidth(0.7f)
+                ) {
+                  Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text("Cancel Render", fontWeight = FontWeight.SemiBold)
+                }
               }
             }
           }
@@ -418,7 +537,7 @@ fun ExportScreen(
 
                   Button(
                     onClick = {
-                      val res = com.example.engine.media.GalleryMediaSaver.saveVideoToGallery(
+                      com.example.engine.media.GalleryMediaSaver.saveVideoToGallery(
                         context = context,
                         sourceFile = state.file,
                         title = state.file.nameWithoutExtension
@@ -487,6 +606,7 @@ fun ExportScreen(
       initialFps = selectedFps,
       initialQuality = selectedQuality,
       initialBitrateKbps = customBitrateKbps,
+      initialCodec = selectedCodec,
       onDismiss = { showConfigDialog = false },
       onConfirmExport = { newConfig ->
         showConfigDialog = false
@@ -494,6 +614,7 @@ fun ExportScreen(
         selectedFps = newConfig.frameRate
         selectedQuality = newConfig.quality
         customBitrateKbps = newConfig.customBitrateKbps
+        selectedCodec = newConfig.codecProfile
         viewModel.startExport(newConfig)
       }
     )

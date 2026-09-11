@@ -18,6 +18,7 @@ val CyanAccentDark = Color(0xFF0369A1) // Sky Blue dark accent
 val PurpleAccent = Color(0xFF8B5CF6)
 val PinkAccent = Color(0xFFEC4899)
 val AmberAccent = Color(0xFFF59E0B)
+val GoldAccent = Color(0xFFEAB308)
 val GreenAccent = Color(0xFF10B981)
 val RedAccent = Color(0xFFEF4444)
 

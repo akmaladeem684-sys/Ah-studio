@@ -31,6 +31,7 @@ import com.example.domain.model.AspectRatio
 import com.example.domain.model.ExportQuality
 import com.example.domain.model.FrameRate
 import com.example.domain.model.Resolution
+import com.example.engine.export.CodecProfile
 import com.example.engine.export.ExportConfig
 import com.example.ui.components.formatDuration
 import com.example.ui.theme.*
@@ -38,8 +39,8 @@ import kotlin.math.roundToInt
 
 /**
  * Dialog for comprehensive export configuration.
- * Allows users to choose resolution, bitrate (presets and fine custom slider), and frame rate
- * before rendering the final project using Media3 Transformer.
+ * Allows users to choose resolution (4K UHD, 2K QHD, 1080p FHD, 720p, 480p),
+ * framerate, video codec (Auto, AVC, HEVC), and bitrate (presets and custom slider).
  */
 @Composable
 fun ExportConfigurationDialog(
@@ -50,12 +51,14 @@ fun ExportConfigurationDialog(
   initialFps: FrameRate = FrameRate.FPS_30,
   initialQuality: ExportQuality = ExportQuality.HIGH,
   initialBitrateKbps: Int = 12000,
+  initialCodec: CodecProfile = CodecProfile.AUTO,
   onDismiss: () -> Unit,
   onConfirmExport: (config: ExportConfig) -> Unit
 ) {
   var selectedResolution by remember { mutableStateOf(initialResolution) }
   var selectedFps by remember { mutableStateOf(initialFps) }
   var selectedQuality by remember { mutableStateOf(initialQuality) }
+  var selectedCodec by remember { mutableStateOf(initialCodec) }
   var customBitrateKbps by remember { mutableIntStateOf(initialBitrateKbps) }
   var isCustomBitrateMode by remember { mutableStateOf(initialQuality == ExportQuality.CUSTOM) }
 
@@ -65,12 +68,13 @@ fun ExportConfigurationDialog(
   }
 
   // Active config representation
-  val currentConfig = remember(selectedResolution, selectedFps, selectedQuality, customBitrateKbps, isCustomBitrateMode) {
+  val currentConfig = remember(selectedResolution, selectedFps, selectedQuality, customBitrateKbps, isCustomBitrateMode, selectedCodec) {
     ExportConfig(
       resolution = selectedResolution,
       frameRate = selectedFps,
       quality = if (isCustomBitrateMode) ExportQuality.CUSTOM else selectedQuality,
-      customBitrateKbps = customBitrateKbps
+      customBitrateKbps = customBitrateKbps,
+      codecProfile = selectedCodec
     )
   }
 
@@ -94,13 +98,14 @@ fun ExportConfigurationDialog(
       customBitrateKbps / 1000f
     } else {
       val base = when (selectedResolution) {
-        Resolution.RES_480P -> 2.0f
-        Resolution.RES_720P -> 4.5f
-        Resolution.RES_1080P -> 8.5f
-        Resolution.RES_2K -> 14.0f
-        Resolution.RES_4K -> 25.0f
+        Resolution.RES_480P -> 2.5f
+        Resolution.RES_720P -> 5.0f
+        Resolution.RES_1080P -> 10.0f
+        Resolution.RES_2K -> 18.0f
+        Resolution.RES_4K -> 35.0f
       }
-      base * selectedQuality.bitrateMultiplier * (selectedFps.fps / 30f)
+      val codecMultiplier = if (selectedCodec == CodecProfile.H265_HEVC) 0.75f else 1.0f
+      base * selectedQuality.bitrateMultiplier * (selectedFps.fps / 30f) * codecMultiplier
     }
   }
 
@@ -154,7 +159,7 @@ fun ExportConfigurationDialog(
                 )
               )
               Text(
-                text = "Render with Media3 Transformer",
+                text = "High-Performance Video Engine",
                 style = MaterialTheme.typography.bodySmall.copy(
                   color = CyanAccent,
                   fontWeight = FontWeight.SemiBold
@@ -173,7 +178,7 @@ fun ExportConfigurationDialog(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // --- Media3 Engine & Project Info Banner ---
+        // --- Engine & Project Info Banner ---
         Surface(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(12.dp),
@@ -218,7 +223,7 @@ fun ExportConfigurationDialog(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                  text = "Media3 Transformer",
+                  text = "Hardware Accelerated",
                   style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = CyanAccentDark,
@@ -272,6 +277,7 @@ fun ExportConfigurationDialog(
               items(Resolution.values()) { res ->
                 val isSelected = selectedResolution == res
                 val isRecommended = res == Resolution.RES_1080P
+                val isUhd = res == Resolution.RES_4K || res == Resolution.RES_2K
                 val resDims = calculateExportDimensions(res, aspectRatio)
 
                 Surface(
@@ -320,6 +326,21 @@ fun ExportConfigurationDialog(
                             )
                           )
                         }
+                      } else if (isUhd) {
+                        Surface(
+                          shape = RoundedCornerShape(4.dp),
+                          color = GoldAccent
+                        ) {
+                          Text(
+                            text = "PRO",
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                              color = Color.Black,
+                              fontSize = 8.sp,
+                              fontWeight = FontWeight.Bold
+                            )
+                          )
+                        }
                       }
                     }
                     Spacer(modifier = Modifier.height(2.dp))
@@ -339,7 +360,72 @@ fun ExportConfigurationDialog(
           HorizontalDivider(color = StudioBorder)
 
           // ==============================
-          // 2. Frame Rate (FPS) Selection
+          // 2. Video Codec Selection
+          // ==============================
+          Column {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "Video Codec",
+                style = MaterialTheme.typography.titleMedium.copy(
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary
+                )
+              )
+              Text(
+                text = selectedCodec.label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                  color = GreenAccent,
+                  fontWeight = FontWeight.Bold
+                )
+              )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              CodecProfile.values().forEach { codec ->
+                val isSelected = selectedCodec == codec
+                Surface(
+                  onClick = { selectedCodec = codec },
+                  shape = RoundedCornerShape(10.dp),
+                  color = if (isSelected) GreenAccent.copy(alpha = 0.15f) else StudioSurfaceVariant,
+                  border = BorderStroke(
+                    width = if (isSelected) 2.dp else 1.dp,
+                    color = if (isSelected) GreenAccent else StudioBorder
+                  ),
+                  modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .testTag("codec_chip_${codec.name}")
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Text(
+                      text = when (codec) {
+                        CodecProfile.AUTO -> "Auto"
+                        CodecProfile.H264_AVC -> "H.264 (AVC)"
+                        CodecProfile.H265_HEVC -> "H.265 (HEVC)"
+                      },
+                      style = MaterialTheme.typography.bodySmall.copy(
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) GreenAccent else TextPrimary
+                      )
+                    )
+                  }
+                }
+              }
+            }
+          }
+
+          HorizontalDivider(color = StudioBorder)
+
+          // ==============================
+          // 3. Frame Rate (FPS) Selection
           // ==============================
           Column {
             Row(
@@ -410,7 +496,7 @@ fun ExportConfigurationDialog(
           HorizontalDivider(color = StudioBorder)
 
           // ==============================
-          // 3. Bitrate & Quality Settings
+          // 4. Bitrate & Quality Settings
           // ==============================
           Column {
             Row(
@@ -571,7 +657,7 @@ fun ExportConfigurationDialog(
           HorizontalDivider(color = StudioBorder)
 
           // ==============================
-          // 4. Output Summary & Pipeline Card
+          // 5. Output Summary & Pipeline Card
           // ==============================
           Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -609,7 +695,7 @@ fun ExportConfigurationDialog(
                   style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                 )
                 Text(
-                  text = "H.264 (AVC) • AAC 48kHz Stereo",
+                  text = "${selectedCodec.label} • AAC 44.1kHz Stereo",
                   style = MaterialTheme.typography.bodySmall.copy(
                     fontWeight = FontWeight.SemiBold,
                     color = TextPrimary
@@ -643,7 +729,7 @@ fun ExportConfigurationDialog(
                   style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                 )
                 Text(
-                  text = "Media3 Transformer HW Pipeline",
+                  text = "Hardware Video Engine (4K / 2K Ready)",
                   style = MaterialTheme.typography.bodySmall.copy(
                     fontWeight = FontWeight.Bold,
                     color = GreenAccent
@@ -691,7 +777,7 @@ fun ExportConfigurationDialog(
             Icon(Icons.Default.MovieFilter, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-              text = "Render with Media3",
+              text = "Start Render",
               style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
             )
           }
@@ -705,21 +791,20 @@ fun ExportConfigurationDialog(
  * Calculates export pixel dimensions honoring project aspect ratio and target resolution.
  */
 internal fun calculateExportDimensions(res: Resolution, aspect: AspectRatio): Pair<Int, Int> {
-  val longEdge = when (res) {
-    Resolution.RES_480P -> 854
-    Resolution.RES_720P -> 1280
-    Resolution.RES_1080P -> 1920
-    Resolution.RES_2K -> 2560
-    Resolution.RES_4K -> 3840
+  val shortSide = res.width
+  val longSide = res.height
+
+  val (w, h) = when (aspect) {
+    AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
+    AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
+    AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
+    AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
+    AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
+    AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
   }
-  val isLandscape = aspect.ratio >= 1.0f
-  val ratioMultiplier = if (isLandscape) aspect.ratio else 1.0f / aspect.ratio
-  val shortEdge = (longEdge / ratioMultiplier).toInt()
-  val w = if (isLandscape) longEdge else shortEdge
-  val h = if (isLandscape) shortEdge else longEdge
-  val evenW = (w / 2) * 2
-  val evenH = (h / 2) * 2
-  return Pair(evenW.coerceAtLeast(320), evenH.coerceAtLeast(320))
+  val alignedW = ((w + 15) / 16) * 16
+  val alignedH = ((h + 15) / 16) * 16
+  return Pair(alignedW.coerceIn(320, 3840), alignedH.coerceIn(320, 3840))
 }
 
 /**
@@ -731,13 +816,14 @@ internal fun calculateEstimatedSize(durationMs: Long, config: ExportConfig): Lon
     config.customBitrateKbps * 1000L
   } else {
     val baseBitrate = when (config.resolution) {
-      Resolution.RES_480P -> 2_000_000L
-      Resolution.RES_720P -> 4_500_000L
-      Resolution.RES_1080P -> 8_500_000L
-      Resolution.RES_2K -> 14_000_000L
-      Resolution.RES_4K -> 25_000_000L
+      Resolution.RES_480P -> 2_500_000L
+      Resolution.RES_720P -> 5_000_000L
+      Resolution.RES_1080P -> 10_000_000L
+      Resolution.RES_2K -> 18_000_000L
+      Resolution.RES_4K -> 35_000_000L
     }
-    (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f)).toLong()
+    val codecMultiplier = if (config.codecProfile == CodecProfile.H265_HEVC) 0.75f else 1.0f
+    (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f) * codecMultiplier).toLong()
   }
   return (effectiveBitrate * durationSec / 8).toLong()
 }

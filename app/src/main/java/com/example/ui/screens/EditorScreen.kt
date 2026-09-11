@@ -52,6 +52,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.compose.ui.graphics.asImageBitmap
+import com.example.engine.media.VideoThumbnailManager
 import coil.compose.AsyncImage
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -1699,75 +1701,13 @@ private fun FilmstripThumbnailsRow(
           frameTimeMs >= c.timelineStartMs && frameTimeMs < (c.timelineStartMs + c.durationMs)
         }
 
-        Box(
-          modifier = Modifier
-            .width(72.dp)
-            .height(82.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color(0xFF1E293B))
-            .border(
-              width = if (isCurrentFrame) 2.dp else 1.dp,
-              color = if (isCurrentFrame) CyanAccent else Color(0xFF334155),
-              shape = RoundedCornerShape(6.dp)
-            )
-            .clickable { onSeek(frameTimeMs) }
-        ) {
-          if (activeClip?.uri?.isNotEmpty() == true) {
-            AsyncImage(
-              model = activeClip.uri,
-              contentDescription = "Frame ${i + 1}",
-              contentScale = ContentScale.Crop,
-              modifier = Modifier.fillMaxSize()
-            )
-          } else {
-            Column(
-              modifier = Modifier
-                .fillMaxSize()
-                .background(
-                  Brush.linearGradient(
-                    listOf(
-                      Color(0xFF0F172A),
-                      Color(0xFF1E293B),
-                      Color(0xFF0F172A)
-                    )
-                  )
-                )
-                .padding(4.dp),
-              verticalArrangement = Arrangement.SpaceBetween,
-              horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Box(modifier = Modifier.size(3.dp).background(Color.White.copy(alpha = 0.3f)))
-                Box(modifier = Modifier.size(3.dp).background(Color.White.copy(alpha = 0.3f)))
-              }
-              Icon(
-                imageVector = Icons.Default.Movie,
-                contentDescription = null,
-                tint = if (isCurrentFrame) CyanAccent else Color.White.copy(alpha = 0.4f),
-                modifier = Modifier.size(20.dp)
-              )
-              Text(
-                text = formatDurationShort(frameTimeMs),
-                color = if (isCurrentFrame) CyanAccent else Color.White.copy(alpha = 0.6f),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Medium
-              )
-            }
-          }
-
-          if (isCurrentFrame) {
-            Box(
-              modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(3.dp)
-                .background(CyanAccent)
-            )
-          }
-        }
+        FilmstripThumbnailCell(
+          frameIndex = i,
+          frameTimeMs = frameTimeMs,
+          isCurrentFrame = isCurrentFrame,
+          activeClip = activeClip,
+          onSeek = onSeek
+        )
       }
     }
 
@@ -1784,6 +1724,120 @@ private fun FilmstripThumbnailsRow(
         contentDescription = "Add Media",
         tint = CyanAccent,
         modifier = Modifier.size(28.dp)
+      )
+    }
+  }
+}
+
+@Composable
+private fun FilmstripThumbnailCell(
+  frameIndex: Int,
+  frameTimeMs: Long,
+  isCurrentFrame: Boolean,
+  activeClip: VideoClip?,
+  onSeek: (Long) -> Unit
+) {
+  val context = LocalContext.current
+  val sourceTimeMs = remember(activeClip, frameTimeMs) {
+    if (activeClip != null) {
+      activeClip.timelineToSourceMs(frameTimeMs)
+    } else frameTimeMs
+  }
+
+  var thumbnailBitmap by remember(activeClip?.uri, sourceTimeMs) {
+    val key = VideoThumbnailManager.makeKey(activeClip?.uri ?: "", sourceTimeMs, 140, 140)
+    mutableStateOf(VideoThumbnailManager.getCachedThumbnail(key))
+  }
+
+  LaunchedEffect(activeClip?.uri, sourceTimeMs) {
+    if (activeClip?.uri?.isNotEmpty() == true && thumbnailBitmap == null) {
+      VideoThumbnailManager.requestThumbnail(
+        context = context,
+        uri = activeClip.uri,
+        sourceTimeMs = sourceTimeMs,
+        targetWidth = 140,
+        targetHeight = 140,
+        isVideo = activeClip.isVideo
+      ) { bmp ->
+        thumbnailBitmap = bmp
+      }
+    }
+  }
+
+  Box(
+    modifier = Modifier
+      .width(72.dp)
+      .height(82.dp)
+      .clip(RoundedCornerShape(6.dp))
+      .background(Color(0xFF1E293B))
+      .border(
+        width = if (isCurrentFrame) 2.dp else 1.dp,
+        color = if (isCurrentFrame) CyanAccent else Color(0xFF334155),
+        shape = RoundedCornerShape(6.dp)
+      )
+      .clickable { onSeek(frameTimeMs) }
+  ) {
+    val currentBmp = thumbnailBitmap
+    if (currentBmp != null && !currentBmp.isRecycled) {
+      Image(
+        bitmap = currentBmp.asImageBitmap(),
+        contentDescription = "Frame ${frameIndex + 1}",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize()
+      )
+    } else if (activeClip?.uri?.isNotEmpty() == true) {
+      AsyncImage(
+        model = activeClip.uri,
+        contentDescription = "Frame ${frameIndex + 1}",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize()
+      )
+    } else {
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(
+            Brush.linearGradient(
+              listOf(
+                Color(0xFF0F172A),
+                Color(0xFF1E293B),
+                Color(0xFF0F172A)
+              )
+            )
+          )
+          .padding(4.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Box(modifier = Modifier.size(3.dp).background(Color.White.copy(alpha = 0.3f)))
+          Box(modifier = Modifier.size(3.dp).background(Color.White.copy(alpha = 0.3f)))
+        }
+        Icon(
+          imageVector = Icons.Default.Movie,
+          contentDescription = null,
+          tint = if (isCurrentFrame) CyanAccent else Color.White.copy(alpha = 0.4f),
+          modifier = Modifier.size(20.dp)
+        )
+        Text(
+          text = formatDurationShort(frameTimeMs),
+          color = if (isCurrentFrame) CyanAccent else Color.White.copy(alpha = 0.6f),
+          fontSize = 9.sp,
+          fontWeight = FontWeight.Medium
+        )
+      }
+    }
+
+    if (isCurrentFrame) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .fillMaxWidth()
+          .height(3.dp)
+          .background(CyanAccent)
       )
     }
   }

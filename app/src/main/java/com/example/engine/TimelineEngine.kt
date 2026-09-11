@@ -2854,6 +2854,26 @@ class TimelineEngine {
     updateClipAnimation(clipId) { ClipAnimationSettings() }
   }
 
+  fun applyAnimationToAllClips(settings: ClipAnimationSettings) {
+    recordHistory()
+    val updatedVideos = _timeline.value.videoClips.map { it.copy(animation = settings) }
+    val updatedOverlays = _timeline.value.overlayClips.map { it.copy(animation = settings) }
+    _timeline.value = _timeline.value.copy(
+      videoClips = updatedVideos,
+      overlayClips = updatedOverlays
+    )
+  }
+
+  fun clearAllClipsAnimation() {
+    recordHistory()
+    val updatedVideos = _timeline.value.videoClips.map { it.copy(animation = ClipAnimationSettings()) }
+    val updatedOverlays = _timeline.value.overlayClips.map { it.copy(animation = ClipAnimationSettings()) }
+    _timeline.value = _timeline.value.copy(
+      videoClips = updatedVideos,
+      overlayClips = updatedOverlays
+    )
+  }
+
   fun deleteSticker(clipId: String) {
     recordHistory()
     val list = _timeline.value.stickerClips.filterNot { it.id == clipId }

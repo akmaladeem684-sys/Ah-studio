@@ -83,6 +83,8 @@ fun TimelineClipView(
   clipIndex: Int? = null,
   totalClipsInTrack: Int = 1,
   isVideoClip: Boolean = false,
+  uri: String = "",
+  isVideo: Boolean = true,
   isBeingReordered: Boolean = false,
   onMoveEarlier: (() -> Unit)? = null,
   onMoveLater: (() -> Unit)? = null,
@@ -93,13 +95,14 @@ fun TimelineClipView(
 ) {
   val startPx = (timelineStartMs / msPerPixel).dp
   val widthPx = (durationMs / msPerPixel).dp.coerceAtLeast(28.dp)
+  val clipHeight = heightDp - 6.dp
 
   // Waveform analysis & dynamic slicing for trimmed clips
   val effectiveWaveform = remember(clipId, waveformData, durationMs, sourceStartMs, sourceEndMs, hasAudio) {
     if (waveformData.isNotEmpty()) {
       AudioWaveformManager.sliceForTrim(waveformData, sourceStartMs, sourceEndMs, durationMs)
     } else if (hasAudio) {
-      val full = AudioWaveformManager.getOrGenerateWaveform(clipId, clipId, title, durationMs)
+      val full = AudioWaveformManager.getOrGenerateWaveform(clipId, uri.ifBlank { clipId }, title, durationMs)
       AudioWaveformManager.sliceForTrim(full, sourceStartMs, sourceEndMs, durationMs)
     } else {
       emptyList()
@@ -129,18 +132,24 @@ fun TimelineClipView(
   // Accumulated drag distances to ensure precision and prevent accidental displacement
   var dragAccumulatorX by remember { mutableFloatStateOf(0f) }
 
+  val backgroundModifier = if (isVideoClip) {
+    Modifier.background(Color(0xFF0F131A))
+  } else {
+    Modifier.background(
+      Brush.horizontalGradient(
+        listOf(trackColor.copy(alpha = if (isBeingReordered) 0.95f else 0.85f), trackColor.copy(alpha = 0.65f))
+      )
+    )
+  }
+
   Box(
     modifier = modifier
       .offset(x = startPx)
       .width(widthPx)
-      .height(heightDp - 6.dp)
+      .height(clipHeight)
       .clip(RoundedCornerShape(6.dp))
       .alpha(if (isBeingReordered) 0.85f else if (isLocked) 0.55f else 1.0f)
-      .background(
-        Brush.horizontalGradient(
-          listOf(trackColor.copy(alpha = if (isBeingReordered) 0.95f else 0.85f), trackColor.copy(alpha = 0.65f))
-        )
-      )
+      .then(backgroundModifier)
       .border(
         width = if (isBeingReordered) 2.5.dp else if (isSelected || isMultiSelected) 2.dp else 1.dp,
         color = when {
@@ -148,55 +157,82 @@ fun TimelineClipView(
           isSelected -> CyanAccent
           isMultiSelected -> AmberAccent
           isLocked -> StudioBorder
-          else -> trackColor.copy(alpha = 0.9f)
+          else -> if (isVideoClip) Color(0xFF2E384D) else trackColor.copy(alpha = 0.9f)
         },
         shape = RoundedCornerShape(6.dp)
       )
       .testTag("clip_$clipId")
   ) {
-    // 0. Filmstrip Perforations Canvas (for video clips)
+    // 0. Video Thumbnail Filmstrip Layer (Continuous frame sequence across clip)
     if (isVideoClip) {
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        val sprocketW = 5.dp.toPx()
-        val sprocketH = 3.dp.toPx()
-        val step = 12.dp.toPx()
-        var cx = 4.dp.toPx()
-        while (cx + sprocketW < size.width) {
-          drawRoundRect(
-            color = Color.Black.copy(alpha = 0.32f),
-            topLeft = Offset(cx, 1.dp.toPx()),
-            size = androidx.compose.ui.geometry.Size(sprocketW, sprocketH),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx(), 1.dp.toPx())
-          )
-          drawRoundRect(
-            color = Color.Black.copy(alpha = 0.32f),
-            topLeft = Offset(cx, size.height - 1.dp.toPx() - sprocketH),
-            size = androidx.compose.ui.geometry.Size(sprocketW, sprocketH),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx(), 1.dp.toPx())
-          )
-          cx += step
-        }
-      }
-    }
-
-    // 1. Audio Waveform Canvas Layer (renders full clip width & height)
-    if (effectiveWaveform.isNotEmpty()) {
-      AudioWaveformCanvas(
-        waveformData = effectiveWaveform,
-        peaks = waveformAnalysis?.peaks ?: emptyList(),
-        silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
-        clipDurationMs = durationMs,
-        playheadPosMs = relPlayheadMs,
-        trackColor = trackColor,
-        peakColor = AmberAccent,
-        crestColor = CyanAccent,
-        style = waveformStyle,
-        showPeakGuides = true,
-        showSilenceHighlights = true,
-        showCenterLine = true,
-        isMuted = isMuted,
+      VideoFilmstripView(
+        clipId = clipId,
+        uri = uri,
+        timelineStartMs = timelineStartMs,
+        durationMs = durationMs,
+        sourceStartMs = sourceStartMs,
+        sourceEndMs = sourceEndMs,
+        speed = speed,
+        isReversed = isReversed,
+        isVideo = isVideo,
+        clipWidthDp = widthPx,
+        clipHeightDp = clipHeight,
+        currentPlayheadMs = currentPlayheadMs,
         modifier = Modifier.fillMaxSize()
       )
+    }
+
+    // 1. Audio Waveform Layer
+    if (effectiveWaveform.isNotEmpty()) {
+      if (isVideoClip) {
+        // Render audio waveform along the lower section of the video clip
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height((clipHeight * 0.45f).coerceAtLeast(18.dp))
+            .align(Alignment.BottomCenter)
+            .background(
+              Brush.verticalGradient(
+                listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
+              )
+            )
+        ) {
+          AudioWaveformCanvas(
+            waveformData = effectiveWaveform,
+            peaks = waveformAnalysis?.peaks ?: emptyList(),
+            silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
+            clipDurationMs = durationMs,
+            playheadPosMs = relPlayheadMs,
+            trackColor = AudioTrackColor,
+            peakColor = AmberAccent,
+            crestColor = CyanAccent,
+            style = waveformStyle,
+            showPeakGuides = true,
+            showSilenceHighlights = true,
+            showCenterLine = false,
+            isMuted = isMuted,
+            modifier = Modifier.fillMaxSize()
+          )
+        }
+      } else {
+        // Dedicated Audio Track: full clip height
+        AudioWaveformCanvas(
+          waveformData = effectiveWaveform,
+          peaks = waveformAnalysis?.peaks ?: emptyList(),
+          silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
+          clipDurationMs = durationMs,
+          playheadPosMs = relPlayheadMs,
+          trackColor = trackColor,
+          peakColor = AmberAccent,
+          crestColor = CyanAccent,
+          style = waveformStyle,
+          showPeakGuides = true,
+          showSilenceHighlights = true,
+          showCenterLine = true,
+          isMuted = isMuted,
+          modifier = Modifier.fillMaxSize()
+        )
+      }
     }
 
     // 1.5. Volume Envelope Graph Overlay on Audio Clips

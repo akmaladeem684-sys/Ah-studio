@@ -1,5 +1,6 @@
 package com.example.ui.components.animation
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,12 +41,161 @@ import com.example.ui.StudioViewModel
 import com.example.ui.theme.*
 import kotlin.math.*
 
-enum class AnimationCategoryTab(val label: String) {
-  IN("In-Animation"),
-  OUT("Out-Animation"),
-  COMBO("Combo / Loop"),
-  CUSTOMIZE("Customise")
+enum class AnimationCategoryTab(val label: String, val icon: ImageVector) {
+  PRESETS("1-Tap Combos", Icons.Default.AutoAwesome),
+  IN("In-Animation", Icons.Default.Login),
+  OUT("Out-Animation", Icons.Default.Logout),
+  COMBO("Loop / Combo", Icons.Default.Sync),
+  CUSTOMIZE("Customise", Icons.Default.Tune)
 }
+
+data class QuickAnimationComboPreset(
+  val id: String,
+  val name: String,
+  val description: String,
+  val icon: ImageVector,
+  val badgeColor: Color,
+  val settings: ClipAnimationSettings
+)
+
+val QUICK_COMBO_PRESETS = listOf(
+  QuickAnimationComboPreset(
+    id = "cinematic",
+    name = "Cinematic Intro",
+    description = "Gentle zoom in with smooth breathing loop & soft fade out",
+    icon = Icons.Default.MovieFilter,
+    badgeColor = AmberAccent,
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.ZOOM_OUT,
+      inDurationMs = 800L,
+      comboType = ComboAnimationType.BREATHE,
+      outType = OutAnimationType.FADE_OUT,
+      outDurationMs = 600L,
+      easing = AnimationEasing.EASE_OUT,
+      intensity = 1.0f,
+      speed = 0.8f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "tiktok_pop",
+    name = "TikTok Energy",
+    description = "Dynamic Pop In, energetic pulse loop & bounce exit",
+    icon = Icons.Default.FlashOn,
+    badgeColor = PurpleAccent,
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.POP_IN,
+      inDurationMs = 500L,
+      comboType = ComboAnimationType.PULSE,
+      outType = OutAnimationType.BOUNCE_OUT,
+      outDurationMs = 500L,
+      easing = AnimationEasing.OVERSHOOT,
+      intensity = 1.2f,
+      speed = 1.4f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "vlog_smooth",
+    name = "Vlog Elegance",
+    description = "Clean upward slide entrance with floating loop",
+    icon = Icons.Default.Videocam,
+    badgeColor = CyanAccent,
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.SLIDE_UP,
+      inDurationMs = 700L,
+      comboType = ComboAnimationType.FLOAT,
+      outType = OutAnimationType.SLIDE_DOWN_OUT,
+      outDurationMs = 600L,
+      easing = AnimationEasing.EASE_IN_OUT,
+      intensity = 1.0f,
+      speed = 1.0f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "glitch_cyber",
+    name = "Cyberpunk Glitch",
+    description = "High-tech digital distortion entry and exit glitch",
+    icon = Icons.Default.ElectricBolt,
+    badgeColor = RedAccent,
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.GLITCH_IN,
+      inDurationMs = 600L,
+      comboType = ComboAnimationType.JITTER,
+      outType = OutAnimationType.GLITCH_OUT,
+      outDurationMs = 500L,
+      easing = AnimationEasing.LINEAR,
+      intensity = 1.5f,
+      speed = 1.8f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "bouncy_fun",
+    name = "Bouncy Playful",
+    description = "Joyful elastic bounce with pendulum wave loop",
+    icon = Icons.Default.SentimentSatisfiedAlt,
+    badgeColor = Color(0xFF10B981),
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.BOUNCE_IN,
+      inDurationMs = 800L,
+      comboType = ComboAnimationType.WAVE,
+      outType = OutAnimationType.POP_OUT,
+      outDurationMs = 500L,
+      easing = AnimationEasing.BOUNCE,
+      intensity = 1.2f,
+      speed = 1.2f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "3d_spin",
+    name = "3D Dynamic Spin",
+    description = "Continuous revolving 360 rotation with flip transition",
+    icon = Icons.Default.RotateRight,
+    badgeColor = Color(0xFFEC4899),
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.SPIN_IN,
+      inDurationMs = 800L,
+      comboType = ComboAnimationType.SPIN_360,
+      outType = OutAnimationType.SPIN_OUT,
+      outDurationMs = 800L,
+      easing = AnimationEasing.EASE_IN_OUT,
+      intensity = 1.0f,
+      speed = 1.0f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "flash_impact",
+    name = "Impact Strobe",
+    description = "Fast strobe beats with high-impact zoom scale",
+    icon = Icons.Default.WbIncandescent,
+    badgeColor = AmberAccent,
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.ZOOM_IN,
+      inDurationMs = 400L,
+      comboType = ComboAnimationType.FLASH_PULSE,
+      outType = OutAnimationType.ZOOM_OUT,
+      outDurationMs = 400L,
+      easing = AnimationEasing.OVERSHOOT,
+      intensity = 1.4f,
+      speed = 2.0f
+    )
+  ),
+  QuickAnimationComboPreset(
+    id = "heartbeat_romance",
+    name = "Heartbeat Rhythm",
+    description = "Warm rhythmic pulse beat with soft blur entrance",
+    icon = Icons.Default.Favorite,
+    badgeColor = RedAccent,
+    settings = ClipAnimationSettings(
+      inType = InAnimationType.BLUR_IN,
+      inDurationMs = 600L,
+      comboType = ComboAnimationType.HEARTBEAT,
+      outType = OutAnimationType.BLUR_OUT,
+      outDurationMs = 600L,
+      easing = AnimationEasing.EASE_OUT,
+      intensity = 1.1f,
+      speed = 1.0f
+    )
+  )
+)
 
 @Composable
 fun AnimationsToolPanel(
@@ -54,6 +205,7 @@ fun AnimationsToolPanel(
   val timeline by viewModel.timelineEngine.timeline.collectAsState()
   val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
   val currentPosMs by viewModel.timelineEngine.currentPositionMs.collectAsState()
+  val isPlaying by viewModel.timelineEngine.isPlaying.collectAsState()
 
   // Determine active target clip
   val selectedVideoClip = remember(selectedElement, timeline) {
@@ -80,15 +232,24 @@ fun AnimationsToolPanel(
     } else null
   }
 
-  var activeCategoryTab by remember { mutableStateOf(AnimationCategoryTab.IN) }
+  var activeCategoryTab by remember { mutableStateOf(AnimationCategoryTab.PRESETS) }
+  var showApplyAllNotice by remember { mutableStateOf(false) }
+
+  // Auto-hide notice after 2.5s
+  LaunchedEffect(showApplyAllNotice) {
+    if (showApplyAllNotice) {
+      kotlinx.coroutines.delay(2500)
+      showApplyAllNotice = false
+    }
+  }
 
   Column(
     modifier = modifier
       .fillMaxWidth()
       .background(StudioSurface)
       .navigationBarsPadding()
-      .padding(horizontal = 16.dp, vertical = 12.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp)
+      .padding(horizontal = 14.dp, vertical = 10.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
   ) {
     // Top Bar Header
     Row(
@@ -112,18 +273,35 @@ fun AnimationsToolPanel(
           )
         }
         Column {
-          Text(
-            text = "Clip Animations",
-            style = MaterialTheme.typography.titleMedium.copy(
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary,
-              fontSize = 16.sp
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+              text = "Clip Animations",
+              style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                fontSize = 15.sp
+              )
             )
-          )
+            // Active animation indicator badge
+            if (selectedVideoClip?.animation?.hasAnimation == true) {
+              Surface(
+                color = AmberAccent.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(4.dp)
+              ) {
+                Text(
+                  text = "Active",
+                  color = AmberAccent,
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                )
+              }
+            }
+          }
           Text(
-            text = if (selectedVideoClip != null) "Editing: ${selectedVideoClip.name}"
-                   else if (selectedTextClip != null) "Editing: \"${selectedTextClip.text}\""
-                   else if (selectedStickerClip != null) "Editing Sticker"
+            text = if (selectedVideoClip != null) "Target: ${selectedVideoClip.name}"
+                   else if (selectedTextClip != null) "Target Text: \"${selectedTextClip.text}\""
+                   else if (selectedStickerClip != null) "Target: Sticker"
                    else "Select a clip to animate",
             style = MaterialTheme.typography.bodySmall.copy(
               color = TextSecondary,
@@ -136,6 +314,24 @@ fun AnimationsToolPanel(
       }
 
       Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Quick Apply to All Clips button
+        if (selectedVideoClip != null && timeline.videoClips.size > 1) {
+          IconButton(
+            onClick = {
+              viewModel.timelineEngine.applyAnimationToAllClips(selectedVideoClip.animation)
+              showApplyAllNotice = true
+            },
+            modifier = Modifier.size(32.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.ContentCopy,
+              contentDescription = "Apply to All Clips",
+              tint = AmberAccent,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+        }
+
         // Quick Preview / Play from animation start
         if (selectedVideoClip != null) {
           IconButton(
@@ -146,14 +342,14 @@ fun AnimationsToolPanel(
                 else -> selectedVideoClip.timelineStartMs
               }
               viewModel.timelineEngine.seekTo(seekTarget)
-              if (!viewModel.timelineEngine.isPlaying.value) {
+              if (!isPlaying) {
                 viewModel.timelineEngine.togglePlayPause()
               }
             },
-            modifier = Modifier.size(34.dp)
+            modifier = Modifier.size(32.dp)
           ) {
             Icon(
-              imageVector = Icons.Default.PlayArrow,
+              imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
               contentDescription = "Preview Animation",
               tint = CyanAccent,
               modifier = Modifier.size(20.dp)
@@ -163,9 +359,33 @@ fun AnimationsToolPanel(
 
         IconButton(
           onClick = { viewModel.setActiveToolbarTab(null) },
-          modifier = Modifier.size(34.dp)
+          modifier = Modifier.size(32.dp)
         ) {
           Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary, modifier = Modifier.size(20.dp))
+        }
+      }
+    }
+
+    // Apply-All Notification Banner
+    AnimatedVisibility(visible = showApplyAllNotice) {
+      Surface(
+        color = AmberAccent.copy(alpha = 0.15f),
+        border = BorderStroke(1.dp, AmberAccent.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(14.dp))
+          Text(
+            text = "Applied animation settings to all ${timeline.videoClips.size} clips in timeline!",
+            fontSize = 11.sp,
+            color = AmberAccent,
+            fontWeight = FontWeight.Medium
+          )
         }
       }
     }
@@ -173,11 +393,12 @@ fun AnimationsToolPanel(
     // Clip Selection Row if multiple video/overlay clips exist
     if (timeline.videoClips.size + timeline.overlayClips.size > 1) {
       LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
         items(timeline.videoClips) { clip ->
           val isTarget = selectedVideoClip?.id == clip.id
+          val hasAnim = clip.animation.hasAnimation
           Surface(
             shape = RoundedCornerShape(8.dp),
             color = if (isTarget) AmberAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
@@ -204,11 +425,15 @@ fun AnimationsToolPanel(
                 color = if (isTarget) AmberAccent else TextPrimary,
                 maxLines = 1
               )
+              if (hasAnim) {
+                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(AmberAccent))
+              }
             }
           }
         }
         items(timeline.overlayClips) { overlay ->
           val isTarget = selectedVideoClip?.id == overlay.id
+          val hasAnim = overlay.animation.hasAnimation
           Surface(
             shape = RoundedCornerShape(8.dp),
             color = if (isTarget) PurpleAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
@@ -235,13 +460,77 @@ fun AnimationsToolPanel(
                 color = if (isTarget) PurpleAccent else TextPrimary,
                 maxLines = 1
               )
+              if (hasAnim) {
+                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(PurpleAccent))
+              }
             }
           }
         }
       }
     }
 
-    // Category Tabs: IN | OUT | COMBO | CUSTOMIZE
+    // Animation Timing Bar Visualizer
+    if (selectedVideoClip != null && selectedVideoClip.animation.hasAnimation) {
+      val clipDur = selectedVideoClip.durationMs.coerceAtLeast(100L).toFloat()
+      val inPct = (selectedVideoClip.animation.inDurationMs / clipDur).coerceIn(0f, 0.45f)
+      val outPct = (selectedVideoClip.animation.outDurationMs / clipDur).coerceIn(0f, 0.45f)
+      val sustainPct = (1f - inPct - outPct).coerceAtLeast(0.1f)
+
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(Color(0xFF1E293B))
+        ) {
+          if (selectedVideoClip.animation.inType != InAnimationType.NONE) {
+            Box(
+              modifier = Modifier
+                .weight(inPct.coerceAtLeast(0.01f))
+                .fillMaxHeight()
+                .background(AmberAccent)
+            )
+          }
+          Box(
+            modifier = Modifier
+              .weight(sustainPct)
+              .fillMaxHeight()
+              .background(if (selectedVideoClip.animation.comboType != ComboAnimationType.NONE) CyanAccent.copy(alpha = 0.6f) else Color(0xFF334155))
+          )
+          if (selectedVideoClip.animation.outType != OutAnimationType.NONE) {
+            Box(
+              modifier = Modifier
+                .weight(outPct.coerceAtLeast(0.01f))
+                .fillMaxHeight()
+                .background(RedAccent)
+            )
+          }
+        }
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Text(
+            text = "In: ${if (selectedVideoClip.animation.inType != InAnimationType.NONE) selectedVideoClip.animation.inType.displayName else "None"}",
+            fontSize = 9.sp,
+            color = if (selectedVideoClip.animation.inType != InAnimationType.NONE) AmberAccent else TextTertiary
+          )
+          Text(
+            text = "Loop: ${if (selectedVideoClip.animation.comboType != ComboAnimationType.NONE) selectedVideoClip.animation.comboType.displayName else "None"}",
+            fontSize = 9.sp,
+            color = if (selectedVideoClip.animation.comboType != ComboAnimationType.NONE) CyanAccent else TextTertiary
+          )
+          Text(
+            text = "Out: ${if (selectedVideoClip.animation.outType != OutAnimationType.NONE) selectedVideoClip.animation.outType.displayName else "None"}",
+            fontSize = 9.sp,
+            color = if (selectedVideoClip.animation.outType != OutAnimationType.NONE) RedAccent else TextTertiary
+          )
+        }
+      }
+    }
+
+    // Main Category Tabs
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -258,7 +547,7 @@ fun AnimationsToolPanel(
             .clip(RoundedCornerShape(8.dp))
             .background(if (isActive) AmberAccent else Color.Transparent)
             .clickable { activeCategoryTab = tab }
-            .padding(vertical = 7.dp),
+            .padding(vertical = 6.dp),
           contentAlignment = Alignment.Center
         ) {
           Text(
@@ -278,6 +567,17 @@ fun AnimationsToolPanel(
       val animSettings = selectedVideoClip.animation
 
       when (activeCategoryTab) {
+        AnimationCategoryTab.PRESETS -> {
+          PresetsTabContent(
+            currentSettings = animSettings,
+            onApplyPreset = { preset ->
+              viewModel.timelineEngine.updateClipAnimation(selectedVideoClip.id) { preset.settings }
+            },
+            onResetAll = {
+              viewModel.timelineEngine.clearClipAnimation(selectedVideoClip.id)
+            }
+          )
+        }
         AnimationCategoryTab.IN -> {
           InAnimationGrid(
             currentType = animSettings.inType,
@@ -328,12 +628,15 @@ fun AnimationsToolPanel(
             },
             onClear = {
               viewModel.timelineEngine.clearClipAnimation(selectedVideoClip.id)
+            },
+            onApplyToAll = {
+              viewModel.timelineEngine.applyAnimationToAllClips(animSettings)
+              showApplyAllNotice = true
             }
           )
         }
       }
     } else if (selectedTextClip != null) {
-      // Text Animation Controls
       TextAnimationPicker(
         clip = selectedTextClip,
         onUpdate = { updated ->
@@ -341,7 +644,6 @@ fun AnimationsToolPanel(
         }
       )
     } else if (selectedStickerClip != null) {
-      // Sticker Animation Controls
       StickerAnimationPicker(
         clip = selectedStickerClip,
         onSelectAnimation = { animType ->
@@ -365,13 +667,137 @@ fun AnimationsToolPanel(
 }
 
 @Composable
+private fun PresetsTabContent(
+  currentSettings: ClipAnimationSettings,
+  onApplyPreset: (QuickAnimationComboPreset) -> Unit,
+  onResetAll: () -> Unit
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(230.dp)
+      .verticalScroll(rememberScrollState()),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text(
+        text = "Ready-to-Use 1-Tap Styles",
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        color = TextPrimary
+      )
+      if (currentSettings.hasAnimation) {
+        TextButton(
+          onClick = onResetAll,
+          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+          Text("Reset to None", color = RedAccent, fontSize = 11.sp)
+        }
+      }
+    }
+
+    QUICK_COMBO_PRESETS.chunked(2).forEach { pair ->
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        pair.forEach { preset ->
+          val isApplied = currentSettings.inType == preset.settings.inType &&
+                          currentSettings.comboType == preset.settings.comboType &&
+                          currentSettings.outType == preset.settings.outType
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (isApplied) preset.badgeColor.copy(alpha = 0.18f) else StudioSurfaceVariant,
+            border = BorderStroke(
+              width = if (isApplied) 1.5.dp else 1.dp,
+              color = if (isApplied) preset.badgeColor else Color.White.copy(alpha = 0.08f)
+            ),
+            modifier = Modifier
+              .weight(1f)
+              .clickable { onApplyPreset(preset) }
+              .testTag("preset_${preset.id}")
+          ) {
+            Column(
+              modifier = Modifier.padding(10.dp),
+              verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(preset.badgeColor.copy(alpha = 0.25f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = preset.icon,
+                    contentDescription = null,
+                    tint = preset.badgeColor,
+                    modifier = Modifier.size(14.dp)
+                  )
+                }
+                if (isApplied) {
+                  Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Applied",
+                    tint = preset.badgeColor,
+                    modifier = Modifier.size(16.dp)
+                  )
+                }
+              }
+              Text(
+                text = preset.name,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                color = if (isApplied) preset.badgeColor else TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+              Text(
+                text = preset.description,
+                fontSize = 10.sp,
+                color = TextSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 12.sp
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
 private fun InAnimationGrid(
   currentType: InAnimationType,
   durationMs: Long,
   onSelectType: (InAnimationType) -> Unit,
   onDurationChange: (Long) -> Unit
 ) {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+  var selectedFilter by remember { mutableStateOf("All") }
+  val filters = listOf("All", "Slide", "Zoom & Scale", "Rotate & 3D", "Special")
+
+  val filteredTypes = remember(selectedFilter) {
+    when (selectedFilter) {
+      "Slide" -> InAnimationType.values().filter { it.name.contains("SLIDE") || it.name.contains("SWING") }
+      "Zoom & Scale" -> InAnimationType.values().filter { it.name.contains("ZOOM") || it.name.contains("POP") || it.name.contains("BOUNCE") }
+      "Rotate & 3D" -> InAnimationType.values().filter { it.name.contains("SPIN") || it.name.contains("FLIP") }
+      "Special" -> InAnimationType.values().filter { it.name.contains("GLITCH") || it.name.contains("WIPE") || it.name.contains("BLUR") || it.name.contains("ELASTIC") || it.name.contains("FADE") }
+      else -> InAnimationType.values().toList()
+    }
+  }
+
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     // Duration Slider
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -402,9 +828,30 @@ private fun InAnimationGrid(
       ),
       modifier = Modifier
         .fillMaxWidth()
-        .height(24.dp)
+        .height(20.dp)
         .testTag("in_anim_duration_slider")
     )
+
+    // Category Filter Chips
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      items(filters) { f ->
+        val isSel = selectedFilter == f
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = if (isSel) AmberAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
+          border = BorderStroke(1.dp, if (isSel) AmberAccent else Color.Transparent),
+          modifier = Modifier.clickable { selectedFilter = f }
+        ) {
+          Text(
+            text = f,
+            fontSize = 11.sp,
+            color = if (isSel) AmberAccent else TextSecondary,
+            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+          )
+        }
+      }
+    }
 
     // Presets Grid
     LazyVerticalGrid(
@@ -413,9 +860,9 @@ private fun InAnimationGrid(
       verticalArrangement = Arrangement.spacedBy(8.dp),
       modifier = Modifier
         .fillMaxWidth()
-        .height(210.dp)
+        .height(180.dp)
     ) {
-      items(InAnimationType.values()) { type ->
+      items(filteredTypes) { type ->
         val isSelected = currentType == type
         AnimationCard(
           label = type.displayName,
@@ -436,7 +883,20 @@ private fun OutAnimationGrid(
   onSelectType: (OutAnimationType) -> Unit,
   onDurationChange: (Long) -> Unit
 ) {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+  var selectedFilter by remember { mutableStateOf("All") }
+  val filters = listOf("All", "Slide", "Zoom & Scale", "Rotate & 3D", "Special")
+
+  val filteredTypes = remember(selectedFilter) {
+    when (selectedFilter) {
+      "Slide" -> OutAnimationType.values().filter { it.name.contains("SLIDE") || it.name.contains("SWING") }
+      "Zoom & Scale" -> OutAnimationType.values().filter { it.name.contains("ZOOM") || it.name.contains("POP") || it.name.contains("BOUNCE") }
+      "Rotate & 3D" -> OutAnimationType.values().filter { it.name.contains("SPIN") || it.name.contains("FLIP") }
+      "Special" -> OutAnimationType.values().filter { it.name.contains("GLITCH") || it.name.contains("WIPE") || it.name.contains("BLUR") || it.name.contains("FADE") }
+      else -> OutAnimationType.values().toList()
+    }
+  }
+
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     // Duration Slider
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -467,9 +927,30 @@ private fun OutAnimationGrid(
       ),
       modifier = Modifier
         .fillMaxWidth()
-        .height(24.dp)
+        .height(20.dp)
         .testTag("out_anim_duration_slider")
     )
+
+    // Category Filter Chips
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      items(filters) { f ->
+        val isSel = selectedFilter == f
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = if (isSel) AmberAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
+          border = BorderStroke(1.dp, if (isSel) AmberAccent else Color.Transparent),
+          modifier = Modifier.clickable { selectedFilter = f }
+        ) {
+          Text(
+            text = f,
+            fontSize = 11.sp,
+            color = if (isSel) AmberAccent else TextSecondary,
+            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+          )
+        }
+      }
+    }
 
     // Presets Grid
     LazyVerticalGrid(
@@ -478,9 +959,9 @@ private fun OutAnimationGrid(
       verticalArrangement = Arrangement.spacedBy(8.dp),
       modifier = Modifier
         .fillMaxWidth()
-        .height(210.dp)
+        .height(180.dp)
     ) {
-      items(OutAnimationType.values()) { type ->
+      items(filteredTypes) { type ->
         val isSelected = currentType == type
         AnimationCard(
           label = type.displayName,
@@ -501,7 +982,19 @@ private fun ComboAnimationGrid(
   onSelectType: (ComboAnimationType) -> Unit,
   onSpeedChange: (Float) -> Unit
 ) {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+  var selectedFilter by remember { mutableStateOf("All") }
+  val filters = listOf("All", "Rhythm & Pulse", "Movement & Wave", "Special FX")
+
+  val filteredTypes = remember(selectedFilter) {
+    when (selectedFilter) {
+      "Rhythm & Pulse" -> ComboAnimationType.values().filter { it.name.contains("PULSE") || it.name.contains("HEARTBEAT") || it.name.contains("BREATHE") }
+      "Movement & Wave" -> ComboAnimationType.values().filter { it.name.contains("FLOAT") || it.name.contains("PENDULUM") || it.name.contains("WAVE") || it.name.contains("SPIN") }
+      "Special FX" -> ComboAnimationType.values().filter { it.name.contains("SHAKE") || it.name.contains("JITTER") || it.name.contains("FLASH") }
+      else -> ComboAnimationType.values().toList()
+    }
+  }
+
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     // Speed Slider
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -532,9 +1025,30 @@ private fun ComboAnimationGrid(
       ),
       modifier = Modifier
         .fillMaxWidth()
-        .height(24.dp)
+        .height(20.dp)
         .testTag("combo_anim_speed_slider")
     )
+
+    // Category Filter Chips
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      items(filters) { f ->
+        val isSel = selectedFilter == f
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = if (isSel) CyanAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
+          border = BorderStroke(1.dp, if (isSel) CyanAccent else Color.Transparent),
+          modifier = Modifier.clickable { selectedFilter = f }
+        ) {
+          Text(
+            text = f,
+            fontSize = 11.sp,
+            color = if (isSel) CyanAccent else TextSecondary,
+            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+          )
+        }
+      }
+    }
 
     // Presets Grid
     LazyVerticalGrid(
@@ -543,9 +1057,9 @@ private fun ComboAnimationGrid(
       verticalArrangement = Arrangement.spacedBy(8.dp),
       modifier = Modifier
         .fillMaxWidth()
-        .height(210.dp)
+        .height(180.dp)
     ) {
-      items(ComboAnimationType.values()) { type ->
+      items(filteredTypes) { type ->
         val isSelected = currentType == type
         AnimationCard(
           label = type.displayName,
@@ -563,17 +1077,18 @@ private fun ComboAnimationGrid(
 private fun AnimationCustomisePanel(
   settings: ClipAnimationSettings,
   onUpdate: (ClipAnimationSettings) -> Unit,
-  onClear: () -> Unit
+  onClear: () -> Unit,
+  onApplyToAll: () -> Unit
 ) {
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .height(230.dp)
       .verticalScroll(rememberScrollState()),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
+    verticalArrangement = Arrangement.spacedBy(10.dp)
   ) {
     // Intensity Slider
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
@@ -590,8 +1105,8 @@ private fun AnimationCustomisePanel(
     }
 
     // Easing Picker
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      Text("Easing Curve", fontSize = 12.sp, color = TextSecondary)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text("Motion Easing Curve", fontSize = 12.sp, color = TextSecondary)
       LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         items(AnimationEasing.values()) { easing ->
           val isSelected = settings.easing == easing
@@ -606,7 +1121,7 @@ private fun AnimationCustomisePanel(
               fontSize = 11.sp,
               fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
               color = if (isSelected) AmberAccent else TextPrimary,
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
             )
           }
         }
@@ -619,7 +1134,7 @@ private fun AnimationCustomisePanel(
       color = StudioSurfaceVariant,
       modifier = Modifier.fillMaxWidth()
     ) {
-      Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text("Active Configuration", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TextPrimary)
         Text("• In: ${settings.inType.displayName} (${settings.inDurationMs}ms)", fontSize = 11.sp, color = TextSecondary)
         Text("• Out: ${settings.outType.displayName} (${settings.outDurationMs}ms)", fontSize = 11.sp, color = TextSecondary)
@@ -628,16 +1143,32 @@ private fun AnimationCustomisePanel(
       }
     }
 
-    // Clear All Animations Button
-    Button(
-      onClick = onClear,
-      colors = ButtonDefaults.buttonColors(containerColor = RedAccent.copy(alpha = 0.2f), contentColor = RedAccent),
-      shape = RoundedCornerShape(8.dp),
-      modifier = Modifier.fillMaxWidth()
+    // Action Buttons Row: Apply to All + Clear All
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
-      Spacer(modifier = Modifier.width(6.dp))
-      Text("Remove All Animations", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+      Button(
+        onClick = onApplyToAll,
+        colors = ButtonDefaults.buttonColors(containerColor = AmberAccent.copy(alpha = 0.2f), contentColor = AmberAccent),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.weight(1f)
+      ) {
+        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Apply to All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      }
+
+      Button(
+        onClick = onClear,
+        colors = ButtonDefaults.buttonColors(containerColor = RedAccent.copy(alpha = 0.2f), contentColor = RedAccent),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.weight(1f)
+      ) {
+        Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Remove All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      }
     }
   }
 }
@@ -657,7 +1188,7 @@ private fun AnimationCard(
       color = if (isSelected) AmberAccent else Color.White.copy(alpha = 0.08f)
     ),
     modifier = Modifier
-      .height(84.dp)
+      .height(82.dp)
       .clip(RoundedCornerShape(10.dp))
       .clickable(onClick = onClick)
       .testTag("anim_item_${label.replace(" ", "_").lowercase()}")
@@ -671,7 +1202,7 @@ private fun AnimationCard(
     ) {
       Box(
         modifier = Modifier
-          .size(36.dp)
+          .size(34.dp)
           .clip(RoundedCornerShape(6.dp))
           .background(if (isSelected) AmberAccent.copy(alpha = 0.25f) else Color(0xFF1E293B)),
         contentAlignment = Alignment.Center
