@@ -52,6 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
           "ah_video_studio.db"
         )
         .addMigrations(MIGRATION_1_2)
+        .fallbackToDestructiveMigration()
         .build()
         INSTANCE = instance
         instance

@@ -581,9 +581,17 @@ class VideoExporter(private val context: Context) {
       }
 
       if (!useGpuSurface) {
-        videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, chosenColorFormat)
-        videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        videoEncoder.start()
+        try {
+          videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, chosenColorFormat)
+          videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          videoEncoder.start()
+        } catch (e: Exception) {
+          Log.w(tag, "Primary buffer configuration failed, retrying with COLOR_FormatYUV420SemiPlanar", e)
+          try { videoEncoder.reset() } catch (ignored: Exception) {}
+          videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
+          videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          videoEncoder.start()
+        }
       }
 
       // 3. Initialize Audio Encoder (AAC) if audio is present
@@ -1033,19 +1041,21 @@ class VideoExporter(private val context: Context) {
   }
 
   private fun getDimensionsForResolution(res: Resolution, aspect: AspectRatio): Pair<Int, Int> {
-    val longEdge = when (res) {
-      Resolution.RES_480P -> 854
-      Resolution.RES_720P -> 1280
-      Resolution.RES_1080P -> 1920
-      Resolution.RES_2K -> 2560
-      Resolution.RES_4K -> 3840
+    val shortSide = res.width
+    val longSide = res.height
+
+    val (w, h) = when (aspect) {
+      AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
+      AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
+      AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
+      AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
+      AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
+      AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
     }
-    val shortEdge = (longEdge / aspect.ratio).toInt()
-    val w = if (aspect.ratio >= 1.0f) longEdge else shortEdge
-    val h = if (aspect.ratio >= 1.0f) shortEdge else longEdge
-    val evenW = (w / 2) * 2
-    val evenH = (h / 2) * 2
-    return Pair(evenW.coerceAtLeast(320), evenH.coerceAtLeast(320))
+
+    val evenW = ((w + 1) / 2) * 2
+    val evenH = ((h + 1) / 2) * 2
+    return Pair(evenW.coerceIn(320, 3840), evenH.coerceIn(320, 3840))
   }
 
   private fun encodeYUV420SemiPlanar(yuv420sp: ByteArray, argb: IntArray, width: Int, height: Int) {

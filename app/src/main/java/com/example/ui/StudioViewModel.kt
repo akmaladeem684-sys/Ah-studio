@@ -112,15 +112,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
   val settings: StateFlow<UserSettings> = StudioPreferencesManager.settings
 
-  // Navigation State
+  // Navigation State - timeline interface as primary workspace
   private val _currentScreen = MutableStateFlow(AppScreen.EDITOR)
   val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
   // Active Project State
-  private val _activeProjectId = MutableStateFlow("")
+  private val _activeProjectId = MutableStateFlow("demo_project_cinema")
   val activeProjectId: StateFlow<String> = _activeProjectId.asStateFlow()
 
-  private val _activeProjectName = MutableStateFlow("Untitled Project")
+  private val _activeProjectName = MutableStateFlow("Cinematic Travel Reel")
   val activeProjectName: StateFlow<String> = _activeProjectName.asStateFlow()
 
   private val _activeAspectRatio = MutableStateFlow(AspectRatio.RATIO_9_16)
@@ -167,14 +167,135 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   private var autoSaveJob: Job? = null
 
   init {
+    // 1. Immediately seed default cinematic timeline so timeline UI has full non-null content on frame 1
+    val defaultTimeline = Timeline(
+      videoClips = listOf(
+        VideoClip(
+          id = "sample_clip_1",
+          uri = "sample://nature_stream",
+          name = "Cinematic Mountain Stream",
+          isVideo = true,
+          timelineStartMs = 0L,
+          durationMs = 4500L,
+          sourceStartMs = 0L,
+          sourceEndMs = 4500L,
+          speed = 1.0f,
+          volume = 1.0f
+        ),
+        VideoClip(
+          id = "sample_clip_2",
+          uri = "sample://urban_sunset",
+          name = "Golden Hour Skyline",
+          isVideo = true,
+          timelineStartMs = 4500L,
+          durationMs = 5500L,
+          sourceStartMs = 0L,
+          sourceEndMs = 5500L,
+          speed = 1.0f,
+          volume = 1.0f
+        ),
+        VideoClip(
+          id = "sample_clip_3",
+          uri = "sample://cyber_neon",
+          name = "Cyberpunk Night Drive",
+          isVideo = true,
+          timelineStartMs = 10000L,
+          durationMs = 5000L,
+          sourceStartMs = 0L,
+          sourceEndMs = 5000L,
+          speed = 1.0f,
+          volume = 0.9f
+        )
+      ),
+      audioClips = listOf(
+        AudioClip(
+          id = "sample_audio_1",
+          uri = "internal://lofi_chill_beat",
+          title = "Chill Lofi Dreams (Original Mix)",
+          timelineStartMs = 0L,
+          durationMs = 15000L,
+          volume = 0.85f,
+          fadeInMs = 800L,
+          fadeOutMs = 1200L,
+          waveformData = listOf(0.2f, 0.4f, 0.6f, 0.9f, 0.7f, 0.5f, 0.8f, 1.0f, 0.6f, 0.4f, 0.7f, 0.8f, 0.5f, 0.3f, 0.6f, 0.7f, 0.4f, 0.2f)
+        )
+      ),
+      textClips = listOf(
+        TextClip(
+          id = "sample_text_1",
+          text = "CINEMATIC JOURNEY",
+          timelineStartMs = 500L,
+          durationMs = 3500L,
+          fontFamily = "Sans-Serif",
+          fontSizeSp = 28f,
+          fontWeight = 900,
+          textColor = 0xFFFFFFFF,
+          hasGradient = true,
+          gradientColorStart = 0xFF00E5FF,
+          gradientColorEnd = 0xFF8B5CF6,
+          strokeWidth = 2f,
+          strokeColor = 0xAA000000,
+          posY = -0.2f,
+          animationType = "Pop"
+        ),
+        TextClip(
+          id = "sample_text_2",
+          text = "Shot on AH Video Studio Pro",
+          timelineStartMs = 4600L,
+          durationMs = 4000L,
+          fontFamily = "Default",
+          fontSizeSp = 18f,
+          textColor = 0xFFE2E8F0,
+          posY = 0.35f,
+          animationType = "Fade"
+        )
+      ),
+      stickerClips = listOf(
+        StickerClip(
+          id = "sample_sticker_1",
+          emojiOrAsset = "✨",
+          timelineStartMs = 1000L,
+          durationMs = 3000L,
+          posX = 0.35f,
+          posY = -0.3f,
+          scale = 1.2f
+        )
+      ),
+      effectClips = listOf(
+        EffectClip(
+          id = "sample_effect_1",
+          effectType = EffectType.GLOW,
+          timelineStartMs = 4000L,
+          durationMs = 2000L,
+          intensity = 0.75f
+        )
+      ),
+      transitions = listOf(
+        Transition(
+          id = "sample_trans_1",
+          clipIndexBefore = 0,
+          type = TransitionType.DISSOLVE,
+          durationMs = 600L
+        )
+      ),
+      adjustments = VideoAdjustments(
+        brightness = 0.05f,
+        contrast = 1.1f,
+        saturation = 1.15f,
+        vignette = 0.15f
+      ),
+      filter = FilterSettings(
+        type = FilterType.CINEMATIC,
+        intensity = 0.85f
+      )
+    )
+    timelineEngine.loadTimeline(defaultTimeline)
+
     viewModelScope.launch {
-      repository.createSampleProjectIfEmpty()
-      val projects = repository.allProjects.first { it.isNotEmpty() }
-      if (_activeProjectId.value.isBlank()) {
-        val firstProj = projects.firstOrNull()
-        if (firstProj != null) {
-          loadProject(firstProj)
-        }
+      try {
+        repository.createSampleProjectIfEmpty()
+      } catch (e: Exception) {
+        android.util.Log.e("StudioViewModel", "Error creating sample project", e)
       }
     }
 
