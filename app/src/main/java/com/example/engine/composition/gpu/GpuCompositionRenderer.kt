@@ -12,6 +12,7 @@ import com.example.engine.composition.ComposedFrame
 import com.example.engine.composition.ComposedOverlay
 import com.example.engine.composition.ComposedSticker
 import com.example.engine.composition.ComposedText
+import com.example.engine.composition.StickerLayerRenderer
 import com.example.engine.text.TextLayerRenderer
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -631,22 +632,34 @@ class GpuCompositionRenderer(private val context: Context) {
       return cached
     }
 
-    val size = (80f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(64, 256)
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val isBadge = clip.badgeType != null
+    val targetWidth = if (isBadge) {
+      (160f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(128, 384)
+    } else {
+      (80f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(64, 256)
+    }
+    val targetHeight = if (isBadge) {
+      (targetWidth * 0.42f).toInt().coerceIn(54, 160)
+    } else {
+      targetWidth
+    }
+
+    val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      textSize = size * 0.75f
-      textAlign = Paint.Align.CENTER
-    }
-    val yPos = (size / 2f) - ((paint.descent() + paint.ascent()) / 2f)
-    canvas.drawText(clip.emojiOrAsset, size / 2f, yPos, paint)
+    StickerLayerRenderer.draw(
+      canvas = canvas,
+      clip = clip.copy(posX = 0f, posY = 0f, scale = 1f, rotation = 0f, opacity = 1f),
+      currentPosMs = clip.timelineStartMs,
+      width = targetWidth,
+      height = targetHeight
+    )
 
     val oldTexId = cached?.texId ?: 0
     val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, oldTexId)
     bitmap.recycle()
 
-    val entry = CachedTexture(texId, size, size, hash)
+    val entry = CachedTexture(texId, targetWidth, targetHeight, hash)
     stickerTextureCache[clip.id] = entry
     return entry
   }

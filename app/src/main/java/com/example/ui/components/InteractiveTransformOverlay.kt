@@ -44,6 +44,7 @@ import com.example.domain.model.TextClip
 import com.example.domain.model.VideoClip
 import com.example.engine.KeyframeInterpolator
 import com.example.engine.SelectedTrackElement
+import com.example.engine.composition.StickerLayerRenderer
 import com.example.engine.text.TextLayerRenderer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import com.example.ui.theme.AmberAccent
@@ -248,12 +249,16 @@ fun InteractiveTransformOverlay(
         (selectedElement as SelectedTrackElement.Sticker).clipId == sticker.id
 
       val currentSticker by rememberUpdatedState(sticker)
-      val baseSizeDp = 80.dp
-      val baseWidthPx = with(density) { baseSizeDp.toPx() }
-      val baseHeightPx = with(density) { baseSizeDp.toPx() }
+      val isBadge = sticker.badgeType != null
+      val baseWidthDp = if (isBadge) 150.dp else 80.dp
+      val baseHeightDp = if (isBadge) 64.dp else 80.dp
+      val baseWidthPx = with(density) { baseWidthDp.toPx() }
+      val baseHeightPx = with(density) { baseHeightDp.toPx() }
 
-      val centerXPx = (parentWidthPx / 2f) + (sticker.posX * parentWidthPx / 2f)
-      val centerYPx = (parentHeightPx / 2f) + (sticker.posY * parentHeightPx / 2f)
+      val animState = StickerLayerRenderer.evaluateAnimation(sticker, currentPosMs)
+
+      val centerXPx = (parentWidthPx / 2f) + (animState.posX * parentWidthPx / 2f)
+      val centerYPx = (parentHeightPx / 2f) + (animState.posY * parentHeightPx / 2f)
 
       val centerXDp = with(density) { centerXPx.toDp() }
       val centerYDp = with(density) { centerYPx.toDp() }
@@ -261,12 +266,12 @@ fun InteractiveTransformOverlay(
       Box(
         modifier = Modifier
           .offset(
-            x = centerXDp - (baseSizeDp / 2f),
-            y = centerYDp - (baseSizeDp / 2f)
+            x = centerXDp - (baseWidthDp / 2f),
+            y = centerYDp - (baseHeightDp / 2f)
           )
-          .size(baseSizeDp)
-          .scale(sticker.scale)
-          .rotate(sticker.rotation)
+          .size(width = baseWidthDp, height = baseHeightDp)
+          .scale(animState.scale)
+          .rotate(animState.rotation)
           .border(
             width = if (isSelected) 2.dp else 0.dp,
             color = if (isSelected) AmberAccent else Color.Transparent,
@@ -300,7 +305,18 @@ fun InteractiveTransformOverlay(
           },
         contentAlignment = Alignment.Center
       ) {
-        Text(sticker.emojiOrAsset, fontSize = 46.sp)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+          drawIntoCanvas { composeCanvas ->
+            val nativeCanvas = composeCanvas.nativeCanvas
+            StickerLayerRenderer.draw(
+              canvas = nativeCanvas,
+              clip = sticker.copy(posX = 0f, posY = 0f, scale = 1f, rotation = 0f),
+              currentPosMs = currentPosMs,
+              width = size.width.toInt(),
+              height = size.height.toInt()
+            )
+          }
+        }
       }
 
       if (isSelected) {
@@ -309,8 +325,8 @@ fun InteractiveTransformOverlay(
           centerYPx = centerYPx,
           baseWidthPx = baseWidthPx,
           baseHeightPx = baseHeightPx,
-          scale = sticker.scale,
-          rotation = sticker.rotation,
+          scale = animState.scale,
+          rotation = animState.rotation,
           onDelete = { onDeleteClip(sticker.id) },
           onDuplicate = { onDuplicateClip(sticker.id) },
           onReset = {

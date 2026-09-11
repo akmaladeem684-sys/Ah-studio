@@ -4,19 +4,18 @@ import android.graphics.ColorMatrix
 import com.example.domain.model.FilterSettings
 import com.example.domain.model.FilterType
 import com.example.domain.model.VideoAdjustments
-import kotlin.math.cos
-import kotlin.math.sin
 
 object ColorFilterGenerator {
 
   /**
-   * Generates a combined Android ColorMatrix representing both user adjustments
+   * Generates a combined Android ColorMatrix representing user adjustments
    * (brightness, contrast, saturation, exposure, temperature, tint, etc.)
-   * and artistic filter presets.
+   * and artistic filter presets (with optional per-clip override).
    */
   fun createCombinedMatrix(
     adjustments: VideoAdjustments,
-    filterSettings: FilterSettings
+    filterSettings: FilterSettings,
+    clipFilter: FilterSettings? = null
   ): ColorMatrix {
     val result = ColorMatrix()
 
@@ -26,7 +25,6 @@ object ColorFilterGenerator {
     result.postConcat(satMatrix)
 
     // 2. Brightness & Exposure
-    // Brightness offset (-255 to 255) and Exposure scale
     val totalBright = (adjustments.brightness + adjustments.exposure) * 100f
     val brightArray = floatArrayOf(
       1f, 0f, 0f, 0f, totalBright,
@@ -47,7 +45,7 @@ object ColorFilterGenerator {
     )
     result.postConcat(ColorMatrix(contrastArray))
 
-    // 4. Temperature (Warm vs Cool: increases Red/Yellow vs increases Blue)
+    // 4. Temperature (Warm vs Cool)
     if (adjustments.temperature != 0f) {
       val temp = adjustments.temperature.coerceIn(-1f, 1f)
       val rOffset = if (temp > 0) temp * 40f else 0f
@@ -75,8 +73,14 @@ object ColorFilterGenerator {
       result.postConcat(ColorMatrix(tintArray))
     }
 
-    // 6. Filter Preset
-    val filterMatrix = getFilterMatrix(filterSettings.type, filterSettings.intensity)
+    // 6. Active Filter Preset (Clip override if set, otherwise timeline filter)
+    val activeFilter = if (clipFilter != null && clipFilter.type != FilterType.NONE) {
+      clipFilter
+    } else {
+      filterSettings
+    }
+
+    val filterMatrix = getFilterMatrix(activeFilter.type, activeFilter.intensity)
     if (filterMatrix != null) {
       result.postConcat(filterMatrix)
     }
@@ -84,10 +88,137 @@ object ColorFilterGenerator {
     return result
   }
 
-  private fun getFilterMatrix(type: FilterType, intensity: Float): ColorMatrix? {
+  /**
+   * Returns a ColorMatrix for a specific filter type and intensity (0.0 to 1.0).
+   */
+  fun getFilterMatrix(type: FilterType, intensity: Float = 1.0f): ColorMatrix? {
     if (type == FilterType.NONE || intensity <= 0f) return null
 
     val baseMatrix = when (type) {
+      // --- Professional Enhancement Filters ---
+      FilterType.FOUR_K -> {
+        // 4K Ultra HD: High micro-contrast, crisp midtones, boosted sharpness and pure luminous dynamic range
+        ColorMatrix(
+          floatArrayOf(
+            1.22f, 0.00f, 0.00f, 0f, -8f,
+            0.00f, 1.22f, 0.00f, 0f, -8f,
+            0.00f, 0.00f, 1.22f, 0f, -8f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.BLACKLIGHT_FIX -> {
+        // Backlight / Blacklight Fix: Shadow lift (+32 offset), controlled highlights, skin-tone warming
+        ColorMatrix(
+          floatArrayOf(
+            1.08f, 0.00f, 0.00f, 0f, 28f,
+            0.00f, 1.05f, 0.00f, 0f, 24f,
+            0.00f, 0.00f, 1.02f, 0f, 20f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.ENHANCE -> {
+        // AI Auto Enhance: Vibrant color pop, enhanced midtone contrast, balanced dynamic clarity
+        ColorMatrix(
+          floatArrayOf(
+            1.16f, 0.02f, 0.00f, 0f, 8f,
+            0.01f, 1.18f, 0.01f, 0f, 8f,
+            0.00f, 0.02f, 1.15f, 0f, 10f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.HDR -> {
+        // High Dynamic Range: Deep rich blacks, bright luminous highlights, punchy vivid color spectrum
+        ColorMatrix(
+          floatArrayOf(
+            1.28f, 0.00f, 0.00f, 0f, -14f,
+            0.00f, 1.28f, 0.00f, 0f, -14f,
+            0.00f, 0.00f, 1.30f, 0f, -12f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.GLOW -> {
+        // Dreamy Glow & Bloom: Raised black floor, diffused highlight luminance, ethereal pastel warmth
+        ColorMatrix(
+          floatArrayOf(
+            1.08f, 0.05f, 0.02f, 0f, 18f,
+            0.02f, 1.06f, 0.02f, 0f, 16f,
+            0.02f, 0.04f, 1.10f, 0f, 20f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.FOCUS -> {
+        // Focus: Micro-contrast punch, edge separation, crisp subject isolation
+        ColorMatrix(
+          floatArrayOf(
+            1.25f, -0.05f, -0.05f, 0f, -6f,
+            -0.05f, 1.25f, -0.05f, 0f, -6f,
+            -0.05f, -0.05f, 1.25f, 0f, -6f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.QUALITY_RESTORATION -> {
+        // Quality Restoration: Balanced exposure recovery, noise-smoothing curve, clean midtone fidelity
+        ColorMatrix(
+          floatArrayOf(
+            1.10f, 0.01f, 0.01f, 0f, 14f,
+            0.01f, 1.10f, 0.01f, 0f, 14f,
+            0.01f, 0.01f, 1.10f, 0f, 14f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.GOLDEN_AUTUMN -> {
+        // Golden Autumn: Rich seasonal amber, warm golden honey, auburn and foliage glow
+        ColorMatrix(
+          floatArrayOf(
+            1.26f, 0.08f, 0.00f, 0f, 26f,
+            0.04f, 1.12f, 0.00f, 0f, 12f,
+            0.00f, 0.00f, 0.76f, 0f, -16f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.OCEANIC_VIEW -> {
+        // Oceanic View: Deep azure and aquamarine sea tones, vibrant sky blue, clean sea breeze atmosphere
+        ColorMatrix(
+          floatArrayOf(
+            0.82f, 0.00f, 0.00f, 0f, -8f,
+            0.00f, 1.16f, 0.08f, 0f, 14f,
+            0.04f, 0.12f, 1.34f, 0f, 28f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.ALMOND -> {
+        // Almond: Creamy warm matte neutral aesthetic, soft vintage pastel desaturation, cozy editorial look
+        ColorMatrix(
+          floatArrayOf(
+            1.14f, 0.06f, 0.02f, 0f, 18f,
+            0.04f, 1.08f, 0.02f, 0f, 14f,
+            0.02f, 0.04f, 0.94f, 0f, 8f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+      FilterType.SUNLIGHT_ORANGE_BLUE -> {
+        // Sunlight Orange Blue: Dual-tone cinematic grading (warm golden sunlight highlights vs deep oceanic teal shadows)
+        ColorMatrix(
+          floatArrayOf(
+            1.24f, 0.00f, 0.00f, 0f, 20f,
+            0.00f, 1.04f, 0.00f, 0f, 0f,
+            -0.08f, 0.10f, 1.28f, 0f, 22f,
+            0.00f, 0.00f, 0.00f, 1f, 0f
+          )
+        )
+      }
+
+      // --- Classic Presets ---
       FilterType.BLACK_AND_WHITE -> {
         ColorMatrix().apply { setSaturation(0f) }
       }
@@ -95,7 +226,6 @@ object ColorFilterGenerator {
         ColorMatrix().apply { setSaturation(1.85f) }
       }
       FilterType.CINEMATIC -> {
-        // Teal and orange look
         ColorMatrix(
           floatArrayOf(
             1.2f, 0f, 0f, 0f, 10f,
@@ -145,23 +275,13 @@ object ColorFilterGenerator {
           )
         )
       }
-      FilterType.HDR -> {
-        ColorMatrix(
-          floatArrayOf(
-            1.25f, 0f, 0f, 0f, -15f,
-            0f, 1.25f, 0f, 0f, -15f,
-            0f, 0f, 1.25f, 0f, -15f,
-            0f, 0f, 0f, 1f, 0f
-          )
-        )
-      }
       FilterType.FILM -> {
         ColorMatrix(
           floatArrayOf(
             1.0f, 0.05f, 0.05f, 0f, 10f,
             0.05f, 0.95f, 0.05f, 0f, 10f,
             0.05f, 0.05f, 0.85f, 0f, 15f,
-            0f, 0f, 0f, 1f, 0f
+            0.0f, 0.0f, 0.0f, 1f, 0f
           )
         )
       }
@@ -231,5 +351,13 @@ object ColorFilterGenerator {
     }
     blended.set(outArr)
     return blended
+  }
+
+  /**
+   * Helper returning FloatArray (20 floats) for Compose ColorFilter / ColorMatrix.
+   */
+  fun getFilterMatrixArray(type: FilterType, intensity: Float = 1.0f): FloatArray {
+    val matrix = getFilterMatrix(type, intensity) ?: ColorMatrix()
+    return matrix.array
   }
 }

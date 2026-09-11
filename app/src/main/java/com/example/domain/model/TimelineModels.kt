@@ -101,7 +101,8 @@ data class VideoClip(
   val isReversed: Boolean = false,
   val freezeFrameAtMs: Long? = null,
   val sourceTotalDurationMs: Long = 0L,
-  val keyframes: List<ClipKeyframe> = emptyList()
+  val keyframes: List<ClipKeyframe> = emptyList(),
+  val filter: FilterSettings? = null
 ) {
   val totalMediaDurationMs: Long
     get() = if (sourceTotalDurationMs > 0L) sourceTotalDurationMs else maxOf(sourceEndMs, durationMs)
@@ -186,6 +187,44 @@ data class TextClip(
   val words: List<WordTiming> = emptyList()
 )
 
+enum class StickerAnimationType(val displayName: String) {
+  NONE("Static"),
+  PULSE("Pulse"),
+  HEARTBEAT("Heartbeat"),
+  BOUNCE("Bounce"),
+  SPIN("Spin 360°"),
+  SHAKE("Shake"),
+  FLOAT("Float"),
+  SWING("Swing"),
+  GLOW_PULSE("Glow Pulse"),
+  POP_IN("Pop In")
+}
+
+enum class BadgeType(
+  val displayName: String,
+  val subtitle: String,
+  val primaryColor: Long,
+  val secondaryColor: Long,
+  val icon: String
+) {
+  NEW("NEW", "Fresh Arrival", 0xFF06B6D4, 0xFF0284C7, "✨"),
+  SALE("SALE", "Special Discount", 0xFFEF4444, 0xFFB91C1C, "🏷️"),
+  HOT("HOT", "Trending Now", 0xFFF97316, 0xFFDC2626, "🔥"),
+  TRENDING("TRENDING", "Viral Hit", 0xFF8B5CF6, 0xFF6366F1, "📈"),
+  BEST_SELLER("BEST SELLER", "#1 Top Choice", 0xFFF59E0B, 0xFFD97706, "👑"),
+  LIMITED_EDITION("LIMITED EDITION", "Exclusive Drop", 0xFF334155, 0xFFF59E0B, "⏳"),
+  PREMIUM("PREMIUM", "VIP Quality", 0xFF7C3AED, 0xFF4F46E5, "💎"),
+  SPECIAL_OFFER("SPECIAL OFFER", "Save Big", 0xFFEAB308, 0xFFCA8A04, "🎁"),
+  DISCOUNT("DISCOUNT", "Price Drop", 0xFF10B981, 0xFF059669, "💸"),
+  RECOMMENDED("RECOMMENDED", "Staff Pick", 0xFF0284C7, 0xFF0369A1, "👍"),
+  FEATURED("FEATURED", "Spotlight", 0xFF6366F1, 0xFF4338CA, "🌟"),
+  EXCLUSIVE("EXCLUSIVE", "Members Only", 0xFFBE185D, 0xFF831843, "🔒"),
+  VERIFIED("VERIFIED", "Official Badge", 0xFF0EA5E9, 0xFF0284C7, "✔️"),
+  TOP_RATED("TOP RATED", "5-Star Quality", 0xFFFBBF24, 0xFFF59E0B, "⭐"),
+  FREE("FREE", "No Cost", 0xFF22C55E, 0xFF16A34A, "🆓"),
+  COMING_SOON("COMING SOON", "Stay Tuned", 0xFFFB923C, 0xFFEA580C, "🚀")
+}
+
 data class StickerClip(
   val id: String = UUID.randomUUID().toString(),
   val emojiOrAsset: String = "🎬",
@@ -195,7 +234,10 @@ data class StickerClip(
   val posY: Float = 0f,
   val scale: Float = 1f,
   val rotation: Float = 0f,
-  val opacity: Float = 1f
+  val opacity: Float = 1f,
+  val animationType: StickerAnimationType = StickerAnimationType.NONE,
+  val badgeType: BadgeType? = null,
+  val category: String = "Emoji & Emotions"
 )
 
 enum class EffectType(val category: String, val displayName: String) {
@@ -271,22 +313,34 @@ data class VideoAdjustments(
   val grain: Float = 0f            // 0f to 1f
 )
 
-enum class FilterType(val displayName: String) {
-  NONE("Normal"),
-  BLACK_AND_WHITE("Black & White"),
-  VINTAGE("Vintage 1970s"),
-  SATURATION("Saturation Boost"),
-  CINEMATIC("Cinematic Teal & Orange"),
-  WARM("Golden Warm"),
-  COOL("Arctic Cool"),
-  PORTRAIT("Portrait Soft"),
-  HDR("High Dynamic Range"),
-  FILM("35mm Film Grain"),
-  RETRO("80s Retro Synth"),
-  NATURE("Vibrant Nature"),
-  FOOD("Rich Warm Food"),
-  TRAVEL("Mediterranean Travel"),
-  SOCIAL_MEDIA("Hyper Vivid")
+enum class FilterType(val displayName: String, val category: String = "Pro Enhancements") {
+  NONE("Original", "All"),
+  FOUR_K("4K", "Pro Enhancements"),
+  BLACKLIGHT_FIX("Blacklight Fix", "Pro Enhancements"),
+  ENHANCE("Enhance", "Pro Enhancements"),
+  HDR("HDR", "Pro Enhancements"),
+  GLOW("Glow", "Pro Enhancements"),
+  FOCUS("Focus", "Pro Enhancements"),
+  QUALITY_RESTORATION("Quality Restoration", "Pro Enhancements"),
+  GOLDEN_AUTUMN("Golden Autumn", "Cinematic & Nature"),
+  OCEANIC_VIEW("Oceanic View", "Cinematic & Nature"),
+  ALMOND("Almond", "Aesthetic Looks"),
+  SUNLIGHT_ORANGE_BLUE("Sunlight Orange Blue", "Cinematic & Nature"),
+  
+  // Classic / Creative presets
+  CINEMATIC("Cinematic Teal & Orange", "Cinematic & Nature"),
+  WARM("Golden Warm", "Aesthetic Looks"),
+  COOL("Arctic Cool", "Aesthetic Looks"),
+  PORTRAIT("Portrait Soft", "Aesthetic Looks"),
+  BLACK_AND_WHITE("Black & White", "Aesthetic Looks"),
+  VINTAGE("Vintage 1970s", "Aesthetic Looks"),
+  SATURATION("Saturation Boost", "Pro Enhancements"),
+  FILM("35mm Film Grain", "Cinematic & Nature"),
+  RETRO("80s Retro Synth", "Aesthetic Looks"),
+  NATURE("Vibrant Nature", "Cinematic & Nature"),
+  FOOD("Rich Warm Food", "Aesthetic Looks"),
+  TRAVEL("Mediterranean Travel", "Cinematic & Nature"),
+  SOCIAL_MEDIA("Hyper Vivid", "Pro Enhancements")
 }
 
 data class FilterSettings(

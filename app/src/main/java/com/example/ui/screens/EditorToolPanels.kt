@@ -6,10 +6,13 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,9 +32,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -675,14 +683,46 @@ fun FiltersToolPanel(
   modifier: Modifier = Modifier
 ) {
   val timeline by viewModel.timelineEngine.timeline.collectAsState()
-  var currentFilter by remember(timeline.filter) { mutableStateOf(timeline.filter) }
+  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
+  
+  // Identify selected clip if any
+  val selectedClip = remember(timeline, selectedElement) {
+    when (selectedElement) {
+      is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == (selectedElement as SelectedTrackElement.Video).clipId }
+      is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == (selectedElement as SelectedTrackElement.Overlay).clipId }
+      else -> null
+    }
+  }
+
+  // Active filter either from selected clip or global timeline filter
+  val activeFilterState = selectedClip?.filter ?: timeline.filter
+  var currentFilter by remember(activeFilterState) { mutableStateOf(activeFilterState) }
+  var selectedCategory by remember { mutableStateOf("All") }
+  val categories = listOf("All", "Pro Enhancements", "Cinematic & Nature", "Aesthetic Looks", "Installed Plugins")
+
+  val installedPlugins by viewModel.installedPlugins.collectAsState()
+  val pluginFilters = remember(installedPlugins) {
+    com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
+      com.example.domain.plugin.PluginCategory.FILTER
+    )
+  }
+
+  val displayFilters = remember(selectedCategory) {
+    when (selectedCategory) {
+      "All" -> FilterType.values().toList()
+      "Pro Enhancements" -> FilterType.values().filter { it.category == "Pro Enhancements" || it == FilterType.NONE }
+      "Cinematic & Nature" -> FilterType.values().filter { it.category == "Cinematic & Nature" || it == FilterType.NONE }
+      "Aesthetic Looks" -> FilterType.values().filter { it.category == "Aesthetic Looks" || it == FilterType.NONE }
+      else -> emptyList()
+    }
+  }
 
   Column(
     modifier = modifier
       .fillMaxWidth()
       .background(StudioSurface)
       .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(14.dp)
+    verticalArrangement = Arrangement.spacedBy(12.dp)
   ) {
     // Header
     Row(
@@ -691,25 +731,35 @@ fun FiltersToolPanel(
       verticalAlignment = Alignment.CenterVertically
     ) {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.FilterBAndW, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(22.dp))
+        Box(
+          modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(PurpleAccent.copy(alpha = 0.15f)),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(18.dp))
+        }
         Column {
           Text(
-            text = "Media3 Video Filters & Presets",
+            text = "Professional Video Filters",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
           )
           Text(
-            text = "Real-time GPU accelerated color matrix presets",
-            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+            text = if (selectedClip != null) "Editing: ${selectedClip.name}" else "Editing: Project Timeline (Global)",
+            style = MaterialTheme.typography.bodySmall.copy(color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
           )
         }
       }
-      Row(verticalAlignment = Alignment.CenterVertically) {
+
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (currentFilter.type != FilterType.NONE) {
           TextButton(
             onClick = {
               currentFilter = FilterSettings(type = FilterType.NONE, intensity = 1.0f)
               viewModel.timelineEngine.updateFilter(currentFilter)
-            }
+            },
+            modifier = Modifier.testTag("filter_reset_button")
           ) {
             Text("Reset", color = TextSecondary, fontSize = 12.sp)
           }
@@ -720,175 +770,181 @@ fun FiltersToolPanel(
       }
     }
 
-    // Filter Cards Row
-    val installedPlugins by viewModel.installedPlugins.collectAsState()
-    val pluginFilters = remember(installedPlugins) {
-      com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
-        com.example.domain.plugin.PluginCategory.FILTER
-      )
-    }
-
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      contentPadding = PaddingValues(horizontal = 2.dp)
+    // Category Tabs
+    ScrollableTabRow(
+      selectedTabIndex = categories.indexOf(selectedCategory).coerceAtLeast(0),
+      edgePadding = 0.dp,
+      containerColor = Color.Transparent,
+      contentColor = PurpleAccent,
+      divider = {},
+      modifier = Modifier.fillMaxWidth()
     ) {
-      items(FilterType.values()) { type ->
-        val isSelected = currentFilter.type == type
-        val swatchColors = when (type) {
-          FilterType.NONE -> listOf(Color(0xFF64748B), Color(0xFF334155))
-          FilterType.BLACK_AND_WHITE -> listOf(Color(0xFF111111), Color(0xFFEEEEEE))
-          FilterType.VINTAGE -> listOf(Color(0xFFB45309), Color(0xFFFDE68A))
-          FilterType.SATURATION -> listOf(Color(0xFFEC4899), Color(0xFF3B82F6))
-          FilterType.CINEMATIC -> listOf(Color(0xFF0D9488), Color(0xFFF97316))
-          FilterType.WARM -> listOf(Color(0xFFF59E0B), Color(0xFFD97706))
-          FilterType.COOL -> listOf(Color(0xFF0284C7), Color(0xFF38BDF8))
-          FilterType.PORTRAIT -> listOf(Color(0xFFF43F5E), Color(0xFFFDA4AF))
-          FilterType.HDR -> listOf(Color(0xFF8B5CF6), Color(0xFF06B6D4))
-          FilterType.FILM -> listOf(Color(0xFF78350F), Color(0xFFA16207))
-          FilterType.RETRO -> listOf(Color(0xFFD946EF), Color(0xFF8B5CF6))
-          FilterType.NATURE -> listOf(Color(0xFF10B981), Color(0xFF047857))
-          FilterType.FOOD -> listOf(Color(0xFFEA580C), Color(0xFFFACC15))
-          FilterType.TRAVEL -> listOf(Color(0xFF0284C7), Color(0xFF10B981))
-          FilterType.SOCIAL_MEDIA -> listOf(Color(0xFFFF007F), Color(0xFF7928CA))
-        }
-
-        Card(
-          modifier = Modifier
-            .size(width = 96.dp, height = 90.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable {
-              currentFilter = currentFilter.copy(type = type)
-              viewModel.timelineEngine.updateFilter(currentFilter)
-            }
-            .testTag("filter_preset_${type.name.lowercase()}"),
-          colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) StudioSurfaceVariant else Color(0xFF1E293B)
-          ),
-          border = BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            color = if (isSelected) PurpleAccent else StudioBorder
-          )
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .padding(8.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            // Color Swatch Badge
-            Box(
-              modifier = Modifier
-                .size(width = 80.dp, height = 40.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Brush.horizontalGradient(swatchColors)),
-              contentAlignment = Alignment.Center
-            ) {
-              if (isSelected) {
-                Box(
-                  modifier = Modifier
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.6f)),
-                  contentAlignment = Alignment.Center
-                ) {
-                  Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                }
-              }
-            }
-
+      categories.forEach { cat ->
+        val isSelected = selectedCategory == cat
+        Tab(
+          selected = isSelected,
+          onClick = { selectedCategory = cat },
+          text = {
             Text(
-              text = type.displayName,
-              style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) PurpleAccent else TextPrimary,
-                fontSize = 11.sp
-              ),
-              maxLines = 1,
-              textAlign = TextAlign.Center,
-              overflow = TextOverflow.Ellipsis
+              text = cat,
+              color = if (isSelected) PurpleAccent else TextSecondary,
+              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+              fontSize = 12.sp
             )
           }
-        }
+        )
       }
     }
 
-    // Plugin Filters Section
-    if (pluginFilters.isNotEmpty()) {
-      Text("Installed Plugin Filters", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
-      LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(pluginFilters) { (plugin, filterItem) ->
+    // Live Animated Filter Thumbnails Grid / Row
+    if (selectedCategory != "Installed Plugins") {
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp)
+      ) {
+        items(displayFilters) { type ->
+          val isSelected = currentFilter.type == type
+
           Card(
             modifier = Modifier
-              .size(width = 110.dp, height = 85.dp)
+              .size(width = 98.dp, height = 110.dp)
               .clip(RoundedCornerShape(14.dp))
               .clickable {
-                currentFilter = currentFilter.copy(type = FilterType.CINEMATIC, intensity = 1.0f)
+                currentFilter = currentFilter.copy(type = type)
                 viewModel.timelineEngine.updateFilter(currentFilter)
-                viewModel.timelineEngine.updateAdjustments(
-                  VideoAdjustments(
-                    brightness = filterItem.brightness,
-                    contrast = filterItem.contrast,
-                    saturation = filterItem.saturation,
-                    temperature = filterItem.temperature,
-                    tint = filterItem.tint,
-                    vignette = filterItem.vignette
-                  )
-                )
-              },
-            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-            border = BorderStroke(1.dp, CyanAccent)
+              }
+              .testTag("filter_preset_${type.name.lowercase()}"),
+            colors = CardDefaults.cardColors(
+              containerColor = if (isSelected) StudioSurfaceVariant else Color(0xFF1E293B)
+            ),
+            border = BorderStroke(
+              width = if (isSelected) 2.dp else 1.dp,
+              color = if (isSelected) PurpleAccent else StudioBorder
+            )
           ) {
             Column(
               modifier = Modifier
                 .fillMaxSize()
-                .padding(8.dp),
+                .padding(6.dp),
               verticalArrangement = Arrangement.SpaceBetween,
               horizontalAlignment = Alignment.CenterHorizontally
             ) {
-              Text(filterItem.emoji, fontSize = 24.sp)
-              Text(
-                text = filterItem.name,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 10.sp),
-                maxLines = 1,
-                textAlign = TextAlign.Center,
-                overflow = TextOverflow.Ellipsis
+              // Live Animated Thumbnail
+              FilterAnimatedThumbnail(
+                type = type,
+                isSelected = isSelected,
+                modifier = Modifier
+                  .size(width = 86.dp, height = 62.dp)
               )
+
               Text(
-                text = plugin.manifest.name,
-                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 8.sp),
-                maxLines = 1,
+                text = type.displayName,
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                  color = if (isSelected) PurpleAccent else TextPrimary,
+                  fontSize = 10.5.sp
+                ),
+                maxLines = 2,
+                textAlign = TextAlign.Center,
                 overflow = TextOverflow.Ellipsis
               )
             }
           }
         }
       }
+    } else {
+      // Installed Plugins Section
+      if (pluginFilters.isNotEmpty()) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          items(pluginFilters) { (plugin, filterItem) ->
+            Card(
+              modifier = Modifier
+                .size(width = 110.dp, height = 95.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .clickable {
+                  currentFilter = currentFilter.copy(type = FilterType.CINEMATIC, intensity = 1.0f)
+                  viewModel.timelineEngine.updateFilter(currentFilter)
+                  viewModel.timelineEngine.updateAdjustments(
+                    VideoAdjustments(
+                      brightness = filterItem.brightness,
+                      contrast = filterItem.contrast,
+                      saturation = filterItem.saturation,
+                      temperature = filterItem.temperature,
+                      tint = filterItem.tint,
+                      vignette = filterItem.vignette
+                    )
+                  )
+                },
+              colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+              border = BorderStroke(1.dp, CyanAccent)
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .padding(8.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                Text(filterItem.emoji, fontSize = 24.sp)
+                Text(
+                  text = filterItem.name,
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 11.sp),
+                  maxLines = 1,
+                  textAlign = TextAlign.Center,
+                  overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                  text = plugin.manifest.name,
+                  style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
+            }
+          }
+        }
+      } else {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(80.dp)
+            .background(StudioSurfaceVariant, RoundedCornerShape(12.dp)),
+          contentAlignment = Alignment.Center
+        ) {
+          Text("No third-party filter plugins installed yet", color = TextSecondary, fontSize = 12.sp)
+        }
+      }
     }
 
-    // Filter Intensity Slider
+    // Filter Intensity Slider & Quick Controls
     if (currentFilter.type != FilterType.NONE) {
       Surface(
         shape = RoundedCornerShape(12.dp),
         color = StudioSurfaceVariant,
         border = BorderStroke(1.dp, StudioBorder),
-        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+        modifier = Modifier.fillMaxWidth()
       ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+          modifier = Modifier.padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text(
-              text = "${currentFilter.type.displayName} Intensity",
-              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(
+                text = "${currentFilter.type.displayName} Intensity",
+                style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+              )
+            }
             Text(
               text = "${(currentFilter.intensity * 100).toInt()}%",
               style = MaterialTheme.typography.bodySmall.copy(color = PurpleAccent, fontWeight = FontWeight.Bold)
             )
           }
+
           Slider(
             value = currentFilter.intensity,
             onValueChange = {
@@ -900,8 +956,210 @@ fun FiltersToolPanel(
               thumbColor = PurpleAccent,
               activeTrackColor = PurpleAccent,
               inactiveTrackColor = StudioBorder
-            )
+            ),
+            modifier = Modifier.testTag("filter_intensity_slider")
           )
+
+          // Quick Preset Chips & Compare / Apply to All actions
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            // Preset percentage buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+              listOf(0.25f, 0.50f, 0.75f, 1.0f).forEach { preset ->
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = if (kotlin.math.abs(currentFilter.intensity - preset) < 0.05f) PurpleAccent.copy(alpha = 0.2f) else Color.Transparent,
+                  border = BorderStroke(1.dp, if (kotlin.math.abs(currentFilter.intensity - preset) < 0.05f) PurpleAccent else StudioBorder),
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                      currentFilter = currentFilter.copy(intensity = preset)
+                      viewModel.timelineEngine.updateFilter(currentFilter)
+                    }
+                ) {
+                  Text(
+                    text = "${(preset * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = if (kotlin.math.abs(currentFilter.intensity - preset) < 0.05f) PurpleAccent else TextSecondary
+                    ),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                  )
+                }
+              }
+            }
+
+            // Apply to all clips button
+            TextButton(
+              onClick = {
+                viewModel.timelineEngine.applyFilterToAllClips(currentFilter)
+              },
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+              modifier = Modifier.testTag("filter_apply_all_button")
+            ) {
+              Icon(Icons.Default.DoneAll, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(14.dp))
+              Spacer(Modifier.width(4.dp))
+              Text("Apply to All", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun FilterAnimatedThumbnail(
+  type: FilterType,
+  isSelected: Boolean,
+  modifier: Modifier = Modifier
+) {
+  val matrixArray = remember(type) {
+    com.example.engine.composition.ColorFilterGenerator.getFilterMatrixArray(type, 1.0f)
+  }
+  val colorFilter = remember(matrixArray) {
+    if (type == FilterType.NONE) null
+    else ColorFilter.colorMatrix(ColorMatrix(matrixArray))
+  }
+
+  val infiniteTransition = rememberInfiniteTransition(label = "FilterAnimation")
+  val wavePhase by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = (2 * Math.PI).toFloat(),
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 3500, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart
+    ),
+    label = "wavePhase"
+  )
+  val shimmerOffset by infiniteTransition.animateFloat(
+    initialValue = -0.3f,
+    targetValue = 1.3f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 2800, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart
+    ),
+    label = "shimmerOffset"
+  )
+
+  // Gradient base for thumbnail landscape
+  val swatchColors = remember(type) {
+    when (type) {
+      FilterType.NONE -> listOf(Color(0xFF475569), Color(0xFF1E293B))
+      FilterType.FOUR_K -> listOf(Color(0xFF00E5FF), Color(0xFF1D4ED8), Color(0xFF0F172A))
+      FilterType.BLACKLIGHT_FIX -> listOf(Color(0xFFF59E0B), Color(0xFFD97706), Color(0xFF1E293B))
+      FilterType.ENHANCE -> listOf(Color(0xFF38BDF8), Color(0xFF818CF8), Color(0xFFC084FC))
+      FilterType.HDR -> listOf(Color(0xFFFF007F), Color(0xFF7928CA), Color(0xFF00E5FF))
+      FilterType.GLOW -> listOf(Color(0xFFFDE047), Color(0xFFF472B6), Color(0xFF6366F1))
+      FilterType.FOCUS -> listOf(Color(0xFF10B981), Color(0xFF0EA5E9), Color(0xFF0F172A))
+      FilterType.QUALITY_RESTORATION -> listOf(Color(0xFF2DD4BF), Color(0xFF3B82F6), Color(0xFF1E1B4B))
+      FilterType.GOLDEN_AUTUMN -> listOf(Color(0xFFF97316), Color(0xFFB45309), Color(0xFF78350F))
+      FilterType.OCEANIC_VIEW -> listOf(Color(0xFF06B6D4), Color(0xFF0284C7), Color(0xFF0369A1))
+      FilterType.ALMOND -> listOf(Color(0xFFFDE68A), Color(0xFFD4A373), Color(0xFFCCD5AE))
+      FilterType.SUNLIGHT_ORANGE_BLUE -> listOf(Color(0xFFFB923C), Color(0xFF0284C7), Color(0xFF0F172A))
+      FilterType.CINEMATIC -> listOf(Color(0xFF0D9488), Color(0xFFF97316))
+      FilterType.WARM -> listOf(Color(0xFFF59E0B), Color(0xFFD97706))
+      FilterType.COOL -> listOf(Color(0xFF0284C7), Color(0xFF38BDF8))
+      FilterType.PORTRAIT -> listOf(Color(0xFFF43F5E), Color(0xFFFDA4AF))
+      FilterType.BLACK_AND_WHITE -> listOf(Color(0xFF111111), Color(0xFFEEEEEE))
+      FilterType.VINTAGE -> listOf(Color(0xFFB45309), Color(0xFFFDE68A))
+      FilterType.SATURATION -> listOf(Color(0xFFEC4899), Color(0xFF3B82F6))
+      FilterType.FILM -> listOf(Color(0xFF78350F), Color(0xFFA16207))
+      FilterType.RETRO -> listOf(Color(0xFFD946EF), Color(0xFF8B5CF6))
+      FilterType.NATURE -> listOf(Color(0xFF10B981), Color(0xFF047857))
+      FilterType.FOOD -> listOf(Color(0xFFEA580C), Color(0xFFFACC15))
+      FilterType.TRAVEL -> listOf(Color(0xFF0284C7), Color(0xFF10B981))
+      FilterType.SOCIAL_MEDIA -> listOf(Color(0xFFFF007F), Color(0xFF7928CA))
+    }
+  }
+
+  Box(
+    modifier = modifier
+      .clip(RoundedCornerShape(8.dp))
+      .background(Brush.verticalGradient(swatchColors)),
+    contentAlignment = Alignment.Center
+  ) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val w = size.width
+      val h = size.height
+
+      // 1. Sun / Light sphere
+      drawCircle(
+        color = Color(0xFFFFFAEB).copy(alpha = 0.85f),
+        radius = h * 0.22f,
+        center = Offset(w * 0.72f, h * 0.35f)
+      )
+
+      // 2. Distant mountain ridge
+      val mtnPath = Path().apply {
+        moveTo(0f, h * 0.65f)
+        lineTo(w * 0.35f, h * 0.38f)
+        lineTo(w * 0.68f, h * 0.55f)
+        lineTo(w, h * 0.42f)
+        lineTo(w, h)
+        lineTo(0f, h)
+        close()
+      }
+      drawPath(
+        path = mtnPath,
+        color = Color(0xFF0F172A).copy(alpha = 0.55f)
+      )
+
+      // 3. Foreground animated water wave with wavePhase
+      val wavePath = Path().apply {
+        moveTo(0f, h * 0.72f)
+        var x = 0f
+        while (x <= w) {
+          val waveY = h * 0.75f + (kotlin.math.sin((x / w) * 6f + wavePhase) * (h * 0.08f))
+          lineTo(x, waveY)
+          x += 6f
+        }
+        lineTo(w, h)
+        lineTo(0f, h)
+        close()
+      }
+      drawPath(
+        path = wavePath,
+        color = Color(0xFF0284C7).copy(alpha = 0.65f)
+      )
+
+      // 4. Animated Light shimmer sweep across the thumbnail
+      val shimmerX = w * shimmerOffset
+      drawLine(
+        brush = Brush.horizontalGradient(
+          colors = listOf(
+            Color.Transparent,
+            Color.White.copy(alpha = 0.35f),
+            Color.Transparent
+          ),
+          startX = shimmerX - 30f,
+          endX = shimmerX + 30f
+        ),
+        start = Offset(shimmerX - 25f, 0f),
+        end = Offset(shimmerX + 25f, h),
+        strokeWidth = 35f
+      )
+    }
+
+    if (isSelected) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(Color.Black.copy(alpha = 0.25f)),
+        contentAlignment = Alignment.Center
+      ) {
+        Box(
+          modifier = Modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(PurpleAccent),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
         }
       }
     }
@@ -1782,13 +2040,38 @@ fun StickersToolPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
-  val defaultStickerList = listOf("🎬", "🔥", "✨", "💯", "🚀", "⚡", "❤️", "🤩", "🎉", "👑", "👍", "💥", "🎯", "🎵", "🏆", "🌟")
-
+  val timeline by viewModel.timelineEngine.timeline.collectAsState()
+  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
   val installedPlugins by viewModel.installedPlugins.collectAsState()
+
+  val selectedSticker = remember(selectedElement, timeline.stickerClips) {
+    (selectedElement as? SelectedTrackElement.Sticker)?.let { sel ->
+      timeline.stickerClips.find { it.id == sel.clipId }
+    }
+  }
+
+  var selectedCategory by remember { mutableStateOf("Badges") }
+  var searchQuery by remember { mutableStateOf("") }
+  var isSearchActive by remember { mutableStateOf(false) }
+
   val pluginStickers = remember(installedPlugins) {
     com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
       com.example.domain.plugin.PluginCategory.STICKER
     )
+  }
+
+  val filteredItems = remember(selectedCategory, searchQuery, isSearchActive) {
+    if (isSearchActive && searchQuery.isNotBlank()) {
+      val q = searchQuery.trim().lowercase()
+      com.example.data.presets.StickersCatalog.getAllStickers().filter { item ->
+        item.name.lowercase().contains(q) ||
+          item.symbolOrAsset.contains(q) ||
+          item.category.lowercase().contains(q) ||
+          item.tags.any { it.lowercase().contains(q) }
+      }
+    } else {
+      com.example.data.presets.StickersCatalog.getItemsForCategory(selectedCategory)
+    }
   }
 
   Column(
@@ -1798,58 +2081,247 @@ fun StickersToolPanel(
       .padding(16.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp)
   ) {
+    // Header
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.EmojiEmotions, contentDescription = null, tint = AmberAccent)
         Text(
           text = "Stickers & Badges",
           style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
         )
-        if (pluginStickers.isNotEmpty()) {
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = PurpleAccent.copy(alpha = 0.2f),
-            border = BorderStroke(1.dp, PurpleAccent)
+      }
+
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        IconButton(
+          onClick = {
+            isSearchActive = !isSearchActive
+            if (!isSearchActive) searchQuery = ""
+          }
+        ) {
+          Icon(
+            imageVector = if (isSearchActive) Icons.Default.SearchOff else Icons.Default.Search,
+            contentDescription = "Search Stickers",
+            tint = if (isSearchActive) AmberAccent else TextSecondary
+          )
+        }
+        IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+          Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+        }
+      }
+    }
+
+    // Search bar if open
+    if (isSearchActive) {
+      OutlinedTextField(
+        value = searchQuery,
+        onValueChange = { searchQuery = it },
+        placeholder = { Text("Search stickers, emojis, badges...", color = TextTertiary, fontSize = 13.sp) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AmberAccent) },
+        trailingIcon = {
+          if (searchQuery.isNotEmpty()) {
+            IconButton(onClick = { searchQuery = "" }) {
+              Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextSecondary)
+            }
+          }
+        },
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedContainerColor = StudioSurfaceVariant,
+          unfocusedContainerColor = StudioSurfaceVariant,
+          focusedBorderColor = AmberAccent,
+          unfocusedBorderColor = Color.Transparent,
+          focusedTextColor = TextPrimary,
+          unfocusedTextColor = TextPrimary
+        ),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(50.dp)
+      )
+    }
+
+    // Selected Sticker Inspector Bar (if a sticker is currently active on timeline)
+    if (selectedSticker != null) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = StudioSurfaceVariant,
+        border = BorderStroke(1.dp, AmberAccent.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(
+          modifier = Modifier.padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
           ) {
-            Text(
-              text = "${pluginStickers.size} Plugin Assets",
-              style = MaterialTheme.typography.labelSmall.copy(color = PurpleAccent, fontWeight = FontWeight.Bold),
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Text(
+                text = if (selectedSticker.badgeType != null) "🏷️ ${selectedSticker.badgeType.displayName}" else "🎬 ${selectedSticker.emojiOrAsset}",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = AmberAccent)
+              )
+              Text(
+                text = "Layer: ${selectedSticker.durationMs / 1000f}s",
+                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
+              )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              // Duplicate Button
+              IconButton(
+                onClick = {
+                  viewModel.timelineEngine.addStickerClip(
+                    emojiOrAsset = selectedSticker.emojiOrAsset,
+                    animationType = selectedSticker.animationType,
+                    badgeType = selectedSticker.badgeType,
+                    category = selectedSticker.category
+                  )
+                },
+                modifier = Modifier.size(32.dp)
+              ) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = CyanAccent, modifier = Modifier.size(18.dp))
+              }
+              // Delete Button
+              IconButton(
+                onClick = { viewModel.timelineEngine.deleteSticker(selectedSticker.id) },
+                modifier = Modifier.size(32.dp)
+              ) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(18.dp))
+              }
+            }
+          }
+
+          // Opacity Slider
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Text("Opacity", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary), modifier = Modifier.width(52.dp))
+            Slider(
+              value = selectedSticker.opacity,
+              onValueChange = { viewModel.timelineEngine.updateStickerOpacity(selectedSticker.id, it) },
+              valueRange = 0.1f..1.0f,
+              colors = SliderDefaults.colors(
+                thumbColor = AmberAccent,
+                activeTrackColor = AmberAccent,
+                inactiveTrackColor = StudioSurface
+              ),
+              modifier = Modifier.weight(1f)
+            )
+            Text("${(selectedSticker.opacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(color = TextPrimary), modifier = Modifier.width(36.dp))
+          }
+
+          // Animation Selection
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Motion / Animation", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              items(StickerAnimationType.values()) { animType ->
+                val isAnimSelected = selectedSticker.animationType == animType
+                FilterChip(
+                  selected = isAnimSelected,
+                  onClick = { viewModel.timelineEngine.updateStickerAnimation(selectedSticker.id, animType) },
+                  label = { Text(animType.displayName, fontSize = 11.sp) },
+                  colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AmberAccent,
+                    selectedLabelColor = StudioBlack,
+                    containerColor = StudioSurface,
+                    labelColor = TextSecondary
+                  ),
+                  border = BorderStroke(1.dp, if (isAnimSelected) AmberAccent else Color.Transparent)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Category Tabs (when not searching)
+    if (!isSearchActive) {
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        items(com.example.data.presets.StickersCatalog.CATEGORIES) { cat ->
+          val isCatSelected = selectedCategory == cat
+          val icon = when (cat) {
+            "Badges" -> "🏷️"
+            "Animated Stickers" -> "⚡"
+            "Trending Stickers" -> "🔥"
+            "Emoji & Emotions" -> "😀"
+            "Love & Hearts" -> "❤️"
+            "Funny & Memes" -> "🗿"
+            "Animals" -> "🐶"
+            "Food & Drinks" -> "🍕"
+            "Travel" -> "✈️"
+            "Nature" -> "🌲"
+            "Flowers" -> "🌸"
+            "Weather" -> "☀️"
+            "Sports" -> "⚽"
+            "Gaming" -> "🎮"
+            "Celebration" -> "🎉"
+            "Birthday" -> "🎂"
+            "Wedding" -> "💍"
+            "Islamic" -> "🕌"
+            "Ramadan & Eid" -> "🌙"
+            "Business" -> "💼"
+            "Shopping" -> "🛍️"
+            "Sale & Discount" -> "💸"
+            "Social Media" -> "▶️"
+            "Arrows & Shapes" -> "➡️"
+            "Speech Bubbles" -> "💬"
+            "Decorative Elements" -> "✨"
+            else -> "🎨"
+          }
+
+          FilterChip(
+            selected = isCatSelected,
+            onClick = { selectedCategory = cat },
+            label = { Text("$icon $cat", fontSize = 12.sp, fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Normal) },
+            colors = FilterChipDefaults.filterChipColors(
+              selectedContainerColor = AmberAccent,
+              selectedLabelColor = StudioBlack,
+              containerColor = StudioSurfaceVariant,
+              labelColor = TextSecondary
+            ),
+            border = BorderStroke(1.dp, if (isCatSelected) AmberAccent else Color.Transparent)
+          )
+        }
+
+        if (pluginStickers.isNotEmpty()) {
+          item {
+            val isCatSelected = selectedCategory == "Plugins"
+            FilterChip(
+              selected = isCatSelected,
+              onClick = { selectedCategory = "Plugins" },
+              label = { Text("🧩 Plugins (${pluginStickers.size})", fontSize = 12.sp, fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Normal) },
+              colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = PurpleAccent,
+                selectedLabelColor = Color.White,
+                containerColor = StudioSurfaceVariant,
+                labelColor = PurpleAccent
+              ),
+              border = BorderStroke(1.dp, if (isCatSelected) PurpleAccent else Color.Transparent)
             )
           }
         }
       }
-      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
-        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-      }
     }
 
-    // Default Emojis Row
-    Text("Standard Emojis", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-      items(defaultStickerList) { emoji ->
-        Box(
-          modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .background(StudioSurfaceVariant)
-            .clickable {
-              viewModel.timelineEngine.addStickerClip(emoji)
-            },
-          contentAlignment = Alignment.Center
-        ) {
-          Text(emoji, fontSize = 26.sp)
-        }
-      }
-    }
-
-    // Plugin Stickers Section
-    if (pluginStickers.isNotEmpty()) {
-      Text("Installed Plugin Sticker Packs", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
-      LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    // Grid content
+    if (selectedCategory == "Plugins" && !isSearchActive) {
+      // Plugin items
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().height(90.dp)
+      ) {
         items(pluginStickers) { (plugin, stickerItem) ->
           val stickerAsset = stickerItem.file.ifBlank { stickerItem.emoji }
           Card(
@@ -1857,7 +2329,10 @@ fun StickersToolPanel(
               .size(width = 110.dp, height = 80.dp)
               .clip(RoundedCornerShape(12.dp))
               .clickable {
-                viewModel.timelineEngine.addStickerClip(stickerAsset)
+                viewModel.timelineEngine.addStickerClip(
+                  emojiOrAsset = stickerAsset,
+                  category = "Plugins"
+                )
               },
             colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
             border = BorderStroke(1.dp, CyanAccent)
@@ -1876,6 +2351,127 @@ fun StickersToolPanel(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
               )
+            }
+          }
+        }
+      }
+    } else if (selectedCategory == "Badges" && !isSearchActive) {
+      // Badges layout (Horizontal scrollable or 2-row grid)
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().height(105.dp)
+      ) {
+        items(com.example.data.presets.StickersCatalog.BADGES) { badgeItem ->
+          val badge = badgeItem.badgeType ?: BadgeType.NEW
+          Card(
+            modifier = Modifier
+              .width(155.dp)
+              .height(95.dp)
+              .clip(RoundedCornerShape(14.dp))
+              .clickable {
+                viewModel.timelineEngine.addBadge(badge)
+              },
+            colors = CardDefaults.cardColors(
+              containerColor = Color(badge.primaryColor).copy(alpha = 0.18f)
+            ),
+            border = BorderStroke(1.5.dp, Color(badge.primaryColor))
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center
+            ) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(badge.primaryColor),
+                modifier = Modifier.padding(bottom = 6.dp)
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Text(badge.icon, fontSize = 13.sp)
+                  Text(
+                    text = badge.displayName,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, color = Color.White, fontSize = 11.sp)
+                  )
+                }
+              }
+              Text(
+                text = badge.subtitle,
+                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+        }
+      }
+    } else {
+      // General Sticker Grid (or search results)
+      if (filteredItems.isEmpty()) {
+        Box(
+          modifier = Modifier.fillMaxWidth().height(80.dp),
+          contentAlignment = Alignment.Center
+        ) {
+          Text("No stickers found for \"$searchQuery\"", color = TextTertiary, fontSize = 13.sp)
+        }
+      } else {
+        LazyRow(
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          modifier = Modifier.fillMaxWidth().height(85.dp)
+        ) {
+          items(filteredItems) { item ->
+            val isAnimated = item.defaultAnimation != StickerAnimationType.NONE
+            Card(
+              modifier = Modifier
+                .width(68.dp)
+                .height(80.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                  if (item.badgeType != null) {
+                    viewModel.timelineEngine.addBadge(item.badgeType)
+                  } else {
+                    viewModel.timelineEngine.addStickerClip(
+                      emojiOrAsset = item.symbolOrAsset,
+                      animationType = item.defaultAnimation,
+                      category = item.category
+                    )
+                  }
+                },
+              colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+              border = BorderStroke(
+                width = if (isAnimated) 1.dp else 0.dp,
+                color = if (isAnimated) AmberAccent.copy(alpha = 0.6f) else Color.Transparent
+              )
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
+              ) {
+                Box(
+                  modifier = Modifier.weight(1f),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(item.symbolOrAsset, fontSize = 28.sp)
+                }
+                Text(
+                  text = item.name,
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.sp,
+                    color = if (isAnimated) AmberAccent else TextSecondary,
+                    textAlign = TextAlign.Center
+                  ),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
             }
           }
         }

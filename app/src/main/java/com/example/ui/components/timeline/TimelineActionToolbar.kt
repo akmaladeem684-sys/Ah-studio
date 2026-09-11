@@ -45,6 +45,11 @@ fun TimelineActionToolbar(
   onReplaceMedia: () -> Unit,
   onToggleMultiSelect: () -> Unit,
   onToggleMagnetic: () -> Unit,
+  isTracksSyncEnabled: Boolean = true,
+  onToggleTracksSync: (() -> Unit)? = null,
+  onMoveToPlayhead: (() -> Unit)? = null,
+  canEditAtPlayhead: Boolean = true,
+  onSplitAllTracks: (() -> Unit)? = null,
   onOpenTrimTool: (() -> Unit)? = null,
   onOpenKeyframeTool: (() -> Unit)? = null,
   onOpenTransitionsTool: (() -> Unit)? = null,
@@ -77,31 +82,43 @@ fun TimelineActionToolbar(
       TimelineActionButton(
         icon = Icons.AutoMirrored.Filled.CallSplit,
         label = "Split",
-        enabled = hasSelection,
+        enabled = hasSelection || canEditAtPlayhead,
         accentColor = CyanAccent,
         testTag = "action_split",
         onClick = onSplit
       )
 
-      // 2. Trim Left to Playhead
+      // 2. Trim Left to Playhead (Clip starts at CTI)
       TimelineActionButton(
         icon = Icons.Default.West,
         label = "Trim L",
-        enabled = hasSelection,
+        enabled = hasSelection || canEditAtPlayhead,
         accentColor = CyanAccent,
         testTag = "action_trim_left",
         onClick = onTrimLeft
       )
 
-      // 3. Trim Right to Playhead
+      // 3. Trim Right to Playhead (Clip ends at CTI)
       TimelineActionButton(
         icon = Icons.Default.East,
         label = "Trim R",
-        enabled = hasSelection,
+        enabled = hasSelection || canEditAtPlayhead,
         accentColor = CyanAccent,
         testTag = "action_trim_right",
         onClick = onTrimRight
       )
+
+      // 4. Align / Move to CTI
+      if (onMoveToPlayhead != null) {
+        TimelineActionButton(
+          icon = Icons.Default.PinDrop,
+          label = "Align CTI",
+          enabled = hasSelection || canEditAtPlayhead,
+          accentColor = AmberAccent,
+          testTag = "action_align_cti",
+          onClick = onMoveToPlayhead
+        )
+      }
 
       if (onOpenTrimTool != null) {
         TimelineActionButton(
@@ -318,6 +335,31 @@ fun TimelineActionToolbar(
         testTag = "action_magnetic",
         onClick = onToggleMagnetic
       )
+
+      // 15. Track Sync Toggle (All tracks move and edit together synchronously)
+      if (onToggleTracksSync != null) {
+        TimelineActionButton(
+          icon = Icons.Default.Link,
+          label = if (isTracksSyncEnabled) "Sync ON" else "Sync OFF",
+          enabled = true,
+          isActive = isTracksSyncEnabled,
+          accentColor = if (isTracksSyncEnabled) GreenAccent else TextSecondary,
+          testTag = "action_sync_tracks",
+          onClick = onToggleTracksSync
+        )
+      }
+
+      // 16. Split All Tracks at CTI
+      if (onSplitAllTracks != null) {
+        TimelineActionButton(
+          icon = Icons.Default.Layers,
+          label = "Split All",
+          enabled = true,
+          accentColor = PurpleAccent,
+          testTag = "action_split_all_tracks",
+          onClick = onSplitAllTracks
+        )
+      }
     }
   }
 }

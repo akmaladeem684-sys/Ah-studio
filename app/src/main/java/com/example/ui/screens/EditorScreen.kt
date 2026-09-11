@@ -117,6 +117,7 @@ fun EditorScreen(
   val selectedTransitionCutIndex by viewModel.timelineEngine.selectedTransitionCutIndex.collectAsState()
   val timelineFps by viewModel.timelineEngine.timelineFps.collectAsState()
   val isFrameSnapping by viewModel.timelineEngine.isFrameSnapping.collectAsState()
+  val isTracksSyncEnabled by viewModel.timelineEngine.isTracksSyncEnabled.collectAsState()
 
   val configuration = LocalConfiguration.current
   val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -588,36 +589,27 @@ fun EditorScreen(
         onAddText = {
           viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
         },
+        onAddOverlay = {
+          viewModel.setActiveToolbarTab(EditorToolbarTab.OVERLAY)
+        },
+        onAddSticker = {
+          viewModel.setActiveToolbarTab(EditorToolbarTab.STICKERS)
+        },
+        onAddEffect = {
+          viewModel.setActiveToolbarTab(EditorToolbarTab.EFFECTS)
+        },
+        isTracksSyncEnabled = isTracksSyncEnabled,
+        onToggleTracksSync = { viewModel.timelineEngine.toggleTracksSync() },
+        onMoveToPlayhead = { viewModel.timelineEngine.moveSelectedClipToPlayhead() },
+        onSplitAllTracks = { viewModel.timelineEngine.splitAllTracksAtPlayhead() },
         onSplitClip = {
-          val clipId = when (val el = selectedElement) {
-            is SelectedTrackElement.Video -> el.clipId
-            is SelectedTrackElement.Overlay -> el.clipId
-            is SelectedTrackElement.Audio -> el.clipId
-            else -> null
-          }
-          if (clipId != null) {
-            viewModel.timelineEngine.splitSelectedClipAtPlayhead()
-          }
+          viewModel.timelineEngine.splitAtPlayhead()
         },
         onTrimLeftToPlayhead = {
-          val clipId = when (val el = selectedElement) {
-            is SelectedTrackElement.Video -> el.clipId
-            is SelectedTrackElement.Overlay -> el.clipId
-            else -> null
-          }
-          if (clipId != null) {
-            viewModel.setClipInPointAtPlayhead(clipId)
-          }
+          viewModel.timelineEngine.trimClipLeftToPlayhead()
         },
         onTrimRightToPlayhead = {
-          val clipId = when (val el = selectedElement) {
-            is SelectedTrackElement.Video -> el.clipId
-            is SelectedTrackElement.Overlay -> el.clipId
-            else -> null
-          }
-          if (clipId != null) {
-            viewModel.setClipOutPointAtPlayhead(clipId)
-          }
+          viewModel.timelineEngine.trimClipRightToPlayhead()
         },
         onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
         onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
@@ -1124,10 +1116,11 @@ fun VideoPreviewSurface(
   }
 
   // Color Matrix for video adjustments and filter presets matching export pipeline
-  val combinedColorFilter = remember(timeline.adjustments, timeline.filter) {
+  val combinedColorFilter = remember(timeline.adjustments, timeline.filter, activeClip?.filter) {
     val androidMatrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
       timeline.adjustments,
-      timeline.filter
+      timeline.filter,
+      activeClip?.filter
     )
     ColorFilter.colorMatrix(ColorMatrix(androidMatrix.array))
   }
@@ -1235,6 +1228,7 @@ fun VideoPreviewSurface(
               SyntheticClipPreview(
                 clip = activeClip,
                 currentPosMs = currentPosMs,
+                colorFilter = combinedColorFilter,
                 modifier = Modifier.fillMaxSize()
               )
             }
@@ -2076,6 +2070,7 @@ private fun formatDurationShort(timeMs: Long): String {
 private fun SyntheticClipPreview(
   clip: VideoClip,
   currentPosMs: Long,
+  colorFilter: ColorFilter? = null,
   modifier: Modifier = Modifier
 ) {
   val stockItem = remember(clip.uri) {

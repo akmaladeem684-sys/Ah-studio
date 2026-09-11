@@ -114,8 +114,15 @@ fun MultiTrackTimeline(
   onAddMedia: (() -> Unit)? = null,
   onAddAudio: (() -> Unit)? = null,
   onAddText: (() -> Unit)? = null,
+  onAddOverlay: (() -> Unit)? = null,
+  onAddSticker: (() -> Unit)? = null,
+  onAddEffect: (() -> Unit)? = null,
   onEditCover: (() -> Unit)? = null,
   onToggleMuteAllVideo: (() -> Unit)? = null,
+  isTracksSyncEnabled: Boolean = true,
+  onToggleTracksSync: (() -> Unit)? = null,
+  onMoveToPlayhead: (() -> Unit)? = null,
+  onSplitAllTracks: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val horizontalScrollState = rememberScrollState()
@@ -123,7 +130,18 @@ fun MultiTrackTimeline(
 
   val totalDuration = timeline.totalDurationMs.coerceAtLeast(3000L)
   val msPerPixel = remember(zoom) { (20f / zoom).coerceIn(2.5f, 120f) }
-  val trackContentWidthDp = (totalDuration / msPerPixel).dp + 60.dp
+  val maxTimelineMs = remember(timeline, totalDuration) {
+    maxOf(
+      totalDuration,
+      timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
+      timeline.overlayClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
+      timeline.audioClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
+      timeline.textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
+      timeline.stickerClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
+      timeline.effectClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+    ).coerceAtLeast(3000L)
+  }
+  val trackContentWidthDp = (maxTimelineMs / msPerPixel).dp + 180.dp
 
   // Reorder dragging state on the Video track
   var draggedVideoIndex by remember { mutableStateOf<Int?>(null) }
@@ -212,18 +230,30 @@ fun MultiTrackTimeline(
           }
         }
 
-        // Contextual Timeline Action Toolbar (Split, Delete, etc. when clip is selected)
+        // Contextual Timeline Action Toolbar (Split, Trim, Align CTI, Sync Tracks, etc.)
+        val canEditAtPlayhead = timeline.videoClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
+          timeline.overlayClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
+          timeline.audioClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
+          timeline.textClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
+          timeline.stickerClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
+          timeline.effectClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs }
+
         AnimatedVisibility(
-          visible = selectedElement !is SelectedTrackElement.None,
+          visible = selectedElement !is SelectedTrackElement.None || timeline.totalDurationMs > 0L,
           enter = slideInVertically { -it } + fadeIn(),
           exit = slideOutVertically { -it } + fadeOut()
         ) {
           TimelineActionToolbar(
-            hasSelection = true,
+            hasSelection = selectedElement !is SelectedTrackElement.None,
             isMultiSelectMode = isMultiSelectMode,
             selectedCount = if (selectedClipIds.isNotEmpty()) selectedClipIds.size else 1,
             canPaste = false,
             isMagnetic = false,
+            isTracksSyncEnabled = isTracksSyncEnabled,
+            onToggleTracksSync = onToggleTracksSync,
+            onMoveToPlayhead = onMoveToPlayhead,
+            canEditAtPlayhead = canEditAtPlayhead,
+            onSplitAllTracks = onSplitAllTracks,
             onSplit = { onSplitClip?.invoke() },
             onTrimLeft = { onTrimLeftToPlayhead?.invoke() },
             onTrimRight = { onTrimRightToPlayhead?.invoke() },
@@ -260,7 +290,7 @@ fun MultiTrackTimeline(
         // 2. Main Timeline Tracks View (Fixed Left Utility Column + Scrollable Multi-Track Lanes)
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
           Row(modifier = Modifier.fillMaxSize()) {
-            // Left Static Column (Mute clip, Cover, Audio icon, Text icon)
+            // Left Static Column (Track Icons & Controls aligned vertically with track lanes)
             Column(
               modifier = Modifier
                 .width(88.dp)
@@ -270,7 +300,7 @@ fun MultiTrackTimeline(
                 .verticalScroll(verticalScrollState),
               verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              // Row 1: Mute Clip & Cover Card (Video Track Left utility)
+              // Row 1: Video Track Left Utility (Mute clip + Cover Card) (64.dp)
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
@@ -353,7 +383,24 @@ fun MultiTrackTimeline(
                 }
               }
 
-              // Row 2: Audio Track Icon (Left utility)
+              // Row 2: Overlay / PIP Track Icon (44.dp)
+              Box(
+                modifier = Modifier
+                  .size(36.dp)
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(Color(0xFF1B1F2A))
+                  .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Layers,
+                  contentDescription = "Overlay Track",
+                  tint = OverlayTrackColor,
+                  modifier = Modifier.size(18.dp)
+                )
+              }
+
+              // Row 3: Audio Track Icon (36.dp)
               Box(
                 modifier = Modifier
                   .size(36.dp)
@@ -365,12 +412,12 @@ fun MultiTrackTimeline(
                 Icon(
                   imageVector = Icons.Default.MusicNote,
                   contentDescription = "Audio Track",
-                  tint = Color.White.copy(alpha = 0.7f),
+                  tint = AudioTrackColor,
                   modifier = Modifier.size(18.dp)
                 )
               }
 
-              // Row 3: Text Track Icon (Left utility)
+              // Row 4: Text Track Icon (36.dp)
               Box(
                 modifier = Modifier
                   .size(36.dp)
@@ -384,9 +431,47 @@ fun MultiTrackTimeline(
                   style = MaterialTheme.typography.titleMedium.copy(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.75f)
+                    color = TextTrackColor
                   )
                 )
+              }
+
+              // Row 5: Sticker Track Icon (36.dp - if stickers exist or quick add)
+              if (timeline.stickerClips.isNotEmpty() || onAddSticker != null) {
+                Box(
+                  modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF1B1F2A))
+                    .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.EmojiEmotions,
+                    contentDescription = "Sticker Track",
+                    tint = StickerTrackColor,
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
+              }
+
+              // Row 6: Effect Track Icon (36.dp - if effects exist or quick add)
+              if (timeline.effectClips.isNotEmpty() || onAddEffect != null) {
+                Box(
+                  modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF1B1F2A))
+                    .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "Effect Track",
+                    tint = EffectTrackColor,
+                    modifier = Modifier.size(18.dp)
+                  )
+                }
               }
             }
 
@@ -410,11 +495,11 @@ fun MultiTrackTimeline(
                     onDrag = { change, dragAmount ->
                       change.consume()
                       val deltaMs = -dragAmount.x * msPerPixel
-                      scrubAccumulatorMs = (scrubAccumulatorMs + deltaMs).coerceIn(0f, totalDuration.toFloat())
+                      scrubAccumulatorMs = (scrubAccumulatorMs + deltaMs).coerceIn(0f, maxTimelineMs.toFloat())
                       val rawMs = scrubAccumulatorMs.toLong()
                       val targetMs = if (isFrameSnapping) {
                         val frameMs = 1000.0 / fps
-                        (Math.round(rawMs / frameMs) * frameMs).toLong().coerceIn(0L, totalDuration)
+                        (Math.round(rawMs / frameMs) * frameMs).toLong().coerceIn(0L, maxTimelineMs)
                       } else rawMs
                       onSeek(targetMs)
                     }
@@ -438,12 +523,12 @@ fun MultiTrackTimeline(
                     .width(trackContentWidthDp + centerPaddingDp * 2)
                     .fillMaxHeight()
                     .verticalScroll(verticalScrollState)
-                    .pointerInput(totalDuration, msPerPixel) {
+                    .pointerInput(maxTimelineMs, msPerPixel) {
                       detectTapGestures { offset ->
                         val viewportCenterX = size.width / 2f
                         val deltaPx = offset.x - viewportCenterX
                         val deltaMs = deltaPx * msPerPixel
-                        val clickedMs = (currentPosMs + deltaMs.toLong()).coerceIn(0L, totalDuration)
+                        val clickedMs = (currentPosMs + deltaMs.toLong()).coerceIn(0L, maxTimelineMs)
                         onSeek(clickedMs)
                       }
                     },
@@ -459,13 +544,12 @@ fun MultiTrackTimeline(
                       .height(videoTrackHeight)
                       .testTag("main_video_track")
                   ) {
-                    Row(
-                      modifier = Modifier.fillMaxHeight(),
-                      verticalAlignment = Alignment.CenterVertically
+                    Box(
+                      modifier = Modifier
+                        .fillMaxHeight()
+                        .offset(x = centerPaddingDp)
                     ) {
-                      Spacer(modifier = Modifier.width(centerPaddingDp))
-
-                      // Video Clips
+                      // Video Clips positioned absolutely by timelineStartMs
                       timeline.videoClips.forEachIndexed { index, clip ->
                         val isSelected = (selectedElement as? SelectedTrackElement.Video)?.clipId == clip.id
                         val isMulti = clip.id in selectedClipIds
@@ -517,7 +601,7 @@ fun MultiTrackTimeline(
                         for (i in 0 until timeline.videoClips.size - 1) {
                           val clipA = timeline.videoClips[i]
                           val cutPosMs = clipA.timelineStartMs + clipA.durationMs
-                          val cutX = (cutPosMs / msPerPixel).dp - 10.dp
+                          val cutX = (cutPosMs / msPerPixel).dp - 9.dp
                           val existingTransition = timeline.transitions.find { it.clipIndexBefore == i }
                           val isSelectedCut = i == selectedTransitionCutIndex
 
@@ -530,7 +614,7 @@ fun MultiTrackTimeline(
                                 if (existingTransition != null) PurpleAccent else Color(0xFF222836),
                                 RoundedCornerShape(2.dp)
                               )
-                              .border(1.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(2.dp))
+                              .border(1.dp, if (isSelectedCut) CyanAccent else Color.White.copy(alpha = 0.8f), RoundedCornerShape(2.dp))
                               .clickable {
                                 onSelectTransitionCut?.invoke(i)
                                 onOpenTransitionsTool?.invoke()
@@ -548,115 +632,166 @@ fun MultiTrackTimeline(
                         }
                       }
 
-                      if (timeline.videoClips.isEmpty()) {
-                        // Empty Timeline: Prominent Add Media button to start editing
-                        Surface(
-                          shape = RoundedCornerShape(8.dp),
-                          color = Color(0xFF161E2E),
-                          border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.6f)),
-                          modifier = Modifier
-                            .width(136.dp)
-                            .height(videoTrackHeight)
-                            .clickable { onAddMedia?.invoke() }
-                            .testTag("add_first_media_btn")
-                        ) {
-                          Row(
+                      // Add Media / Add Ending controls at the end of the video track
+                      val maxVideoEndMs = timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                      val addMediaOffset = if (timeline.videoClips.isEmpty()) 0.dp else (maxVideoEndMs / msPerPixel).dp + 8.dp
+
+                      Box(
+                        modifier = Modifier
+                          .offset(x = addMediaOffset)
+                          .align(Alignment.CenterStart)
+                      ) {
+                        if (timeline.videoClips.isEmpty()) {
+                          Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF161E2E),
+                            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.6f)),
                             modifier = Modifier
-                              .fillMaxSize()
-                              .padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                              .width(136.dp)
+                              .height(videoTrackHeight)
+                              .clickable { onAddMedia?.invoke() }
+                              .testTag("add_first_media_btn")
                           ) {
-                            Box(
-                              modifier = Modifier
-                                .size(24.dp)
-                                .clip(CircleShape)
-                                .background(CyanAccent),
-                              contentAlignment = Alignment.Center
+                            Row(
+                              modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                              verticalAlignment = Alignment.CenterVertically,
+                              horizontalArrangement = Arrangement.Center
                             ) {
-                              Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add Media",
-                                tint = Color.Black,
-                                modifier = Modifier.size(16.dp)
-                              )
+                              Box(
+                                modifier = Modifier.size(24.dp).clip(CircleShape).background(CyanAccent),
+                                contentAlignment = Alignment.Center
+                              ) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Media", tint = Color.Black, modifier = Modifier.size(16.dp))
+                              }
+                              Spacer(modifier = Modifier.width(8.dp))
+                              Text("Add Media", style = MaterialTheme.typography.bodySmall.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp))
                             }
+                          }
+                        } else {
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                              shape = RoundedCornerShape(6.dp),
+                              color = Color(0xFF1E222D),
+                              border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                              modifier = Modifier
+                                .width(110.dp)
+                                .height(videoTrackHeight)
+                                .clickable { onAddMedia?.invoke() }
+                                .testTag("add_ending_btn")
+                            ) {
+                              Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                              ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Add ending", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.85f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                              }
+                            }
+
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                              text = "Add Media",
-                              style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                              )
-                            )
+
+                            Surface(
+                              shape = RoundedCornerShape(6.dp),
+                              color = Color.White,
+                              modifier = Modifier
+                                .size(38.dp)
+                                .clickable { onAddMedia?.invoke() }
+                                .testTag("add_media_square_btn")
+                            ) {
+                              Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Media", tint = Color.Black, modifier = Modifier.size(22.dp))
+                              }
+                            }
                           }
                         }
-                      } else {
-                        Spacer(modifier = Modifier.width(6.dp))
+                      }
+                    }
+                  }
 
-                        // "+ Add ending" card
+                  // ==========================================
+                  // 2. OVERLAY / PIP TRACK (44.dp)
+                  // ==========================================
+                  val overlayTrackHeight = 44.dp
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(overlayTrackHeight)
+                      .testTag("overlay_track_lane")
+                  ) {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxHeight()
+                        .offset(x = centerPaddingDp)
+                    ) {
+                      timeline.overlayClips.forEach { clip ->
+                        val isSelected = (selectedElement as? SelectedTrackElement.Overlay)?.clipId == clip.id
+                        val isMulti = clip.id in selectedClipIds
+
+                        TimelineClipView(
+                          clipId = clip.id,
+                          title = clip.name.ifBlank { "Overlay" },
+                          timelineStartMs = clip.timelineStartMs,
+                          durationMs = clip.durationMs,
+                          sourceStartMs = clip.sourceStartMs,
+                          sourceEndMs = clip.sourceEndMs,
+                          currentPlayheadMs = currentPosMs,
+                          hasAudio = clip.hasAudio,
+                          trackColor = OverlayTrackColor,
+                          heightDp = overlayTrackHeight,
+                          msPerPixel = msPerPixel,
+                          isSelected = isSelected,
+                          isMultiSelected = isMulti,
+                          isLocked = false,
+                          speed = clip.speed,
+                          onSelect = {
+                            if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                            else {
+                              onSelectElement(SelectedTrackElement.Overlay(clip.id))
+                              onSeek(clip.timelineStartMs)
+                            }
+                          },
+                          onLongClick = { onToggleClipSelection(clip.id) },
+                          onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                          onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                          onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                        )
+                      }
+
+                      val maxOverlayEndMs = timeline.overlayClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                      val addOverlayOffset = (maxOverlayEndMs / msPerPixel).dp + 8.dp
+
+                      Box(
+                        modifier = Modifier
+                          .offset(x = addOverlayOffset)
+                          .align(Alignment.CenterStart)
+                      ) {
                         Surface(
                           shape = RoundedCornerShape(6.dp),
                           color = Color(0xFF1E222D),
                           border = BorderStroke(1.dp, Color(0xFF2D3344)),
                           modifier = Modifier
-                            .width(110.dp)
-                            .height(videoTrackHeight)
-                            .clickable { onAddMedia?.invoke() }
-                            .testTag("add_ending_btn")
+                            .width(115.dp)
+                            .height(32.dp)
+                            .clickable { onAddOverlay?.invoke() }
+                            .testTag("add_overlay_pill_btn")
                         ) {
                           Row(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                           ) {
-                            Icon(
-                              imageVector = Icons.Default.Add,
-                              contentDescription = null,
-                              tint = Color.White.copy(alpha = 0.8f),
-                              modifier = Modifier.size(14.dp)
-                            )
+                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                              text = "Add ending",
-                              style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 11.5.sp
-                              )
-                            )
-                          }
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        // "+" White Square Media Add Button
-                        Surface(
-                          shape = RoundedCornerShape(6.dp),
-                          color = Color.White,
-                          modifier = Modifier
-                            .size(38.dp)
-                            .clickable { onAddMedia?.invoke() }
-                            .testTag("add_media_square_btn")
-                        ) {
-                          Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                              imageVector = Icons.Default.Add,
-                              contentDescription = "Add Media",
-                              tint = Color.Black,
-                              modifier = Modifier.size(22.dp)
-                            )
+                            Text("Add overlay", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium))
                           }
                         }
                       }
-
-                      Spacer(modifier = Modifier.width(centerPaddingDp))
                     }
                   }
 
                   // ==========================================
-                  // 2. AUDIO TRACK (+ Add audio button card / waveforms)
+                  // 3. AUDIO TRACK (+ Add audio button card / waveforms)
                   // ==========================================
                   val audioTrackHeight = 36.dp
                   Box(
@@ -665,99 +800,89 @@ fun MultiTrackTimeline(
                       .height(audioTrackHeight)
                       .testTag("audio_track_lane")
                   ) {
-                    Row(
-                      modifier = Modifier.fillMaxHeight(),
-                      verticalAlignment = Alignment.CenterVertically
+                    Box(
+                      modifier = Modifier
+                        .fillMaxHeight()
+                        .offset(x = centerPaddingDp)
                     ) {
-                      Spacer(modifier = Modifier.width(centerPaddingDp))
+                      timeline.audioClips.forEach { clip ->
+                        val isSelected = (selectedElement as? SelectedTrackElement.Audio)?.clipId == clip.id
+                        val isMulti = clip.id in selectedClipIds
 
-                      if (timeline.audioClips.isNotEmpty()) {
-                        timeline.audioClips.forEach { clip ->
-                          val isSelected = (selectedElement as? SelectedTrackElement.Audio)?.clipId == clip.id
-                          val isMulti = clip.id in selectedClipIds
-
-                          TimelineClipView(
-                            clipId = clip.id,
-                            title = clip.title.ifBlank { "Audio" },
-                            timelineStartMs = clip.timelineStartMs,
-                            durationMs = clip.durationMs,
-                            trackColor = AudioTrackColor,
-                            heightDp = audioTrackHeight,
-                            msPerPixel = msPerPixel,
-                            isSelected = isSelected,
-                            isMultiSelected = isMulti,
-                            isLocked = false,
-                            waveformData = clip.waveformData,
-                            waveformStyle = waveformStyle,
-                            keyframes = clip.keyframes,
-                            selectedKeyframeIds = selectedKeyframeIds,
-                            baseVolume = clip.volume,
-                            fadeInMs = clip.fadeInMs,
-                            fadeOutMs = clip.fadeOutMs,
-                            showVolumeEnvelope = true,
-                            onSelectKeyframe = onSelectKeyframe,
-                            onMoveKeyframe = onMoveKeyframe,
-                            onAddVolumeKeyframe = { relTime, vol ->
-                              onAddAudioKeyframe?.invoke(clip.id, relTime, vol)
-                            },
-                            onUpdateVolumeKeyframe = { kfId, relTime, vol ->
-                              onUpdateAudioKeyframe?.invoke(clip.id, kfId, relTime, vol)
-                            },
-                            onDeleteVolumeKeyframe = { kfId ->
-                              onDeleteAudioKeyframe?.invoke(clip.id, kfId)
-                            },
-                            onSelect = {
-                              if (isMultiSelectMode) onToggleClipSelection(clip.id)
-                              else onSelectElement(SelectedTrackElement.Audio(clip.id))
-                            },
-                            onLongClick = { onToggleClipSelection(clip.id) },
-                            onMoveClip = { delta -> onMoveClip(clip.id, delta) },
-                            onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
-                          )
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
+                        TimelineClipView(
+                          clipId = clip.id,
+                          title = clip.title.ifBlank { "Audio" },
+                          timelineStartMs = clip.timelineStartMs,
+                          durationMs = clip.durationMs,
+                          trackColor = AudioTrackColor,
+                          heightDp = audioTrackHeight,
+                          msPerPixel = msPerPixel,
+                          isSelected = isSelected,
+                          isMultiSelected = isMulti,
+                          isLocked = false,
+                          waveformData = clip.waveformData,
+                          waveformStyle = waveformStyle,
+                          keyframes = clip.keyframes,
+                          selectedKeyframeIds = selectedKeyframeIds,
+                          baseVolume = clip.volume,
+                          fadeInMs = clip.fadeInMs,
+                          fadeOutMs = clip.fadeOutMs,
+                          showVolumeEnvelope = true,
+                          onSelectKeyframe = onSelectKeyframe,
+                          onMoveKeyframe = onMoveKeyframe,
+                          onAddVolumeKeyframe = { relTime, vol ->
+                            onAddAudioKeyframe?.invoke(clip.id, relTime, vol)
+                          },
+                          onUpdateVolumeKeyframe = { kfId, relTime, vol ->
+                            onUpdateAudioKeyframe?.invoke(clip.id, kfId, relTime, vol)
+                          },
+                          onDeleteVolumeKeyframe = { kfId ->
+                            onDeleteAudioKeyframe?.invoke(clip.id, kfId)
+                          },
+                          onSelect = {
+                            if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                            else onSelectElement(SelectedTrackElement.Audio(clip.id))
+                          },
+                          onLongClick = { onToggleClipSelection(clip.id) },
+                          onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                          onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                          onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                        )
                       }
 
-                      // "+ Add audio" Pill Card
-                      Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1E222D),
-                        border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                      val maxAudioEndMs = timeline.audioClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                      val addAudioOffset = (maxAudioEndMs / msPerPixel).dp + 8.dp
+
+                      Box(
                         modifier = Modifier
-                          .width(130.dp)
-                          .height(34.dp)
-                          .clickable { onAddAudio?.invoke() }
-                          .testTag("add_audio_pill_btn")
+                          .offset(x = addAudioOffset)
+                          .align(Alignment.CenterStart)
                       ) {
-                        Row(
-                          modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                          verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                          shape = RoundedCornerShape(6.dp),
+                          color = Color(0xFF1E222D),
+                          border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                          modifier = Modifier
+                            .width(120.dp)
+                            .height(34.dp)
+                            .clickable { onAddAudio?.invoke() }
+                            .testTag("add_audio_pill_btn")
                         ) {
-                          Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(13.dp)
-                          )
-                          Spacer(modifier = Modifier.width(6.dp))
-                          Text(
-                            text = "Add audio",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                              color = Color.White.copy(alpha = 0.8f),
-                              fontWeight = FontWeight.Medium,
-                              fontSize = 11.5.sp
-                            )
-                          )
+                          Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                          ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Add audio", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                          }
                         }
                       }
-
-                      Spacer(modifier = Modifier.width(centerPaddingDp))
                     }
                   }
 
                   // ==========================================
-                  // 3. TEXT TRACK (+ Add text button card / text cards)
+                  // 4. TEXT TRACK (+ Add text button card / text cards)
                   // ==========================================
                   val textTrackHeight = 36.dp
                   Box(
@@ -766,31 +891,102 @@ fun MultiTrackTimeline(
                       .height(textTrackHeight)
                       .testTag("text_track_lane")
                   ) {
-                    Row(
-                      modifier = Modifier.fillMaxHeight(),
-                      verticalAlignment = Alignment.CenterVertically
+                    Box(
+                      modifier = Modifier
+                        .fillMaxHeight()
+                        .offset(x = centerPaddingDp)
                     ) {
-                      Spacer(modifier = Modifier.width(centerPaddingDp))
+                      timeline.textClips.forEach { clip ->
+                        val isSelected = (selectedElement as? SelectedTrackElement.Text)?.clipId == clip.id
+                        val isMulti = clip.id in selectedClipIds
 
-                      if (timeline.textClips.isNotEmpty()) {
-                        timeline.textClips.forEach { clip ->
-                          val isSelected = (selectedElement as? SelectedTrackElement.Text)?.clipId == clip.id
+                        TimelineClipView(
+                          clipId = clip.id,
+                          title = clip.text.ifBlank { "Text" },
+                          timelineStartMs = clip.timelineStartMs,
+                          durationMs = clip.durationMs,
+                          trackColor = TextTrackColor,
+                          heightDp = textTrackHeight,
+                          msPerPixel = msPerPixel,
+                          isSelected = isSelected,
+                          isMultiSelected = isMulti,
+                          isLocked = false,
+                          onSelect = {
+                            if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                            else onSelectElement(SelectedTrackElement.Text(clip.id))
+                          },
+                          onLongClick = { onToggleClipSelection(clip.id) },
+                          onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                          onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                          onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                        )
+                      }
+
+                      val maxTextEndMs = timeline.textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                      val addTextOffset = (maxTextEndMs / msPerPixel).dp + 8.dp
+
+                      Box(
+                        modifier = Modifier
+                          .offset(x = addTextOffset)
+                          .align(Alignment.CenterStart)
+                      ) {
+                        Surface(
+                          shape = RoundedCornerShape(6.dp),
+                          color = Color(0xFF1E222D),
+                          border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                          modifier = Modifier
+                            .width(120.dp)
+                            .height(34.dp)
+                            .clickable { onAddText?.invoke() }
+                            .testTag("add_text_pill_btn")
+                        ) {
+                          Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                          ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Add text", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // ==========================================
+                  // 5. STICKER TRACK (36.dp)
+                  // ==========================================
+                  if (timeline.stickerClips.isNotEmpty() || onAddSticker != null) {
+                    val stickerTrackHeight = 36.dp
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .height(stickerTrackHeight)
+                        .testTag("sticker_track_lane")
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .fillMaxHeight()
+                          .offset(x = centerPaddingDp)
+                      ) {
+                        timeline.stickerClips.forEach { clip ->
+                          val isSelected = (selectedElement as? SelectedTrackElement.Sticker)?.clipId == clip.id
                           val isMulti = clip.id in selectedClipIds
 
                           TimelineClipView(
                             clipId = clip.id,
-                            title = clip.text.ifBlank { "Text" },
+                            title = clip.emojiOrAsset.ifBlank { "Sticker" },
                             timelineStartMs = clip.timelineStartMs,
                             durationMs = clip.durationMs,
-                            trackColor = TextTrackColor,
-                            heightDp = textTrackHeight,
+                            trackColor = StickerTrackColor,
+                            heightDp = stickerTrackHeight,
                             msPerPixel = msPerPixel,
                             isSelected = isSelected,
                             isMultiSelected = isMulti,
                             isLocked = false,
                             onSelect = {
                               if (isMultiSelectMode) onToggleClipSelection(clip.id)
-                              else onSelectElement(SelectedTrackElement.Text(clip.id))
+                              else onSelectElement(SelectedTrackElement.Sticker(clip.id))
                             },
                             onLongClick = { onToggleClipSelection(clip.id) },
                             onMoveClip = { delta -> onMoveClip(clip.id, delta) },
@@ -798,43 +994,110 @@ fun MultiTrackTimeline(
                             onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
                           )
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
-                      }
 
-                      // "+ Add text" Pill Card
-                      Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1E222D),
-                        border = BorderStroke(1.dp, Color(0xFF2D3344)),
-                        modifier = Modifier
-                          .width(130.dp)
-                          .height(34.dp)
-                          .clickable { onAddText?.invoke() }
-                          .testTag("add_text_pill_btn")
-                      ) {
-                        Row(
-                          modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                          verticalAlignment = Alignment.CenterVertically
+                        val maxStickerEndMs = timeline.stickerClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                        val addStickerOffset = (maxStickerEndMs / msPerPixel).dp + 8.dp
+
+                        Box(
+                          modifier = Modifier
+                            .offset(x = addStickerOffset)
+                            .align(Alignment.CenterStart)
                         ) {
-                          Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(13.dp)
-                          )
-                          Spacer(modifier = Modifier.width(6.dp))
-                          Text(
-                            text = "Add text",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                              color = Color.White.copy(alpha = 0.8f),
-                              fontWeight = FontWeight.Medium,
-                              fontSize = 11.5.sp
-                            )
-                          )
+                          Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF1E222D),
+                            border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                            modifier = Modifier
+                              .width(120.dp)
+                              .height(34.dp)
+                              .clickable { onAddSticker?.invoke() }
+                              .testTag("add_sticker_pill_btn")
+                          ) {
+                            Row(
+                              modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                              verticalAlignment = Alignment.CenterVertically
+                            ) {
+                              Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                              Spacer(modifier = Modifier.width(6.dp))
+                              Text("Add sticker", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                            }
+                          }
                         }
                       }
+                    }
+                  }
 
-                      Spacer(modifier = Modifier.width(centerPaddingDp))
+                  // ==========================================
+                  // 6. EFFECT TRACK (36.dp)
+                  // ==========================================
+                  if (timeline.effectClips.isNotEmpty() || onAddEffect != null) {
+                    val effectTrackHeight = 36.dp
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .height(effectTrackHeight)
+                        .testTag("effect_track_lane")
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .fillMaxHeight()
+                          .offset(x = centerPaddingDp)
+                      ) {
+                        timeline.effectClips.forEach { clip ->
+                          val isSelected = (selectedElement as? SelectedTrackElement.Effect)?.clipId == clip.id
+                          val isMulti = clip.id in selectedClipIds
+
+                          TimelineClipView(
+                            clipId = clip.id,
+                            title = clip.effectType.displayName,
+                            timelineStartMs = clip.timelineStartMs,
+                            durationMs = clip.durationMs,
+                            trackColor = EffectTrackColor,
+                            heightDp = effectTrackHeight,
+                            msPerPixel = msPerPixel,
+                            isSelected = isSelected,
+                            isMultiSelected = isMulti,
+                            isLocked = false,
+                            onSelect = {
+                              if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                              else onSelectElement(SelectedTrackElement.Effect(clip.id))
+                            },
+                            onLongClick = { onToggleClipSelection(clip.id) },
+                            onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                            onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                          )
+                        }
+
+                        val maxEffectEndMs = timeline.effectClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                        val addEffectOffset = (maxEffectEndMs / msPerPixel).dp + 8.dp
+
+                        Box(
+                          modifier = Modifier
+                            .offset(x = addEffectOffset)
+                            .align(Alignment.CenterStart)
+                        ) {
+                          Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF1E222D),
+                            border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                            modifier = Modifier
+                              .width(120.dp)
+                              .height(34.dp)
+                              .clickable { onAddEffect?.invoke() }
+                              .testTag("add_effect_pill_btn")
+                          ) {
+                            Row(
+                              modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                              verticalAlignment = Alignment.CenterVertically
+                            ) {
+                              Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                              Spacer(modifier = Modifier.width(6.dp))
+                              Text("Add effect", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }

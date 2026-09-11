@@ -257,7 +257,7 @@ class VideoCompositionEngine(private val context: Context) {
     } else emptyList()
 
     // Adjustments & Filters
-    val colorMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter)
+    val colorMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter, activeClip?.filter)
     val colorFilter = ColorMatrixColorFilter(colorMatrix)
 
     val activeClipTransform = if (activeClip != null) {
@@ -533,20 +533,18 @@ class VideoCompositionEngine(private val context: Context) {
   }
 
   private fun drawStickerClip(canvas: Canvas, sticker: ComposedSticker, width: Int, height: Int) {
-    val clip = sticker.clip
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      textSize = 54f * sticker.scale * (width / 400f)
-      alpha = (sticker.opacity * 255).toInt().coerceIn(0, 255)
-      textAlign = Paint.Align.CENTER
-    }
-
-    val centerX = (width / 2f) + (sticker.posX * width / 2f)
-    val centerY = (height / 2f) + (sticker.posY * height / 2f)
-
-    canvas.save()
-    canvas.translate(centerX, centerY)
-    canvas.rotate(sticker.rotation)
-    canvas.drawText(clip.emojiOrAsset, 0f, 0f, paint)
-    canvas.restore()
+    StickerLayerRenderer.draw(
+      canvas = canvas,
+      clip = sticker.clip.copy(
+        posX = sticker.posX,
+        posY = sticker.posY,
+        scale = sticker.scale,
+        rotation = sticker.rotation,
+        opacity = sticker.opacity
+      ),
+      currentPosMs = sticker.clip.timelineStartMs,
+      width = width,
+      height = height
+    )
   }
 }
