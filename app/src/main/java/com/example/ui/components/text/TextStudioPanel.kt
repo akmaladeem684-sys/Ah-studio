@@ -250,19 +250,18 @@ fun TextStudioPanel(
     }
   }
 
-  // Ensure a text clip is always available when user clicks Text tool
-  LaunchedEffect(timeline.textClips) {
-    if (timeline.textClips.isEmpty()) {
-      viewModel.timelineEngine.addTextClip("Your Text Here / اپنا متن لکھیں")
-    } else if (selectedElement !is SelectedTrackElement.Text) {
+  // Select active text element if already present
+  LaunchedEffect(timeline.textClips, selectedElement) {
+    if (timeline.textClips.isNotEmpty() && selectedElement !is SelectedTrackElement.Text) {
       val firstClip = timeline.textClips.first()
       viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(firstClip.id))
     }
   }
 
   var activeSubTab by remember { mutableStateOf("Templates") } // "Templates", "Urdu Fonts", "English Fonts", "Style & Color", "Motion & Position", "Captions"
-  val availableFonts = remember { FontManager.getAvailableFonts(context) }
-  var fontOptionsList by remember { mutableStateOf(availableFonts) }
+  val installedPlugins by viewModel.installedPlugins.collectAsState()
+  val availableFonts = remember(installedPlugins) { FontManager.getAvailableFonts(context) }
+  var fontOptionsList by remember(availableFonts) { mutableStateOf(availableFonts) }
 
   val fontPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocument()
@@ -357,7 +356,16 @@ fun TextStudioPanel(
         OutlinedTextField(
           value = activeClip.text,
           onValueChange = { newText ->
-            viewModel.timelineEngine.updateTextClip(activeClip.copy(text = newText))
+            if (selectedTextClip != null) {
+              viewModel.timelineEngine.updateTextClip(activeClip.copy(text = newText))
+            } else if (newText.isNotBlank()) {
+              val newClip = activeClip.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                text = newText,
+                timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+              )
+              viewModel.timelineEngine.addTextClipObject(newClip)
+            }
           },
           label = { Text("Write Custom Content (Urdu / English)", fontSize = 11.sp, color = CyanAccent) },
           placeholder = { Text("Type here in Urdu or English...", color = TextSecondary, fontSize = 13.sp) },
@@ -391,7 +399,16 @@ fun TextStudioPanel(
             items(samples) { (label, sampleStr) ->
               SuggestionChip(
                 onClick = {
-                  viewModel.timelineEngine.updateTextClip(activeClip.copy(text = sampleStr))
+                  if (selectedTextClip != null) {
+                    viewModel.timelineEngine.updateTextClip(activeClip.copy(text = sampleStr))
+                  } else {
+                    val newClip = activeClip.copy(
+                      id = java.util.UUID.randomUUID().toString(),
+                      text = sampleStr,
+                      timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+                    )
+                    viewModel.timelineEngine.addTextClipObject(newClip)
+                  }
                 },
                 label = { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Medium) },
                 colors = SuggestionChipDefaults.suggestionChipColors(
@@ -448,14 +465,32 @@ fun TextStudioPanel(
       "Templates" -> TemplatesSubTab(
         clip = activeClip,
         onApplyTemplate = { updatedClip ->
-          viewModel.timelineEngine.updateTextClip(updatedClip)
+          if (selectedTextClip != null) {
+            viewModel.timelineEngine.updateTextClip(updatedClip)
+          } else {
+            val newClip = updatedClip.copy(
+              id = java.util.UUID.randomUUID().toString(),
+              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+            )
+            viewModel.timelineEngine.addTextClipObject(newClip)
+          }
         }
       )
       "Urdu Fonts" -> UrduFontsSubTab(
         clip = activeClip,
         fonts = fontOptionsList.filter { it.category == "Urdu" || it.id.lowercase().contains("urdu") || it.id.lowercase().contains("nastaliq") },
         onSelectFont = { fontId, path ->
-          viewModel.timelineEngine.updateTextClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
+          if (selectedTextClip != null) {
+            viewModel.timelineEngine.updateTextClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
+          } else {
+            val newClip = activeClip.copy(
+              id = java.util.UUID.randomUUID().toString(),
+              fontFamily = fontId,
+              customFontPath = path,
+              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+            )
+            viewModel.timelineEngine.addTextClipObject(newClip)
+          }
         },
         onImportFont = { fontPickerLauncher.launch(arrayOf("*/*")) }
       )
@@ -463,17 +498,47 @@ fun TextStudioPanel(
         clip = activeClip,
         fonts = fontOptionsList.filter { it.category != "Urdu" },
         onSelectFont = { fontId, path ->
-          viewModel.timelineEngine.updateTextClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
+          if (selectedTextClip != null) {
+            viewModel.timelineEngine.updateTextClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
+          } else {
+            val newClip = activeClip.copy(
+              id = java.util.UUID.randomUUID().toString(),
+              fontFamily = fontId,
+              customFontPath = path,
+              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+            )
+            viewModel.timelineEngine.addTextClipObject(newClip)
+          }
         },
         onImportFont = { fontPickerLauncher.launch(arrayOf("*/*")) }
       )
       "Style & Color" -> StyleAndColorSettings(
         clip = activeClip,
-        onUpdate = { viewModel.timelineEngine.updateTextClip(it) }
+        onUpdate = {
+          if (selectedTextClip != null) {
+            viewModel.timelineEngine.updateTextClip(it)
+          } else {
+            val newClip = it.copy(
+              id = java.util.UUID.randomUUID().toString(),
+              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+            )
+            viewModel.timelineEngine.addTextClipObject(newClip)
+          }
+        }
       )
       "Motion & Position" -> MotionAndPositionSettings(
         clip = activeClip,
-        onUpdate = { viewModel.timelineEngine.updateTextClip(it) }
+        onUpdate = {
+          if (selectedTextClip != null) {
+            viewModel.timelineEngine.updateTextClip(it)
+          } else {
+            val newClip = it.copy(
+              id = java.util.UUID.randomUUID().toString(),
+              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
+            )
+            viewModel.timelineEngine.addTextClipObject(newClip)
+          }
+        }
       )
       "Captions" -> CaptionsAndTimingSettings(
         clip = activeClip,
@@ -499,6 +564,105 @@ private fun TemplatesSubTab(
   clip: TextClip,
   onApplyTemplate: (TextClip) -> Unit
 ) {
+  val installedPlugins by com.example.engine.plugin.PluginManager.installedPlugins.collectAsState()
+
+  // Dynamically extract and build template presets from all installed and enabled plugins
+  val pluginTemplates = remember(installedPlugins) {
+    val list = mutableListOf<TextTemplateItem>()
+    for (plugin in installedPlugins) {
+      if (!plugin.isEnabled) continue
+      for (item in plugin.manifest.items) {
+        val cat = if (item.categoryKey.isNotBlank()) {
+          com.example.domain.plugin.PluginCategory.fromKey(item.categoryKey)
+        } else {
+          plugin.manifest.category
+        }
+        if (cat == com.example.domain.plugin.PluginCategory.TEXT_TEMPLATE) {
+          val category = (item.parameters["category"] as? String)
+            ?: (item.parameters["type"] as? String)
+            ?: "Templates"
+          val sample = (item.parameters["sampleText"] as? String)
+            ?: (item.parameters["text"] as? String)
+            ?: (item.parameters["title"] as? String)
+            ?: item.name
+          val fontFam = (item.parameters["fontFamily"] as? String)
+            ?: (item.parameters["font"] as? String)
+            ?: if (category.contains("urdu", true) || category.contains("islamic", true)) "jameel_nastaliq" else "Sans-Serif"
+          val fontSize = (item.parameters["fontSizeSp"] as? Number)?.toFloat()
+            ?: (item.parameters["fontSize"] as? Number)?.toFloat()
+            ?: 28f
+          val fontWeight = (item.parameters["fontWeight"] as? Number)?.toInt()
+            ?: (item.parameters["weight"] as? Number)?.toInt()
+            ?: 700
+
+          fun parseColor(v: Any?, def: Long): Long {
+            if (v == null) return def
+            if (v is Number) return v.toLong()
+            val s = v.toString().trim()
+            return try {
+              if (s.startsWith("#")) {
+                val hex = s.substring(1)
+                if (hex.length == 6) ("FF$hex").toLong(16) else hex.toLong(16)
+              } else s.toLong()
+            } catch (_: Exception) { def }
+          }
+
+          val textColor = parseColor(item.parameters["textColor"] ?: item.parameters["color"], 0xFFFFFFFFL)
+          val bgColor = parseColor(item.parameters["backgroundColor"] ?: item.parameters["bg_color"], 0xCC000000L)
+          val strokeColor = parseColor(item.parameters["strokeColor"], 0xFF000000L)
+          val shadowColor = parseColor(item.parameters["shadowColor"], 0x88000000L)
+          val gradStart = parseColor(item.parameters["gradientColorStart"], 0xFF00E5FFL)
+          val gradEnd = parseColor(item.parameters["gradientColorEnd"], 0xFF8B5CF6L)
+          
+          val strokeWidth = (item.parameters["strokeWidth"] as? Number)?.toFloat() ?: 0f
+          val hasShadow = (item.parameters["hasShadow"] as? Boolean) ?: (item.parameters["shadow"] as? Boolean) ?: true
+          val hasGradient = (item.parameters["hasGradient"] as? Boolean) ?: (item.parameters["gradient"] as? Boolean) ?: false
+          val hasBg = (item.parameters["hasBackground"] as? Boolean) ?: true
+          val anim = (item.parameters["animationType"] as? String) ?: (item.parameters["animation"] as? String) ?: "Pop"
+
+          list.add(
+            TextTemplateItem(
+              id = item.id,
+              name = item.name,
+              category = category,
+              sampleText = sample,
+              fontFamily = fontFam,
+              fontSizeSp = fontSize,
+              fontWeight = fontWeight,
+              textColor = textColor,
+              hasGradient = hasGradient,
+              gradientColorStart = gradStart,
+              gradientColorEnd = gradEnd,
+              strokeWidth = strokeWidth,
+              strokeColor = strokeColor,
+              hasShadow = hasShadow,
+              shadowColor = shadowColor,
+              hasBackground = hasBg,
+              backgroundColor = bgColor,
+              cornerRadius = 12f,
+              bgPadding = 16f,
+              animationType = anim,
+              badgeEmoji = item.emoji
+            )
+          )
+        }
+      }
+    }
+    list
+  }
+
+  val allTemplates = remember(pluginTemplates) { TEXT_TEMPLATES + pluginTemplates }
+
+  val categories = remember(allTemplates) {
+    listOf("All") + allTemplates.map { it.category }.distinct()
+  }
+  var selectedCategory by remember { mutableStateOf("All") }
+
+  val displayedTemplates = remember(selectedCategory, allTemplates) {
+    if (selectedCategory == "All") allTemplates
+    else allTemplates.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+  }
+
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -510,20 +674,47 @@ private fun TemplatesSubTab(
         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
       )
       Text(
-        text = "${TEXT_TEMPLATES.size} Styles",
-        style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
+        text = if (pluginTemplates.isNotEmpty()) "${allTemplates.size} Styles (${pluginTemplates.size} Plugins)" else "${allTemplates.size} Styles",
+        style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
       )
+    }
+
+    // Category Filter Chips Row (All, Urdu, English, Captions, Quotes, Business, YouTube, Islamic, Reels)
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      contentPadding = PaddingValues(vertical = 2.dp)
+    ) {
+      items(categories) { catName ->
+        val isSelected = selectedCategory == catName
+        FilterChip(
+          selected = isSelected,
+          onClick = { selectedCategory = catName },
+          label = { Text(catName, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = PurpleAccent.copy(alpha = 0.25f),
+            selectedLabelColor = PurpleAccent,
+            containerColor = StudioSurfaceVariant,
+            labelColor = TextSecondary
+          ),
+          border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = isSelected,
+            borderColor = StudioBorder,
+            selectedBorderColor = PurpleAccent
+          )
+        )
+      }
     }
 
     LazyRow(
       horizontalArrangement = Arrangement.spacedBy(10.dp),
       contentPadding = PaddingValues(vertical = 4.dp)
     ) {
-      items(TEXT_TEMPLATES) { tpl ->
+      items(displayedTemplates) { tpl ->
         Card(
           modifier = Modifier
             .width(180.dp)
-            .height(110.dp)
+            .height(115.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable {
               val sampleToUse = if (clip.text.isBlank() || clip.text == "Tap to edit" || clip.text == "Your Text Here") {
@@ -534,6 +725,7 @@ private fun TemplatesSubTab(
                 clip.copy(
                   text = sampleToUse,
                   fontFamily = tpl.fontFamily,
+                  customFontPath = null,
                   fontSizeSp = tpl.fontSizeSp,
                   fontWeight = tpl.fontWeight,
                   textColor = tpl.textColor,
@@ -572,13 +764,23 @@ private fun TemplatesSubTab(
               Text(tpl.badgeEmoji, fontSize = 18.sp)
               Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = if (tpl.category == "Urdu") Color(0xFF10B981).copy(alpha = 0.2f) else CyanAccent.copy(alpha = 0.2f)
+                color = when {
+                  tpl.category.equals("Urdu", true) || tpl.category.equals("Islamic", true) -> Color(0xFF10B981).copy(alpha = 0.2f)
+                  tpl.category.equals("Business", true) -> AmberAccent.copy(alpha = 0.2f)
+                  tpl.category.equals("YouTube", true) -> Color(0xFFFF3B30).copy(alpha = 0.2f)
+                  else -> CyanAccent.copy(alpha = 0.2f)
+                }
               ) {
                 Text(
                   text = tpl.category,
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
-                  color = if (tpl.category == "Urdu") Color(0xFF10B981) else CyanAccent,
+                  color = when {
+                    tpl.category.equals("Urdu", true) || tpl.category.equals("Islamic", true) -> Color(0xFF10B981)
+                    tpl.category.equals("Business", true) -> AmberAccent
+                    tpl.category.equals("YouTube", true) -> Color(0xFFFF3B30)
+                    else -> CyanAccent
+                  },
                   modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                 )
               }

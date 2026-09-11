@@ -339,6 +339,11 @@ fun EditorScreen(
           onDuplicateClip = { viewModel.timelineEngine.duplicateClips(setOf(it)) },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = true },
+          onAddMedia = {
+            timelineMediaPickerLauncher.launch(
+              PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+            )
+          },
           modifier = Modifier
             .fillMaxSize()
             .testTag("video_preview")
@@ -775,6 +780,11 @@ fun EditorScreen(
           onDuplicateClip = { viewModel.timelineEngine.duplicateClips(setOf(it)) },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = false },
+          onAddMedia = {
+            timelineMediaPickerLauncher.launch(
+              PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+            )
+          },
           modifier = Modifier.fillMaxSize()
         )
 
@@ -1070,6 +1080,7 @@ fun VideoPreviewSurface(
   onDuplicateClip: (String) -> Unit = {},
   player: ExoPlayer? = null,
   onToggleFullscreen: (() -> Unit)? = null,
+  onAddMedia: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -1229,8 +1240,48 @@ fun VideoPreviewSurface(
             }
           }
         } else {
-          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Empty Timeline", color = TextTertiary)
+          Box(
+            modifier = Modifier
+              .fillMaxSize()
+              .clickable { onAddMedia?.invoke() }
+              .testTag("empty_timeline_canvas"),
+            contentAlignment = Alignment.Center
+          ) {
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(52.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF1E293B))
+                  .border(1.dp, CyanAccent.copy(alpha = 0.5f), CircleShape),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.VideoLibrary,
+                  contentDescription = "Add Media",
+                  tint = CyanAccent,
+                  modifier = Modifier.size(26.dp)
+                )
+              }
+              Text(
+                text = "Tap to add video or photo",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                  color = TextPrimary,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 13.sp
+                )
+              )
+              Text(
+                text = "Clean blank timeline ready for your media",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  color = TextTertiary,
+                  fontSize = 11.sp
+                )
+              )
+            }
           }
         }
 

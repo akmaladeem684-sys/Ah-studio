@@ -78,13 +78,18 @@ fun InteractiveTransformOverlay(
 ) {
   val context = LocalContext.current
 
+  val currentOnSelectElement by rememberUpdatedState(onSelectElement)
+  val currentOnUpdateText by rememberUpdatedState(onUpdateText)
+  val currentOnUpdateOverlay by rememberUpdatedState(onUpdateOverlay)
+  val currentOnUpdateSticker by rememberUpdatedState(onUpdateSticker)
+
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
       .pointerInput(Unit) {
         // Tap on empty canvas background to deselect active transform frame
         detectTapGestures {
-          onSelectElement(SelectedTrackElement.None)
+          currentOnSelectElement(SelectedTrackElement.None)
         }
       }
   ) {
@@ -99,6 +104,7 @@ fun InteractiveTransformOverlay(
       val isSelected = selectedElement is SelectedTrackElement.Overlay &&
         (selectedElement as SelectedTrackElement.Overlay).clipId == overlay.id
 
+      val currentOverlay by rememberUpdatedState(overlay)
       val relTime = currentPosMs - overlay.timelineStartMs
       val kf = KeyframeInterpolator.interpolate(overlay, relTime)
 
@@ -134,21 +140,22 @@ fun InteractiveTransformOverlay(
           )
           .pointerInput(overlay.id) {
             detectTapGestures {
-              onSelectElement(SelectedTrackElement.Overlay(overlay.id))
+              currentOnSelectElement(SelectedTrackElement.Overlay(currentOverlay.id))
             }
           }
-          .pointerInput(overlay.id, isSelected) {
+          .pointerInput(overlay.id) {
             detectTransformGestures { _, pan, zoom, rotationChange ->
-              onSelectElement(SelectedTrackElement.Overlay(overlay.id))
+              val clip = currentOverlay
+              currentOnSelectElement(SelectedTrackElement.Overlay(clip.id))
               val deltaPosX = (pan.x * 2f) / parentWidthPx
               val deltaPosY = (pan.y * 2f) / parentHeightPx
-              val newX = (kf.posX + deltaPosX).coerceIn(-1.25f, 1.25f)
-              val newY = (kf.posY + deltaPosY).coerceIn(-1.25f, 1.25f)
-              val newScale = (kf.scale * zoom).coerceIn(0.15f, 6.0f)
-              val newRot = ((kf.rotation + rotationChange) % 360f).toInt()
+              val newX = (clip.cropOffsetX + deltaPosX).coerceIn(-1.5f, 1.5f)
+              val newY = (clip.cropOffsetY + deltaPosY).coerceIn(-1.5f, 1.5f)
+              val newScale = (clip.cropScale * zoom).coerceIn(0.15f, 8.0f)
+              val newRot = ((clip.rotationDegrees + rotationChange) % 360f).toInt()
 
-              onUpdateOverlay(
-                overlay.copy(
+              currentOnUpdateOverlay(
+                clip.copy(
                   cropOffsetX = newX,
                   cropOffsetY = newY,
                   cropScale = newScale,
@@ -226,9 +233,10 @@ fun InteractiveTransformOverlay(
             onUpdateOverlay(overlay.copy(cropScale = 1.0f, rotationDegrees = 0))
           },
           onTransformHandleDrag = { deltaScale, deltaRotation ->
-            val newScale = (kf.scale * deltaScale).coerceIn(0.15f, 6.0f)
-            val newRot = ((kf.rotation + deltaRotation) % 360f).toInt()
-            onUpdateOverlay(overlay.copy(cropScale = newScale, rotationDegrees = newRot))
+            val clip = currentOverlay
+            val newScale = (clip.cropScale * deltaScale).coerceIn(0.15f, 8.0f)
+            val newRot = ((clip.rotationDegrees + deltaRotation) % 360f).toInt()
+            currentOnUpdateOverlay(clip.copy(cropScale = newScale, rotationDegrees = newRot))
           }
         )
       }
@@ -239,6 +247,7 @@ fun InteractiveTransformOverlay(
       val isSelected = selectedElement is SelectedTrackElement.Sticker &&
         (selectedElement as SelectedTrackElement.Sticker).clipId == sticker.id
 
+      val currentSticker by rememberUpdatedState(sticker)
       val baseSizeDp = 80.dp
       val baseWidthPx = with(density) { baseSizeDp.toPx() }
       val baseHeightPx = with(density) { baseSizeDp.toPx() }
@@ -265,21 +274,22 @@ fun InteractiveTransformOverlay(
           )
           .pointerInput(sticker.id) {
             detectTapGestures {
-              onSelectElement(SelectedTrackElement.Sticker(sticker.id))
+              currentOnSelectElement(SelectedTrackElement.Sticker(currentSticker.id))
             }
           }
-          .pointerInput(sticker.id, isSelected) {
+          .pointerInput(sticker.id) {
             detectTransformGestures { _, pan, zoom, rotationChange ->
-              onSelectElement(SelectedTrackElement.Sticker(sticker.id))
+              val clip = currentSticker
+              currentOnSelectElement(SelectedTrackElement.Sticker(clip.id))
               val deltaPosX = (pan.x * 2f) / parentWidthPx
               val deltaPosY = (pan.y * 2f) / parentHeightPx
-              val newX = (sticker.posX + deltaPosX).coerceIn(-1.25f, 1.25f)
-              val newY = (sticker.posY + deltaPosY).coerceIn(-1.25f, 1.25f)
-              val newScale = (sticker.scale * zoom).coerceIn(0.15f, 6.0f)
-              val newRot = (sticker.rotation + rotationChange) % 360f
+              val newX = (clip.posX + deltaPosX).coerceIn(-1.5f, 1.5f)
+              val newY = (clip.posY + deltaPosY).coerceIn(-1.5f, 1.5f)
+              val newScale = (clip.scale * zoom).coerceIn(0.15f, 8.0f)
+              val newRot = (clip.rotation + rotationChange) % 360f
 
-              onUpdateSticker(
-                sticker.copy(
+              currentOnUpdateSticker(
+                clip.copy(
                   posX = newX,
                   posY = newY,
                   scale = newScale,
@@ -307,9 +317,10 @@ fun InteractiveTransformOverlay(
             onUpdateSticker(sticker.copy(scale = 1.0f, rotation = 0f))
           },
           onTransformHandleDrag = { deltaScale, deltaRotation ->
-            val newScale = (sticker.scale * deltaScale).coerceIn(0.15f, 6.0f)
-            val newRot = (sticker.rotation + deltaRotation) % 360f
-            onUpdateSticker(sticker.copy(scale = newScale, rotation = newRot))
+            val clip = currentSticker
+            val newScale = (clip.scale * deltaScale).coerceIn(0.15f, 8.0f)
+            val newRot = (clip.rotation + deltaRotation) % 360f
+            currentOnUpdateSticker(clip.copy(scale = newScale, rotation = newRot))
           }
         )
       }
@@ -320,47 +331,30 @@ fun InteractiveTransformOverlay(
       val isSelected = selectedElement is SelectedTrackElement.Text &&
         (selectedElement as SelectedTrackElement.Text).clipId == textClip.id
 
+      val currentTextClip by rememberUpdatedState(textClip)
+
       val centerXPx = (parentWidthPx / 2f) + (textClip.posX * parentWidthPx / 2f)
       val centerYPx = (parentHeightPx / 2f) + (textClip.posY * parentHeightPx / 2f)
 
       // Estimate base bounds for handles
       val approxTextLen = textClip.text.length.coerceAtLeast(3)
-      val baseWidthDp = maxOf(140.dp, (approxTextLen * textClip.fontSizeSp * 0.45f).dp)
-      val baseHeightDp = maxOf(50.dp, (textClip.fontSizeSp * 1.6f).dp)
+      val baseWidthDp = maxOf(120.dp, (approxTextLen * textClip.fontSizeSp * 0.45f).dp)
+      val baseHeightDp = maxOf(48.dp, (textClip.fontSizeSp * 1.6f).dp)
 
       val baseWidthPx = with(density) { baseWidthDp.toPx() }
       val baseHeightPx = with(density) { baseHeightDp.toPx() }
 
-      // Custom Canvas for crisp TextLayerRenderer
-      Canvas(
-        modifier = Modifier
-          .fillMaxSize()
-          .pointerInput(textClip.id) {
-            detectTapGestures {
-              onSelectElement(SelectedTrackElement.Text(textClip.id))
-            }
-          }
-          .pointerInput(textClip.id, isSelected) {
-            detectTransformGestures { _, pan, zoom, rotationChange ->
-              onSelectElement(SelectedTrackElement.Text(textClip.id))
-              val deltaPosX = (pan.x * 2f) / parentWidthPx
-              val deltaPosY = (pan.y * 2f) / parentHeightPx
-              val newX = (textClip.posX + deltaPosX).coerceIn(-1.25f, 1.25f)
-              val newY = (textClip.posY + deltaPosY).coerceIn(-1.25f, 1.25f)
-              val newScale = (textClip.scale * zoom).coerceIn(0.15f, 6.0f)
-              val newRot = (textClip.rotation + rotationChange) % 360f
+      val currentWidthPx = baseWidthPx * textClip.scale
+      val currentHeightPx = baseHeightPx * textClip.scale
 
-              onUpdateText(
-                textClip.copy(
-                  posX = newX,
-                  posY = newY,
-                  scale = newScale,
-                  rotation = newRot
-                )
-              )
-            }
-          }
-      ) {
+      val currentWidthDp = with(density) { currentWidthPx.toDp() }
+      val currentHeightDp = with(density) { currentHeightPx.toDp() }
+
+      val centerXDp = with(density) { centerXPx.toDp() }
+      val centerYDp = with(density) { centerYPx.toDp() }
+
+      // Custom Canvas for crisp TextLayerRenderer
+      Canvas(modifier = Modifier.fillMaxSize()) {
         drawIntoCanvas { canvas ->
           TextLayerRenderer.draw(
             canvas = canvas.nativeCanvas,
@@ -372,6 +366,43 @@ fun InteractiveTransformOverlay(
           )
         }
       }
+
+      // Touch Target Bounding Box positioned at exact text coordinates
+      Box(
+        modifier = Modifier
+          .offset(
+            x = centerXDp - (currentWidthDp / 2f),
+            y = centerYDp - (currentHeightDp / 2f)
+          )
+          .size(currentWidthDp, currentHeightDp)
+          .rotate(textClip.rotation)
+          .pointerInput(textClip.id) {
+            detectTapGestures {
+              currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
+            }
+          }
+          .pointerInput(textClip.id) {
+            detectTransformGestures { _, pan, zoom, rotationChange ->
+              val clip = currentTextClip
+              currentOnSelectElement(SelectedTrackElement.Text(clip.id))
+              val deltaPosX = (pan.x * 2f) / parentWidthPx
+              val deltaPosY = (pan.y * 2f) / parentHeightPx
+              val newX = (clip.posX + deltaPosX).coerceIn(-1.5f, 1.5f)
+              val newY = (clip.posY + deltaPosY).coerceIn(-1.5f, 1.5f)
+              val newScale = (clip.scale * zoom).coerceIn(0.15f, 8.0f)
+              val newRot = (clip.rotation + rotationChange) % 360f
+
+              currentOnUpdateText(
+                clip.copy(
+                  posX = newX,
+                  posY = newY,
+                  scale = newScale,
+                  rotation = newRot
+                )
+              )
+            }
+          }
+      )
 
       if (isSelected) {
         TransformHandlesBox(
@@ -387,9 +418,10 @@ fun InteractiveTransformOverlay(
             onUpdateText(textClip.copy(scale = 1.0f, rotation = 0f))
           },
           onTransformHandleDrag = { deltaScale, deltaRotation ->
-            val newScale = (textClip.scale * deltaScale).coerceIn(0.15f, 6.0f)
-            val newRot = (textClip.rotation + deltaRotation) % 360f
-            onUpdateText(textClip.copy(scale = newScale, rotation = newRot))
+            val clip = currentTextClip
+            val newScale = (clip.scale * deltaScale).coerceIn(0.15f, 8.0f)
+            val newRot = (clip.rotation + deltaRotation) % 360f
+            currentOnUpdateText(clip.copy(scale = newScale, rotation = newRot))
           }
         )
       }

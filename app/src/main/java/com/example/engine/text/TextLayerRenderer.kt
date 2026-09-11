@@ -182,9 +182,15 @@ object TextLayerRenderer {
     val isHighlightWord = clip.subtitleStyle.equals("HighlightWord", true) || clip.subtitleStyle.equals("Highlight word", true)
     val isAnimatedCaptions = clip.subtitleStyle.equals("Animated", true) || clip.subtitleStyle.equals("Animated captions", true)
 
+    val containsUrdu = rawText.any {
+      it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' ||
+          it in '\u08A0'..'\u08FF' || it in '\uFB50'..'\uFDFF' || it in '\uFE70'..'\uFEFF'
+    }
+
     val lines = rawText.split("\n")
     val fontMetrics = paint.fontMetrics
-    val lineHeight = (fontMetrics.descent - fontMetrics.ascent) * clip.lineSpacing
+    val effectiveLineSpacing = if (containsUrdu) maxOf(clip.lineSpacing, 1.25f) else clip.lineSpacing
+    val lineHeight = (fontMetrics.descent - fontMetrics.ascent) * effectiveLineSpacing
     val totalTextHeight = lines.size * lineHeight
 
     // Measure bounding box for background
@@ -253,6 +259,8 @@ object TextLayerRenderer {
     scaleFactor: Float,
     opacity: Float
   ) {
+    if (text.isEmpty()) return
+
     // Shadow
     if (clip.hasShadow || clip.subtitleStyle.equals("Classic", true)) {
       val sColor = if (clip.hasShadow) clip.shadowColor.toInt() else 0xDD000000.toInt()
@@ -310,6 +318,7 @@ object TextLayerRenderer {
     paint.style = Paint.Style.FILL
     paint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
     canvas.drawText(text, x, y, paint)
+    paint.shader = null
     paint.clearShadowLayer()
   }
 

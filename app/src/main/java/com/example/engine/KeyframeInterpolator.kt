@@ -130,10 +130,11 @@ object KeyframeInterpolator {
   }
 
   fun interpolateVolume(clip: AudioClip, relTimeMs: Long): Float {
-    if (clip.keyframes.isNotEmpty()) {
-      return interpolateVolume(clip.keyframes, relTimeMs, clip.volume)
+    var vol = if (clip.keyframes.isNotEmpty()) {
+      interpolateVolume(clip.keyframes, relTimeMs, clip.volume)
+    } else {
+      clip.volume
     }
-    var vol = clip.volume
     if (clip.fadeInMs > 0L && relTimeMs < clip.fadeInMs) {
       vol *= (relTimeMs.toFloat() / clip.fadeInMs.toFloat()).coerceIn(0f, 1f)
     }

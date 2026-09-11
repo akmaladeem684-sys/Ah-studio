@@ -5,8 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -30,8 +35,11 @@ class MainActivity : ComponentActivity() {
       MyApplicationTheme {
         val viewModel: StudioViewModel = viewModel()
         val currentScreen by viewModel.currentScreen.collectAsState()
+        val isStartupLoading by viewModel.isStartupLoading.collectAsState()
+        val startupProgress by viewModel.startupProgress.collectAsState()
+        val startupStatus by viewModel.startupStatus.collectAsState()
 
-        BackHandler(enabled = currentScreen != AppScreen.HOME) {
+        BackHandler(enabled = currentScreen != AppScreen.HOME && !isStartupLoading) {
           when (currentScreen) {
             AppScreen.EDITOR -> {
               viewModel.saveCurrentProject()
@@ -45,24 +53,44 @@ class MainActivity : ComponentActivity() {
           }
         }
 
-        Surface(
-          modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .background(StudioDarkBg),
-          color = StudioDarkBg
-        ) {
-          Crossfade(targetState = currentScreen, label = "screen_transition") { screen ->
-            when (screen) {
-              AppScreen.HOME -> HomeScreen(viewModel = viewModel)
-              AppScreen.EDITOR -> EditorScreen(viewModel = viewModel)
-              AppScreen.EXPORT -> ExportScreen(viewModel = viewModel)
-              AppScreen.TEMPLATES -> TemplatesScreen(viewModel = viewModel)
-              AppScreen.AI_SUITE -> AISuiteScreen(viewModel = viewModel)
-              AppScreen.EXPORTED_LIBRARY -> ExportedVideosScreen(viewModel = viewModel)
-              AppScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
+        Box(modifier = Modifier.fillMaxSize()) {
+          // Primary Application Screens (Home Screen is default on open)
+          Surface(
+            modifier = Modifier
+              .fillMaxSize()
+              .statusBarsPadding()
+              .navigationBarsPadding()
+              .background(StudioDarkBg),
+            color = StudioDarkBg
+          ) {
+            Crossfade(targetState = currentScreen, label = "screen_transition") { screen ->
+              when (screen) {
+                AppScreen.HOME -> HomeScreen(viewModel = viewModel)
+                AppScreen.EDITOR -> EditorScreen(viewModel = viewModel)
+                AppScreen.EXPORT -> ExportScreen(viewModel = viewModel)
+                AppScreen.TEMPLATES -> TemplatesScreen(viewModel = viewModel)
+                AppScreen.AI_SUITE -> AISuiteScreen(viewModel = viewModel)
+                AppScreen.EXPORTED_LIBRARY -> ExportedVideosScreen(viewModel = viewModel)
+                AppScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
+              }
             }
+          }
+
+          // Startup Loading Animation Screen with Editing Tools
+          AnimatedVisibility(
+            visible = isStartupLoading,
+            enter = fadeIn(),
+            exit = fadeOut(animationSpec = tween(500))
+          ) {
+            StartupLoadingScreen(
+              progress = startupProgress,
+              statusText = startupStatus,
+              onFinished = { viewModel.finishStartupLoading() },
+              modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+            )
           }
         }
       }

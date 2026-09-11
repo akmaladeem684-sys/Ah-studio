@@ -161,50 +161,29 @@ object PluginManager {
         }
       }
 
-      // 2. Locate Manifest File (plugin.json or manifest.json)
-      var manifestFile = File(tempExtractDir, "plugin.json")
-      if (!manifestFile.exists()) {
-        manifestFile = File(tempExtractDir, "manifest.json")
-      }
+      // 2. Locate Manifest & Descriptor Files (plugin.json, manifest.json, integration.json, package.json)
+      val allJsonFiles = tempExtractDir.walkTopDown().filter { it.isFile && it.extension.equals("json", ignoreCase = true) }.toList()
+      
+      var manifestFile = allJsonFiles.find { it.name.equals("plugin.json", ignoreCase = true) }
+        ?: allJsonFiles.find { it.name.equals("manifest.json", ignoreCase = true) }
+        ?: allJsonFiles.find { it.name.equals("integration.json", ignoreCase = true) }
+        ?: allJsonFiles.find { it.name.equals("package.json", ignoreCase = true) }
 
-      // Check if ZIP extracted into a single wrapper folder
-      if (!manifestFile.exists()) {
-        val subDirs = tempExtractDir.listFiles { f -> f.isDirectory }
-        if (subDirs != null && subDirs.isNotEmpty()) {
-          for (dir in subDirs) {
-            val nested = File(dir, "plugin.json")
-            if (nested.exists()) {
-              manifestFile = nested
-              break
-            }
-          }
-        }
-      }
+      val integrationFile = allJsonFiles.find { it.name.equals("integration.json", ignoreCase = true) }
+      val readmeFile = tempExtractDir.walkTopDown().find { it.isFile && (it.name.equals("README.txt", ignoreCase = true) || it.name.equals("README.md", ignoreCase = true)) }
 
-      if (!manifestFile.exists()) {
-        tempExtractDir.deleteRecursively()
-        return PluginValidationResult.Error("Invalid Plugin ZIP: Missing 'plugin.json' manifest in root of package.")
-      }
+      val effectiveRootDir = manifestFile?.parentFile ?: tempExtractDir
 
-      // 3. Parse and Validate Manifest
-      val jsonContent = manifestFile.readText()
-      val manifest = parseManifestJson(jsonContent)
-        ?: run {
-          tempExtractDir.deleteRecursively()
-          return PluginValidationResult.Error("Invalid Plugin Manifest: Failed to parse 'plugin.json'. Check JSON syntax.")
-        }
+      // 3. Parse and Merge Manifest & Integration JSONs with Resilient Fallbacks
+      val manifest = parseAndBuildManifest(
+        manifestFile = manifestFile,
+        integrationFile = integrationFile,
+        readmeFile = readmeFile,
+        rootDir = effectiveRootDir,
+        zipFileName = zipFile.nameWithoutExtension
+      )
 
-      if (manifest.id.isBlank()) {
-        tempExtractDir.deleteRecursively()
-        return PluginValidationResult.Error("Invalid Plugin Manifest: Missing required field 'id'.")
-      }
-
-      if (manifest.name.isBlank()) {
-        tempExtractDir.deleteRecursively()
-        return PluginValidationResult.Error("Invalid Plugin Manifest: Missing required field 'name'.")
-      }
-
-      val sourceDir = manifestFile.parentFile ?: tempExtractDir
+      val sourceDir = effectiveRootDir
 
       // 4. Copy to permanent Plugin Directory (/data/data/com.example/files/plugins/<plugin_id>/)
       val targetPluginDir = File(pluginsBaseDir, manifest.id)
@@ -235,7 +214,7 @@ object PluginManager {
       Log.d(TAG, "Successfully installed plugin '${manifest.name}' v${manifest.version} with ${manifest.items.size} assets.")
       return PluginValidationResult.Success(
         installedPlugin = installedPlugin,
-        message = "Plugin '${manifest.name}' v${manifest.version} installed successfully with ${manifest.items.size} items!"
+        message = "Plugin '${manifest.name}' installed successfully with ${manifest.items.size} assets!"
       )
 
     } catch (e: Exception) {
@@ -280,8 +259,14 @@ object PluginManager {
   fun getEnabledItemsForCategory(category: PluginCategory): List<Pair<InstalledPlugin, PluginItemManifest>> {
     val result = mutableListOf<Pair<InstalledPlugin, PluginItemManifest>>()
     for (plugin in _installedPlugins.value) {
-      if (plugin.isEnabled && plugin.manifest.category == category) {
-        for (item in plugin.manifest.items) {
+      if (!plugin.isEnabled) continue
+      for (item in plugin.manifest.items) {
+        val itemCategory = if (item.categoryKey.isNotBlank()) {
+          PluginCategory.fromKey(item.categoryKey)
+        } else {
+          plugin.manifest.category
+        }
+        if (itemCategory == category) {
           result.add(Pair(plugin, item))
         }
       }
@@ -293,13 +278,412 @@ object PluginManager {
     return getEnabledItemsForCategory(PluginCategory.fromKey(categoryKey))
   }
 
+  /**
+   * Resiliently extracts manifest metadata and auto-discovers all fonts and templates.
+   */
+  private fun parseAndBuildManifest(
+    manifestFile: File?,
+    integrationFile: File?,
+    readmeFile: File?,
+    rootDir: File,
+    zipFileName: String
+  ): PluginManifest {
+    var manifestJsonObj: JSONObject? = null
+    var integrationJsonObj: JSONObject? = null
+
+    if (manifestFile != null && manifestFile.exists()) {
+      try {
+        val text = manifestFile.readText().trim()
+        if (text.startsWith("{")) {
+          manifestJsonObj = JSONObject(text)
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "Could not parse manifestFile as JSONObject", e)
+      }
+    }
+
+    if (integrationFile != null && integrationFile.exists()) {
+      try {
+        val text = integrationFile.readText().trim()
+        if (text.startsWith("{")) {
+          integrationJsonObj = JSONObject(text)
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "Could not parse integrationFile as JSONObject", e)
+      }
+    }
+
+    // Merge attributes: Check manifest first, then integration
+    fun optField(vararg keys: String): String {
+      for (k in keys) {
+        val v = manifestJsonObj?.optString(k, "")?.trim() ?: ""
+        if (v.isNotBlank()) return v
+        val iv = integrationJsonObj?.optString(k, "")?.trim() ?: ""
+        if (iv.isNotBlank()) return iv
+      }
+      return ""
+    }
+
+    // Check nested objects: manifest.optJSONObject("plugin"), integration.optJSONObject("plugin")
+    fun optNestedField(vararg keys: String): String {
+      val nestedContainers = listOf("plugin", "manifest", "package", "metadata", "info", "extension")
+      for (containerKey in nestedContainers) {
+        val mSub = manifestJsonObj?.optJSONObject(containerKey)
+        val iSub = integrationJsonObj?.optJSONObject(containerKey)
+        for (k in keys) {
+          val v = mSub?.optString(k, "")?.trim() ?: ""
+          if (v.isNotBlank()) return v
+          val iv = iSub?.optString(k, "")?.trim() ?: ""
+          if (iv.isNotBlank()) return iv
+        }
+      }
+      return ""
+    }
+
+    // 1. Resilient ID Resolution
+    var rawId = optField("id", "plugin_id", "pluginId", "pluginID", "package", "package_name", "packageName", "identifier", "slug", "key")
+    if (rawId.isBlank()) {
+      rawId = optNestedField("id", "plugin_id", "pluginId", "package", "identifier", "slug")
+    }
+
+    // 2. Resilient Name Resolution
+    var rawName = optField("name", "title", "plugin_name", "pluginName", "displayName", "display_name", "label", "package_title")
+    if (rawName.isBlank()) {
+      rawName = optNestedField("name", "title", "plugin_name", "displayName", "label")
+    }
+
+    // Derive ID if missing
+    val id = if (rawId.isNotBlank()) {
+      rawId.lowercase().replace(Regex("[^a-z0-9_]"), "_").trim('_')
+    } else if (rawName.isNotBlank()) {
+      rawName.lowercase().replace(Regex("[^a-z0-9_]"), "_").trim('_')
+    } else {
+      zipFileName.lowercase().replace(Regex("[^a-z0-9_]"), "_").trim('_').ifBlank { "plugin_${System.currentTimeMillis()}" }
+    }
+
+    // Derive Name if missing
+    val name = if (rawName.isNotBlank()) {
+      rawName
+    } else {
+      id.replace('_', ' ').replace('-', ' ').split(' ')
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { it.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.titlecase() else ch.toString() } }
+        .ifBlank { "Extension Pack" }
+    }
+
+    val version = optField("version", "ver", "v").ifBlank { "1.0.0" }
+    val author = optField("author", "creator", "publisher", "vendor", "developer").ifBlank { "AH Studio Community" }
+    
+    var description = optField("description", "desc", "summary", "about")
+    if (description.isBlank() && readmeFile != null && readmeFile.exists()) {
+      try {
+        val lines = readmeFile.readLines().filter { it.isNotBlank() }
+        description = lines.take(2).joinToString(" ")
+      } catch (_: Exception) {}
+    }
+    if (description.isBlank()) {
+      description = "Creative templates and typography pack for AH Video Studio."
+    }
+
+    val rawType = optField("type", "category", "plugin_type")
+    val icon = optField("icon", "preview", "thumbnail")
+    val minVersion = optField("minimumAppVersion", "min_version").ifBlank { "1.0.0" }
+
+    // 3. Asset Discovery: Gather items from JSON + Directory structures
+    val discoveredItems = mutableListOf<PluginItemManifest>()
+    val seenItemIds = mutableSetOf<String>()
+
+    fun addItem(item: PluginItemManifest) {
+      if (item.id !in seenItemIds) {
+        seenItemIds.add(item.id)
+        discoveredItems.add(item)
+      }
+    }
+
+    // A. Parse explicitly declared items in manifestJsonObj / integrationJsonObj
+    val explicitArrays = listOf("items", "assets", "templates", "fonts", "captions", "quotes", "business", "youtube", "islamic", "reels", "stickers", "filters", "audio")
+    for (arrName in explicitArrays) {
+      val arr = manifestJsonObj?.optJSONArray(arrName) ?: integrationJsonObj?.optJSONArray(arrName)
+      if (arr != null) {
+        for (i in 0 until arr.length()) {
+          val itemObj = arr.optJSONObject(i) ?: continue
+          val item = parseItemJsonObject(itemObj, id, discoveredItems.size, arrName)
+          addItem(item)
+        }
+      }
+    }
+
+    // B. Scan fonts/ directory for fonts.json and font binaries (.ttf, .otf)
+    val fontsDir = File(rootDir, "fonts")
+    if (fontsDir.exists() && fontsDir.isDirectory) {
+      fontsDir.walkTopDown().forEach { file ->
+        if (file.isFile) {
+          if (file.extension.equals("json", ignoreCase = true)) {
+            try {
+              val fontJsonText = file.readText().trim()
+              val relPath = file.relativeTo(rootDir).path
+              val isUrdu = file.path.contains("urdu", ignoreCase = true)
+              val lang = if (isUrdu) "Urdu" else "English"
+              val defaultEmoji = if (isUrdu) "🇵🇰" else "🔤"
+
+              if (fontJsonText.startsWith("[")) {
+                val jsonArr = JSONArray(fontJsonText)
+                for (j in 0 until jsonArr.length()) {
+                  val fObj = jsonArr.optJSONObject(j) ?: continue
+                  val fId = fObj.optString("id", "${id}_font_${discoveredItems.size}")
+                  val fName = fObj.optString("name", fObj.optString("title", "Font ${discoveredItems.size}"))
+                  val fFile = fObj.optString("file", fObj.optString("path", ""))
+                  val fSample = fObj.optString("sample", fObj.optString("sampleText", if (isUrdu) "جمیل نوری نستعلیق خطاطی" else fName))
+                  val params = mutableMapOf<String, Any>(
+                    "language" to lang,
+                    "category" to lang,
+                    "sample" to fSample,
+                    "fontFamily" to fObj.optString("fontFamily", fName)
+                  )
+                  addItem(
+                    PluginItemManifest(
+                      id = fId,
+                      name = fName,
+                      description = fObj.optString("description", "$lang Font Option"),
+                      preview = fObj.optString("preview", ""),
+                      file = fFile,
+                      emoji = fObj.optString("emoji", defaultEmoji),
+                      categoryKey = "font",
+                      parameters = params
+                    )
+                  )
+                }
+              } else if (fontJsonText.startsWith("{")) {
+                val rootFObj = JSONObject(fontJsonText)
+                val list = rootFObj.optJSONArray("fonts") ?: rootFObj.optJSONArray("items")
+                if (list != null) {
+                  for (j in 0 until list.length()) {
+                    val fObj = list.optJSONObject(j) ?: continue
+                    val fId = fObj.optString("id", "${id}_font_${discoveredItems.size}")
+                    val fName = fObj.optString("name", fObj.optString("title", "Font ${discoveredItems.size}"))
+                    val fFile = fObj.optString("file", fObj.optString("path", ""))
+                    val fSample = fObj.optString("sample", fObj.optString("sampleText", if (isUrdu) "جمیل نوری نستعلیق خطاطی" else fName))
+                    val params = mutableMapOf<String, Any>(
+                      "language" to lang,
+                      "category" to lang,
+                      "sample" to fSample,
+                      "fontFamily" to fObj.optString("fontFamily", fName)
+                    )
+                    addItem(
+                      PluginItemManifest(
+                        id = fId,
+                        name = fName,
+                        description = fObj.optString("description", "$lang Font Option"),
+                        preview = fObj.optString("preview", ""),
+                        file = fFile,
+                        emoji = fObj.optString("emoji", defaultEmoji),
+                        categoryKey = "font",
+                        parameters = params
+                      )
+                    )
+                  }
+                }
+              }
+            } catch (e: Exception) {
+              Log.w(TAG, "Error parsing font json file: ${file.path}", e)
+            }
+          } else if (file.extension.equals("ttf", ignoreCase = true) || file.extension.equals("otf", ignoreCase = true)) {
+            val relPath = file.relativeTo(rootDir).path
+            val fontId = "${id}_${file.nameWithoutExtension.lowercase().replace(Regex("[^a-z0-9_]"), "_")}"
+            val isUrdu = file.path.contains("urdu", ignoreCase = true) || file.name.contains("urdu", ignoreCase = true) || file.name.contains("nastaliq", ignoreCase = true)
+            val lang = if (isUrdu) "Urdu" else "English"
+            val fontTitle = file.nameWithoutExtension.replace('_', ' ').split(' ')
+              .joinToString(" ") { it.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.titlecase() else ch.toString() } }
+            
+            addItem(
+              PluginItemManifest(
+                id = fontId,
+                name = fontTitle,
+                description = "$lang Typography Font File",
+                preview = "",
+                file = relPath,
+                emoji = if (isUrdu) "🇵🇰" else "🔤",
+                categoryKey = "font",
+                parameters = mapOf(
+                  "language" to lang,
+                  "category" to lang,
+                  "sample" to if (isUrdu) "اردو خطاطی ویڈیو ٹیکسٹ" else fontTitle,
+                  "fontFamily" to file.nameWithoutExtension
+                )
+              )
+            )
+          }
+        }
+      }
+    }
+
+    // C. Scan templates/ directory for template JSON files (captions, quotes, business, youtube, islamic, reels)
+    val templatesDir = File(rootDir, "templates")
+    if (templatesDir.exists() && templatesDir.isDirectory) {
+      templatesDir.walkTopDown().forEach { file ->
+        if (file.isFile && file.extension.equals("json", ignoreCase = true)) {
+          try {
+            val tplText = file.readText().trim()
+            if (tplText.startsWith("{")) {
+              val tplObj = JSONObject(tplText)
+              val tplId = tplObj.optString("id", "${id}_${file.nameWithoutExtension}")
+              val parentFolder = file.parentFile?.name?.lowercase() ?: ""
+              
+              val tplCategory = when {
+                tplObj.optString("category").isNotBlank() -> tplObj.optString("category")
+                parentFolder.contains("islamic") -> "Islamic"
+                parentFolder.contains("quote") -> "Quotes"
+                parentFolder.contains("caption") -> "Captions"
+                parentFolder.contains("business") -> "Business"
+                parentFolder.contains("youtube") -> "YouTube"
+                parentFolder.contains("reel") -> "Reels"
+                else -> "Text Templates"
+              }
+
+              val tplEmoji = when {
+                tplObj.optString("emoji").isNotBlank() -> tplObj.optString("emoji")
+                tplCategory.equals("Islamic", ignoreCase = true) -> "🕌"
+                tplCategory.equals("Business", ignoreCase = true) -> "💼"
+                tplCategory.equals("YouTube", ignoreCase = true) -> "▶️"
+                tplCategory.equals("Reels", ignoreCase = true) -> "📱"
+                tplCategory.equals("Quotes", ignoreCase = true) -> "📜"
+                tplCategory.equals("Captions", ignoreCase = true) -> "💬"
+                else -> "✨"
+              }
+
+              val defaultName = file.nameWithoutExtension.replace('_', ' ').split(' ')
+                .joinToString(" ") { it.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.titlecase() else ch.toString() } }
+              val tplName = tplObj.optString("name", tplObj.optString("title", defaultName))
+
+              val params = mutableMapOf<String, Any>()
+              val keys = tplObj.keys()
+              while (keys.hasNext()) {
+                val k = keys.next()
+                val v = tplObj.get(k)
+                if (v is JSONArray) {
+                  val l = mutableListOf<Any>()
+                  for (idx in 0 until v.length()) l.add(v.get(idx))
+                  params[k] = l
+                } else {
+                  params[k] = v
+                }
+              }
+
+              params["category"] = tplCategory
+              if (!params.containsKey("sampleText")) {
+                params["sampleText"] = tplObj.optString("text", tplObj.optString("sample", tplName))
+              }
+              if (!params.containsKey("fontFamily")) {
+                params["fontFamily"] = if (tplCategory.equals("Islamic", ignoreCase = true)) "jameel_nastaliq" else "Sans-Serif"
+              }
+
+              addItem(
+                PluginItemManifest(
+                  id = tplId,
+                  name = tplName,
+                  description = tplObj.optString("description", "$tplCategory Video Template"),
+                  preview = tplObj.optString("preview", ""),
+                  file = file.relativeTo(rootDir).path,
+                  emoji = tplEmoji,
+                  categoryKey = "text_template",
+                  parameters = params
+                )
+              )
+            }
+          } catch (e: Exception) {
+            Log.w(TAG, "Error parsing template json file: ${file.path}", e)
+          }
+        }
+      }
+    }
+
+    // Determine finalized plugin category/type
+    val finalType = when {
+      rawType.isNotBlank() -> rawType
+      discoveredItems.any { it.categoryKey == "font" } && discoveredItems.any { it.categoryKey == "text_template" } -> "templates_and_fonts"
+      discoveredItems.any { it.categoryKey == "font" } -> "font"
+      discoveredItems.any { it.categoryKey == "text_template" } -> "text_template"
+      discoveredItems.any { it.categoryKey == "filter" } -> "filter"
+      discoveredItems.any { it.categoryKey == "sticker" } -> "sticker"
+      discoveredItems.any { it.categoryKey == "audio" } -> "audio"
+      else -> "other"
+    }
+
+    return PluginManifest(
+      id = id,
+      name = name,
+      version = version,
+      author = author,
+      description = description,
+      type = finalType,
+      minimumAppVersion = minVersion,
+      icon = icon,
+      items = discoveredItems
+    )
+  }
+
+  private fun parseItemJsonObject(itemObj: JSONObject, pluginId: String, index: Int, defaultCategory: String): PluginItemManifest {
+    val itemId = itemObj.optString("id", "${pluginId}_item_$index")
+    val itemName = itemObj.optString("name", itemObj.optString("title", "Asset $index"))
+    val itemDesc = itemObj.optString("description", "")
+    val itemPreview = itemObj.optString("preview", "")
+    val itemFile = itemObj.optString("file", itemObj.optString("path", ""))
+    val itemEmoji = itemObj.optString("emoji", "🎬")
+    val itemCatKey = itemObj.optString("categoryKey", itemObj.optString("category", defaultCategory))
+
+    val paramsMap = mutableMapOf<String, Any>()
+    val paramsObj = itemObj.optJSONObject("parameters")
+    if (paramsObj != null) {
+      val keys = paramsObj.keys()
+      while (keys.hasNext()) {
+        val k = keys.next()
+        val v = paramsObj.get(k)
+        if (v is JSONArray) {
+          val list = mutableListOf<Any>()
+          for (j in 0 until v.length()) {
+            list.add(v.get(j))
+          }
+          paramsMap[k] = list
+        } else {
+          paramsMap[k] = v
+        }
+      }
+    } else {
+      val keys = itemObj.keys()
+      while (keys.hasNext()) {
+        val k = keys.next()
+        if (k !in listOf("id", "name", "description", "preview", "file", "emoji", "categoryKey", "category")) {
+          val v = itemObj.get(k)
+          if (v is JSONArray) {
+            val list = mutableListOf<Any>()
+            for (j in 0 until v.length()) list.add(v.get(j))
+            paramsMap[k] = list
+          } else {
+            paramsMap[k] = v
+          }
+        }
+      }
+    }
+
+    return PluginItemManifest(
+      id = itemId,
+      name = itemName,
+      description = itemDesc,
+      preview = itemPreview,
+      file = itemFile,
+      emoji = itemEmoji,
+      categoryKey = itemCatKey,
+      parameters = paramsMap
+    )
+  }
+
   private fun parseManifestJson(jsonStr: String): PluginManifest? {
     return try {
       val obj = JSONObject(jsonStr)
-      val id = obj.optString("id", "")
-      val name = obj.optString("name", "")
+      val id = obj.optString("id", "plugin_${System.currentTimeMillis()}")
+      val name = obj.optString("name", "Plugin Extension")
       val version = obj.optString("version", "1.0.0")
-      val author = obj.optString("author", "Unknown Creator")
+      val author = obj.optString("author", "Community Creator")
       val description = obj.optString("description", "")
       val type = obj.optString("type", obj.optString("category", "other"))
       val minVersion = obj.optString("minimumAppVersion", "1.0.0")
@@ -310,43 +694,7 @@ object PluginManager {
       if (itemsArray != null) {
         for (i in 0 until itemsArray.length()) {
           val itemObj = itemsArray.optJSONObject(i) ?: continue
-          val itemId = itemObj.optString("id", "${id}_item_$i")
-          val itemName = itemObj.optString("name", "Asset $i")
-          val itemDesc = itemObj.optString("description", "")
-          val itemPreview = itemObj.optString("preview", "")
-          val itemFile = itemObj.optString("file", itemObj.optString("path", ""))
-          val itemEmoji = itemObj.optString("emoji", "🎬")
-
-          val paramsMap = mutableMapOf<String, Any>()
-          val paramsObj = itemObj.optJSONObject("parameters")
-          if (paramsObj != null) {
-            val keys = paramsObj.keys()
-            while (keys.hasNext()) {
-              val k = keys.next()
-              val v = paramsObj.get(k)
-              if (v is JSONArray) {
-                val list = mutableListOf<Any>()
-                for (j in 0 until v.length()) {
-                  list.add(v.get(j))
-                }
-                paramsMap[k] = list
-              } else {
-                paramsMap[k] = v
-              }
-            }
-          }
-
-          itemsList.add(
-            PluginItemManifest(
-              id = itemId,
-              name = itemName,
-              description = itemDesc,
-              preview = itemPreview,
-              file = itemFile,
-              emoji = itemEmoji,
-              parameters = paramsMap
-            )
-          )
+          itemsList.add(parseItemJsonObject(itemObj, id, i, type))
         }
       }
 
@@ -393,6 +741,7 @@ object PluginManager {
               put("preview", item.preview)
               put("file", item.file)
               put("emoji", item.emoji)
+              put("categoryKey", item.categoryKey)
               
               if (item.parameters.isNotEmpty()) {
                 val pObj = JSONObject()

@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -432,9 +433,9 @@ fun HomeScreen(
   if (showNewProjectDialog) {
     NewProjectDialog(
       onDismiss = { showNewProjectDialog = false },
-      onCreate = { name, aspect, res, fps, sampleClips ->
+      onCreate = { name, aspect, res, fps ->
         showNewProjectDialog = false
-        viewModel.createNewProject(name, aspect, res, fps, sampleClips)
+        viewModel.createNewProject(name, aspect, res, fps, emptyList())
       }
     )
   }
@@ -696,13 +697,12 @@ fun ProjectItemCard(
 @Composable
 fun NewProjectDialog(
   onDismiss: () -> Unit,
-  onCreate: (name: String, aspect: AspectRatio, res: Resolution, fps: FrameRate, initialClips: List<VideoClip>) -> Unit
+  onCreate: (name: String, aspect: AspectRatio, res: Resolution, fps: FrameRate) -> Unit
 ) {
   var projectName by remember { mutableStateOf("") }
   var selectedAspect by remember { mutableStateOf(AspectRatio.RATIO_9_16) }
   var selectedResolution by remember { mutableStateOf(Resolution.RES_1080P) }
   var selectedFps by remember { mutableStateOf(FrameRate.FPS_30) }
-  var includeSampleMedia by remember { mutableStateOf(true) }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -797,44 +797,48 @@ fun NewProjectDialog(
           }
         }
 
-        // Sample Media Switch
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+        // Clean Blank Timeline Guarantee Note
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = StudioSurface,
+          border = BorderStroke(1.dp, StudioBorder),
+          modifier = Modifier.fillMaxWidth()
         ) {
-          Column {
-            Text("Include Starter Footage", style = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, fontWeight = FontWeight.Medium))
-            Text("Pre-loads starter clips to edit immediately", style = MaterialTheme.typography.bodySmall.copy(color = TextTertiary))
+          Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.CheckCircle,
+              contentDescription = null,
+              tint = CyanAccent,
+              modifier = Modifier.size(18.dp)
+            )
+            Column {
+              Text(
+                text = "Clean Blank Timeline",
+                style = MaterialTheme.typography.labelMedium.copy(
+                  color = TextPrimary,
+                  fontWeight = FontWeight.Bold
+                )
+              )
+              Text(
+                text = "Ready for your own video clips, audio tracks, and edits.",
+                style = MaterialTheme.typography.bodySmall.copy(
+                  color = TextSecondary,
+                  fontSize = 11.5.sp
+                )
+              )
+            }
           }
-          Switch(
-            checked = includeSampleMedia,
-            onCheckedChange = { includeSampleMedia = it },
-            colors = SwitchDefaults.colors(checkedThumbColor = CyanAccent, checkedTrackColor = StudioBorder)
-          )
         }
       }
     },
     confirmButton = {
       Button(
         onClick = {
-          val clips = if (includeSampleMedia) {
-            listOf(
-              VideoClip(
-                name = "Opening Scene",
-                durationMs = 4000L,
-                isVideo = true
-              ),
-              VideoClip(
-                name = "Action Scene",
-                timelineStartMs = 4000L,
-                durationMs = 4500L,
-                isVideo = true,
-                speed = 1.0f
-              )
-            )
-          } else emptyList()
-          onCreate(projectName, selectedAspect, selectedResolution, selectedFps, clips)
+          onCreate(projectName, selectedAspect, selectedResolution, selectedFps)
         },
         colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
         shape = RoundedCornerShape(20.dp)

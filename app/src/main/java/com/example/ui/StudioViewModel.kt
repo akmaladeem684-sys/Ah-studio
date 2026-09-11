@@ -113,15 +113,29 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
   val settings: StateFlow<UserSettings> = StudioPreferencesManager.settings
 
-  // Navigation State - timeline interface as primary workspace
-  private val _currentScreen = MutableStateFlow(AppScreen.EDITOR)
+  // Navigation State - Home page as the initial opening screen
+  private val _currentScreen = MutableStateFlow(AppScreen.HOME)
   val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
+  // App Startup Loading State (Editing tools animation during 3-5s launch)
+  private val _isStartupLoading = MutableStateFlow(true)
+  val isStartupLoading: StateFlow<Boolean> = _isStartupLoading.asStateFlow()
+
+  private val _startupProgress = MutableStateFlow(0.08f)
+  val startupProgress: StateFlow<Float> = _startupProgress.asStateFlow()
+
+  private val _startupStatus = MutableStateFlow("Initializing Timeline Engine...")
+  val startupStatus: StateFlow<String> = _startupStatus.asStateFlow()
+
+  fun finishStartupLoading() {
+    _isStartupLoading.value = false
+  }
+
   // Active Project State
-  private val _activeProjectId = MutableStateFlow("demo_project_cinema")
+  private val _activeProjectId = MutableStateFlow("")
   val activeProjectId: StateFlow<String> = _activeProjectId.asStateFlow()
 
-  private val _activeProjectName = MutableStateFlow("Cinematic Travel Reel")
+  private val _activeProjectName = MutableStateFlow("New Project")
   val activeProjectName: StateFlow<String> = _activeProjectName.asStateFlow()
 
   private val _activeAspectRatio = MutableStateFlow(AspectRatio.RATIO_9_16)
@@ -171,136 +185,32 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // 0. Initialize Plugin System Registry
     com.example.engine.plugin.PluginManager.initialize(application)
 
-    // 1. Immediately seed default cinematic timeline so timeline UI has full non-null content on frame 1
-    val defaultTimeline = Timeline(
-      videoClips = listOf(
-        VideoClip(
-          id = "sample_clip_1",
-          uri = "sample://nature_stream",
-          name = "Cinematic Mountain Stream",
-          isVideo = true,
-          timelineStartMs = 0L,
-          durationMs = 4500L,
-          sourceStartMs = 0L,
-          sourceEndMs = 4500L,
-          speed = 1.0f,
-          volume = 1.0f
-        ),
-        VideoClip(
-          id = "sample_clip_2",
-          uri = "sample://urban_sunset",
-          name = "Golden Hour Skyline",
-          isVideo = true,
-          timelineStartMs = 4500L,
-          durationMs = 5500L,
-          sourceStartMs = 0L,
-          sourceEndMs = 5500L,
-          speed = 1.0f,
-          volume = 1.0f
-        ),
-        VideoClip(
-          id = "sample_clip_3",
-          uri = "sample://cyber_neon",
-          name = "Cyberpunk Night Drive",
-          isVideo = true,
-          timelineStartMs = 10000L,
-          durationMs = 5000L,
-          sourceStartMs = 0L,
-          sourceEndMs = 5000L,
-          speed = 1.0f,
-          volume = 0.9f
-        )
-      ),
-      audioClips = listOf(
-        AudioClip(
-          id = "sample_audio_1",
-          uri = "internal://lofi_chill_beat",
-          title = "Chill Lofi Dreams (Original Mix)",
-          timelineStartMs = 0L,
-          durationMs = 15000L,
-          volume = 0.85f,
-          fadeInMs = 800L,
-          fadeOutMs = 1200L,
-          waveformData = listOf(0.2f, 0.4f, 0.6f, 0.9f, 0.7f, 0.5f, 0.8f, 1.0f, 0.6f, 0.4f, 0.7f, 0.8f, 0.5f, 0.3f, 0.6f, 0.7f, 0.4f, 0.2f)
-        )
-      ),
-      textClips = listOf(
-        TextClip(
-          id = "sample_text_1",
-          text = "CINEMATIC JOURNEY",
-          timelineStartMs = 500L,
-          durationMs = 3500L,
-          fontFamily = "Sans-Serif",
-          fontSizeSp = 28f,
-          fontWeight = 900,
-          textColor = 0xFFFFFFFF,
-          hasGradient = true,
-          gradientColorStart = 0xFF00E5FF,
-          gradientColorEnd = 0xFF8B5CF6,
-          strokeWidth = 2f,
-          strokeColor = 0xAA000000,
-          posY = -0.2f,
-          animationType = "Pop"
-        ),
-        TextClip(
-          id = "sample_text_2",
-          text = "Shot on AH Video Studio Pro",
-          timelineStartMs = 4600L,
-          durationMs = 4000L,
-          fontFamily = "Default",
-          fontSizeSp = 18f,
-          textColor = 0xFFE2E8F0,
-          posY = 0.35f,
-          animationType = "Fade"
-        )
-      ),
-      stickerClips = listOf(
-        StickerClip(
-          id = "sample_sticker_1",
-          emojiOrAsset = "✨",
-          timelineStartMs = 1000L,
-          durationMs = 3000L,
-          posX = 0.35f,
-          posY = -0.3f,
-          scale = 1.2f
-        )
-      ),
-      effectClips = listOf(
-        EffectClip(
-          id = "sample_effect_1",
-          effectType = EffectType.GLOW,
-          timelineStartMs = 4000L,
-          durationMs = 2000L,
-          intensity = 0.75f
-        )
-      ),
-      transitions = listOf(
-        Transition(
-          id = "sample_trans_1",
-          clipIndexBefore = 0,
-          type = TransitionType.DISSOLVE,
-          durationMs = 600L
-        )
-      ),
-      adjustments = VideoAdjustments(
-        brightness = 0.05f,
-        contrast = 1.1f,
-        saturation = 1.15f,
-        vignette = 0.15f
-      ),
-      filter = FilterSettings(
-        type = FilterType.CINEMATIC,
-        intensity = 0.85f
-      )
-    )
-    timelineEngine.loadTimeline(defaultTimeline)
+    // 1. Initialize with a clean, blank timeline
+    timelineEngine.loadTimeline(Timeline())
 
+    // App Startup Loading Sequence (3.2 seconds showcasing editing tools preparation, then auto-dismiss)
     viewModelScope.launch {
-      try {
-        repository.createSampleProjectIfEmpty()
-      } catch (e: Exception) {
-        android.util.Log.e("StudioViewModel", "Error creating sample project", e)
+      val phases = listOf(
+        Pair(0.22f, "Initializing Timeline & Multi-Track Engine..."),
+        Pair(0.48f, "Loading Precision Trimming & Razor Cut Tools..."),
+        Pair(0.72f, "Synthesizing Audio Waveforms & Keyframe Buffers..."),
+        Pair(0.92f, "Calibrating 4K 60fps Preview & Color Shaders..."),
+        Pair(1.00f, "Studio Ready • Opening Workspace...")
+      )
+
+      for (phase in phases) {
+        val targetProgress = phase.first
+        _startupStatus.value = phase.second
+        val startProgress = _startupProgress.value
+        val steps = 10
+        for (s in 1..steps) {
+          delay(45L)
+          _startupProgress.value = startProgress + (targetProgress - startProgress) * (s.toFloat() / steps)
+        }
+        delay(120L)
       }
+      delay(250L)
+      _isStartupLoading.value = false
     }
 
     // Sync Timeline changes with Playback Engine, mark unsaved, and persist recovery snapshot
@@ -380,20 +290,18 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     _activeSampleRate.value = 48000
     _activeCanvasColor.value = 0xFF000000
 
-    val initialTimeline = if (initialMediaClips.isNotEmpty()) {
-      Timeline(videoClips = initialMediaClips)
-    } else {
-      // Create a default initial clip to make the project immediately responsive and interactive
-      Timeline(
-        videoClips = listOf(
-          VideoClip(
-            name = "Scene 1",
-            durationMs = 4000L,
-            isVideo = true
-          )
-        )
-      )
-    }
+    // Timeline is completely empty: no video clips, text, audio clips, overlays, stickers, or any other media
+    val initialTimeline = Timeline(
+      videoClips = initialMediaClips,
+      overlayClips = emptyList(),
+      audioClips = emptyList(),
+      textClips = emptyList(),
+      stickerClips = emptyList(),
+      effectClips = emptyList(),
+      transitions = emptyList(),
+      adjustments = VideoAdjustments(),
+      filter = FilterSettings()
+    )
 
     timelineEngine.loadTimeline(initialTimeline)
     saveCurrentProject()

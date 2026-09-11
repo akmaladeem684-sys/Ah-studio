@@ -1250,16 +1250,25 @@ class TimelineEngine {
         recordHistory()
         val firstDur = playhead - clip.timelineStartMs
         val secondDur = clip.durationMs - firstDur
+
+        // Automatic crossfade boundaries (150ms) to avoid pops/clicks at split boundary
+        val clip1FadeOut = if (clip.fadeOutMs > 0L) minOf(clip.fadeOutMs, firstDur / 2) else 150L.coerceAtMost(firstDur / 2)
+        val clip2FadeIn = if (clip.fadeInMs > 0L) minOf(clip.fadeInMs, secondDur / 2) else 150L.coerceAtMost(secondDur / 2)
+
         val clip1 = clip.copy(
           durationMs = firstDur,
-          sourceEndMs = clip.sourceStartMs + (firstDur * clip.speed).toLong()
+          sourceEndMs = clip.sourceStartMs + (firstDur * clip.speed).toLong(),
+          fadeOutMs = clip1FadeOut,
+          keyframes = clip.keyframes.filter { it.timeMs <= firstDur }
         )
         val clip2 = clip.copy(
           id = UUID.randomUUID().toString(),
           timelineStartMs = playhead,
           durationMs = secondDur,
           sourceStartMs = clip1.sourceEndMs,
-          sourceEndMs = clip.sourceEndMs
+          sourceEndMs = clip.sourceEndMs,
+          fadeInMs = clip2FadeIn,
+          keyframes = clip.keyframes.filter { it.timeMs >= firstDur }.map { it.copy(timeMs = it.timeMs - firstDur) }
         )
         val list = _timeline.value.audioClips.toMutableList()
         list[index] = clip1
@@ -2275,14 +2284,19 @@ class TimelineEngine {
     title: String,
     durationMs: Long = 8000L,
     uri: String = "internal://$title",
-    waveformData: List<Float>? = null
+    waveformData: List<Float>? = null,
+    fadeInMs: Long = 400L,
+    fadeOutMs: Long = 600L
   ) {
     recordHistory()
+    val maxFade = durationMs / 2
     val newAudio = AudioClip(
       title = title,
       uri = uri,
       timelineStartMs = _currentPositionMs.value,
       durationMs = durationMs,
+      fadeInMs = fadeInMs.coerceIn(0L, maxFade),
+      fadeOutMs = fadeOutMs.coerceIn(0L, maxFade),
       waveformData = waveformData ?: com.example.engine.audio.SoundEffectsCatalog.generateWaveform(title)
     )
     val list = _timeline.value.audioClips.toMutableList()
@@ -2315,6 +2329,14 @@ class TimelineEngine {
     list.add(newText)
     _timeline.value = _timeline.value.copy(textClips = list)
     _selectedElement.value = SelectedTrackElement.Text(newText.id)
+  }
+
+  fun addTextClipObject(newClip: TextClip) {
+    recordHistory()
+    val list = _timeline.value.textClips.toMutableList()
+    list.add(newClip)
+    _timeline.value = _timeline.value.copy(textClips = list)
+    _selectedElement.value = SelectedTrackElement.Text(newClip.id)
   }
 
   fun updateTextClip(updated: TextClip) {
@@ -3308,6 +3330,21 @@ class TimelineEngine {
       if (clip.id == clipId) {
         clip.copy(keyframes = emptyList(), fadeInMs = 0L, fadeOutMs = 0L)
       } else clip
+    }
+    _timeline.value = _timeline.value.copy(audioClips = list)
+  }
+
+  /**
+   * Applies automatic fade-in and fade-out transitions to all audio tracks in the project.
+   */
+  fun applyAutoFadesToAllAudioClips(fadeInMs: Long = 400L, fadeOutMs: Long = 600L) {
+    recordHistory()
+    val list = _timeline.value.audioClips.map { clip ->
+      val maxFade = clip.durationMs / 2
+      clip.copy(
+        fadeInMs = fadeInMs.coerceIn(0L, maxFade),
+        fadeOutMs = fadeOutMs.coerceIn(0L, maxFade)
+      )
     }
     _timeline.value = _timeline.value.copy(audioClips = list)
   }

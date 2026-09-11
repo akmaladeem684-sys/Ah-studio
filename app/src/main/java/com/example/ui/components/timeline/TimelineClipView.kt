@@ -242,17 +242,16 @@ fun TimelineClipView(
         for (i in 0..steps) {
           val frac = i.toFloat() / steps.toFloat()
           val sampleTimeMs = (frac * durationMs).toLong()
-          val vol = if (keyframes.isNotEmpty()) {
+          var vol = if (keyframes.isNotEmpty()) {
             KeyframeInterpolator.interpolateVolume(keyframes, sampleTimeMs, baseVolume)
           } else {
-            var v = baseVolume
-            if (fadeInMs > 0L && sampleTimeMs < fadeInMs) {
-              v *= (sampleTimeMs.toFloat() / fadeInMs.toFloat()).coerceIn(0f, 1f)
-            }
-            if (fadeOutMs > 0L && (durationMs - sampleTimeMs) < fadeOutMs) {
-              v *= ((durationMs - sampleTimeMs).toFloat() / fadeOutMs.toFloat()).coerceIn(0f, 1f)
-            }
-            v
+            baseVolume
+          }
+          if (fadeInMs > 0L && sampleTimeMs < fadeInMs) {
+            vol *= (sampleTimeMs.toFloat() / fadeInMs.toFloat()).coerceIn(0f, 1f)
+          }
+          if (fadeOutMs > 0L && (durationMs - sampleTimeMs) < fadeOutMs) {
+            vol *= ((durationMs - sampleTimeMs).toFloat() / fadeOutMs.toFloat()).coerceIn(0f, 1f)
           }
 
           val px = frac * w

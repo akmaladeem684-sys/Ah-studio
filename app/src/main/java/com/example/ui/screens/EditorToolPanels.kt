@@ -46,6 +46,7 @@ import com.example.engine.audio.SoundEffectsCatalog
 import com.example.ui.StudioViewModel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.text.TextStudioPanel
+import com.example.ui.components.timeline.AudioVolumeEnvelopeGraph
 import com.example.ui.theme.*
 import java.io.File
 
@@ -720,7 +721,8 @@ fun FiltersToolPanel(
     }
 
     // Filter Cards Row
-    val pluginFilters = remember {
+    val installedPlugins by viewModel.installedPlugins.collectAsState()
+    val pluginFilters = remember(installedPlugins) {
       com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
         com.example.domain.plugin.PluginCategory.FILTER
       )
@@ -1168,14 +1170,165 @@ fun TextEditorPanel(
 }
 
 @Composable
+fun AudioFadeControlsCard(
+  audioClip: AudioClip,
+  onFadeInChanged: (Long) -> Unit,
+  onFadeOutChanged: (Long) -> Unit,
+  onAddKeyframeAtPlayhead: () -> Unit,
+  onResetEnvelope: () -> Unit,
+  onApplyAutoFadesAll: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .background(StudioSurface, RoundedCornerShape(8.dp))
+      .padding(10.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    // Fade-In Section
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.Default.TrendingUp, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+        Text("Fade-In Duration", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
+      }
+      Text("${(audioClip.fadeInMs / 1000f).formatSec()}s", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
+    }
+
+    Slider(
+      value = audioClip.fadeInMs.toFloat(),
+      onValueChange = { onFadeInChanged(it.toLong()) },
+      valueRange = 0f..(audioClip.durationMs / 2f).coerceAtLeast(100f),
+      colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent, inactiveTrackColor = StudioBorder),
+      modifier = Modifier.height(24.dp)
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      listOf(0L to "Off", 300L to "0.3s", 500L to "0.5s", 1000L to "1.0s", 2000L to "2.0s").forEach { (ms, label) ->
+        val isSelected = kotlin.math.abs(audioClip.fadeInMs - ms) < 50L
+        Surface(
+          onClick = { onFadeInChanged(ms) },
+          shape = RoundedCornerShape(4.dp),
+          color = if (isSelected) CyanAccent else StudioSurfaceVariant,
+          border = BorderStroke(1.dp, if (isSelected) CyanAccent else StudioBorder)
+        ) {
+          Text(
+            label,
+            style = MaterialTheme.typography.labelSmall.copy(color = if (isSelected) Color.Black else TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+          )
+        }
+      }
+    }
+
+    HorizontalDivider(color = StudioBorder, thickness = 0.5.dp)
+
+    // Fade-Out Section
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.Default.TrendingDown, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(16.dp))
+        Text("Fade-Out Duration", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
+      }
+      Text("${(audioClip.fadeOutMs / 1000f).formatSec()}s", style = MaterialTheme.typography.labelSmall.copy(color = PurpleAccent, fontWeight = FontWeight.Bold))
+    }
+
+    Slider(
+      value = audioClip.fadeOutMs.toFloat(),
+      onValueChange = { onFadeOutChanged(it.toLong()) },
+      valueRange = 0f..(audioClip.durationMs / 2f).coerceAtLeast(100f),
+      colors = SliderDefaults.colors(thumbColor = PurpleAccent, activeTrackColor = PurpleAccent, inactiveTrackColor = StudioBorder),
+      modifier = Modifier.height(24.dp)
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      listOf(0L to "Off", 300L to "0.3s", 500L to "0.5s", 1000L to "1.0s", 2000L to "2.0s").forEach { (ms, label) ->
+        val isSelected = kotlin.math.abs(audioClip.fadeOutMs - ms) < 50L
+        Surface(
+          onClick = { onFadeOutChanged(ms) },
+          shape = RoundedCornerShape(4.dp),
+          color = if (isSelected) PurpleAccent else StudioSurfaceVariant,
+          border = BorderStroke(1.dp, if (isSelected) PurpleAccent else StudioBorder)
+        ) {
+          Text(
+            label,
+            style = MaterialTheme.typography.labelSmall.copy(color = if (isSelected) Color.White else TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+          )
+        }
+      }
+    }
+
+    HorizontalDivider(color = StudioBorder, thickness = 0.5.dp)
+
+    // Keyframing Quick Buttons Row
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Button(
+        onClick = onAddKeyframeAtPlayhead,
+        colors = ButtonDefaults.buttonColors(containerColor = AmberAccent, contentColor = Color.Black),
+        shape = RoundedCornerShape(6.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier.height(32.dp)
+      ) {
+        Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("+ Keyframe at Playhead", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      }
+
+      OutlinedButton(
+        onClick = onApplyAutoFadesAll,
+        shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(1.dp, GreenAccent),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        modifier = Modifier.height(32.dp)
+      ) {
+        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = GreenAccent, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Auto-Fade All Tracks", fontSize = 10.sp, color = GreenAccent, fontWeight = FontWeight.Bold)
+      }
+
+      IconButton(
+        onClick = onResetEnvelope,
+        modifier = Modifier.size(32.dp)
+      ) {
+        Icon(Icons.Default.RestartAlt, contentDescription = "Reset Keyframes", tint = TextSecondary, modifier = Modifier.size(18.dp))
+      }
+    }
+  }
+}
+
+private fun Float.formatSec(): String {
+  return String.format(java.util.Locale.US, "%.1f", this)
+}
+
+@Composable
 fun AudioToolPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  var selectedTab by remember { mutableStateOf("Import") } // "Import", "Voiceover", "SFX", "Music"
+  var selectedTab by remember { mutableStateOf("Fades & Keyframes") } // "Fades & Keyframes", "Import", "Voiceover", "SFX", "Music"
   val isRecording by viewModel.audioEngine.isRecording.collectAsState()
   val recordDuration by viewModel.audioEngine.recordingDurationMs.collectAsState()
+  val timeline by viewModel.timelineEngine.timeline.collectAsState()
+  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
 
   // Mic permission launcher for voice recording
   val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -1210,7 +1363,7 @@ fun AudioToolPanel(
           uri = uri.toString(),
           waveformData = waveform
         )
-        Toast.makeText(context, "Imported \"$fileName\" to audio track!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Imported \"$fileName\" with automatic fade transitions!", Toast.LENGTH_SHORT).show()
       } catch (e: Exception) {
         Toast.makeText(context, "Failed to import audio: ${e.message}", Toast.LENGTH_SHORT).show()
       }
@@ -1246,6 +1399,13 @@ fun AudioToolPanel(
       horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
       FilterChip(
+        selected = selectedTab == "Fades & Keyframes",
+        onClick = { selectedTab = "Fades & Keyframes" },
+        label = { Text("Fades & Keyframes") },
+        leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp)) },
+        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AmberAccent, selectedLabelColor = Color.Black)
+      )
+      FilterChip(
         selected = selectedTab == "Import",
         onClick = { selectedTab = "Import" },
         label = { Text("Import Audio") },
@@ -1276,6 +1436,122 @@ fun AudioToolPanel(
     }
 
     when (selectedTab) {
+      "Fades & Keyframes" -> {
+        val selectedAudioClip = timeline.audioClips.find { clip ->
+          (selectedElement as? SelectedTrackElement.Audio)?.clipId == clip.id
+        } ?: timeline.audioClips.firstOrNull()
+
+        if (selectedAudioClip != null) {
+          val playheadMs by viewModel.timelineEngine.currentPositionMs.collectAsState()
+
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(StudioSurfaceVariant)
+              .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Audiotrack, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(18.dp))
+                Text(
+                  text = selectedAudioClip.title.ifBlank { "Audio Track" },
+                  style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+                )
+              }
+            }
+
+            // Interactive Volume Envelope Graph
+            AudioVolumeEnvelopeGraph(
+              audioClip = selectedAudioClip,
+              clipDurationMs = selectedAudioClip.durationMs,
+              currentPlayheadMs = playheadMs,
+              showControlsHeader = true,
+              onAddKeyframe = { relTime, vol ->
+                viewModel.timelineEngine.addAudioVolumeKeyframe(selectedAudioClip.id, relTime, vol)
+              },
+              onUpdateKeyframe = { kfId, newTime, newVol ->
+                viewModel.timelineEngine.updateAudioVolumeKeyframe(selectedAudioClip.id, kfId, newTime, newVol)
+              },
+              onDeleteKeyframe = { kfId ->
+                viewModel.timelineEngine.deleteAudioVolumeKeyframe(selectedAudioClip.id, kfId)
+              },
+              onFadeInChanged = { newFadeIn ->
+                viewModel.timelineEngine.setAudioFade(selectedAudioClip.id, newFadeIn, selectedAudioClip.fadeOutMs)
+              },
+              onFadeOutChanged = { newFadeOut ->
+                viewModel.timelineEngine.setAudioFade(selectedAudioClip.id, selectedAudioClip.fadeInMs, newFadeOut)
+              },
+              onApplyPresetFade = { presetType ->
+                when (presetType) {
+                  "fadeIn" -> viewModel.timelineEngine.setAudioFade(selectedAudioClip.id, 1000L, selectedAudioClip.fadeOutMs)
+                  "fadeOut" -> viewModel.timelineEngine.setAudioFade(selectedAudioClip.id, selectedAudioClip.fadeInMs, 1000L)
+                  else -> viewModel.timelineEngine.applyAudioFadeKeyframes(selectedAudioClip.id)
+                }
+              },
+              onResetEnvelope = {
+                viewModel.timelineEngine.resetAudioVolumeEnvelope(selectedAudioClip.id)
+              },
+              onBaseVolumeChanged = { newVol ->
+                viewModel.timelineEngine.setAudioClipBaseVolume(selectedAudioClip.id, newVol)
+              },
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(130.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, StudioBorder, RoundedCornerShape(8.dp))
+            )
+
+            // Fade Sliders & Quick Presets
+            AudioFadeControlsCard(
+              audioClip = selectedAudioClip,
+              onFadeInChanged = { fadeIn ->
+                viewModel.timelineEngine.setAudioFade(selectedAudioClip.id, fadeIn, selectedAudioClip.fadeOutMs)
+              },
+              onFadeOutChanged = { fadeOut ->
+                viewModel.timelineEngine.setAudioFade(selectedAudioClip.id, selectedAudioClip.fadeInMs, fadeOut)
+              },
+              onAddKeyframeAtPlayhead = {
+                val relTime = (playheadMs - selectedAudioClip.timelineStartMs).coerceIn(0L, selectedAudioClip.durationMs)
+                val currentVol = com.example.engine.KeyframeInterpolator.interpolateVolume(selectedAudioClip, relTime)
+                viewModel.timelineEngine.addAudioVolumeKeyframe(selectedAudioClip.id, relTime, currentVol)
+              },
+              onResetEnvelope = {
+                viewModel.timelineEngine.resetAudioVolumeEnvelope(selectedAudioClip.id)
+              },
+              onApplyAutoFadesAll = {
+                viewModel.timelineEngine.applyAutoFadesToAllAudioClips()
+              }
+            )
+          }
+        } else {
+          // Empty State if no audio clip
+          Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant)
+          ) {
+            Column(
+              modifier = Modifier.padding(16.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Text("No Audio Clips on Timeline", style = MaterialTheme.typography.titleSmall.copy(color = TextPrimary))
+              Text("Import audio or record a voiceover to edit volume keyframes and fade transitions.", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, textAlign = TextAlign.Center))
+              Button(
+                onClick = { viewModel.timelineEngine.ensureAudioTrackExists() },
+                colors = ButtonDefaults.buttonColors(containerColor = AmberAccent, contentColor = Color.Black)
+              ) {
+                Text("+ Create Master Audio Track", fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+        }
+      }
       "Import" -> {
         Card(
           modifier = Modifier
@@ -1508,7 +1784,8 @@ fun StickersToolPanel(
 ) {
   val defaultStickerList = listOf("🎬", "🔥", "✨", "💯", "🚀", "⚡", "❤️", "🤩", "🎉", "👑", "👍", "💥", "🎯", "🎵", "🏆", "🌟")
 
-  val pluginStickers = remember {
+  val installedPlugins by viewModel.installedPlugins.collectAsState()
+  val pluginStickers = remember(installedPlugins) {
     com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
       com.example.domain.plugin.PluginCategory.STICKER
     )

@@ -102,6 +102,10 @@ class VideoPlaybackEngine(
 
   fun play() {
     _playerError.value = null
+    if (currentTimeline.totalDurationMs <= 0L) {
+      _isPlaying.value = false
+      return
+    }
     if (currentPosMs >= currentTimeline.totalDurationMs) {
       seekTo(0L)
     }
