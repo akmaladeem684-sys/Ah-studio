@@ -39,6 +39,7 @@ object FontManager {
     val fonts = mutableListOf<FontOption>()
     fonts.addAll(BUILT_IN_FONTS)
 
+    // 1. Add Custom Fonts from Custom Fonts Directory
     val dir = File(context.filesDir, FONTS_DIR)
     if (dir.exists() && dir.isDirectory) {
       val files = dir.listFiles { f -> f.extension.equals("ttf", true) || f.extension.equals("otf", true) }
@@ -54,6 +55,23 @@ object FontManager {
         )
       }
     }
+
+    // 2. Add Plugin Fonts from Installed Plugins
+    val pluginFonts = com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
+      com.example.domain.plugin.PluginCategory.FONT
+    )
+    for ((plugin, fontItem) in pluginFonts) {
+      val fontFile = plugin.getItemFile(fontItem)
+      fonts.add(
+        FontOption(
+          id = fontItem.id,
+          name = "🧩 ${fontItem.name} (${plugin.manifest.name})",
+          isCustom = true,
+          filePath = fontFile?.absolutePath
+        )
+      )
+    }
+
     return fonts
   }
 

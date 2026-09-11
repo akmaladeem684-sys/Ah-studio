@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.*
@@ -72,6 +74,9 @@ fun EditToolPanel(
         .horizontalScroll(rememberScrollState()),
       horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+      EditorActionTile(icon = Icons.Default.VolumeUp, label = "Volume", color = GreenAccent) {
+        viewModel.setActiveToolbarTab(com.example.ui.EditorToolbarTab.VOLUME)
+      }
       EditorActionTile(icon = Icons.Default.CallSplit, label = "Split", color = CyanAccent) {
         viewModel.timelineEngine.splitSelectedClipAtPlayhead()
       }
@@ -97,6 +102,205 @@ fun EditToolPanel(
         viewModel.timelineEngine.flipSelectedClip(horizontal = false)
       }
     }
+
+    // Embedded Volume Slider Control
+    VolumeSliderSection(viewModel = viewModel)
+  }
+}
+
+@Composable
+fun VolumeSliderSection(
+  viewModel: StudioViewModel,
+  modifier: Modifier = Modifier
+) {
+  val timeline by viewModel.timelineEngine.timeline.collectAsState()
+  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
+
+  val targetClipId = when (selectedElement) {
+    is SelectedTrackElement.Video -> (selectedElement as SelectedTrackElement.Video).clipId
+    is SelectedTrackElement.Overlay -> (selectedElement as SelectedTrackElement.Overlay).clipId
+    is SelectedTrackElement.Audio -> (selectedElement as SelectedTrackElement.Audio).clipId
+    else -> timeline.videoClips.firstOrNull()?.id ?: timeline.audioClips.firstOrNull()?.id
+  }
+
+  val videoClip = timeline.videoClips.find { it.id == targetClipId }
+  val overlayClip = timeline.overlayClips.find { it.id == targetClipId }
+  val audioClip = timeline.audioClips.find { it.id == targetClipId }
+
+  val clipName = videoClip?.name ?: overlayClip?.name ?: audioClip?.title ?: "Selected Track / Clip"
+  val currentVol = videoClip?.volume ?: overlayClip?.volume ?: audioClip?.volume ?: 1.0f
+  val isMuted = videoClip?.isMuted ?: overlayClip?.isMuted ?: audioClip?.isMuted ?: false
+
+  var sliderVal by remember(targetClipId, currentVol, isMuted) {
+    mutableFloatStateOf(if (isMuted) 0f else currentVol)
+  }
+
+  Surface(
+    shape = RoundedCornerShape(12.dp),
+    color = StudioSurfaceVariant,
+    border = BorderStroke(1.dp, StudioBorder),
+    modifier = modifier.fillMaxWidth()
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier.weight(1f)
+        ) {
+          Icon(
+            imageVector = if (isMuted || sliderVal == 0f) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+            contentDescription = null,
+            tint = if (isMuted || sliderVal == 0f) RedAccent else GreenAccent,
+            modifier = Modifier.size(20.dp)
+          )
+          Column {
+            Text(
+              text = "Volume Gain Adjustment",
+              style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+            )
+            Text(
+              text = clipName,
+              style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 11.sp),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+        }
+
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (isMuted || sliderVal == 0f) RedAccent.copy(alpha = 0.2f) else GreenAccent.copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, if (isMuted || sliderVal == 0f) RedAccent else GreenAccent)
+          ) {
+            Text(
+              text = if (isMuted || sliderVal == 0f) "Muted" else "${(sliderVal * 100).toInt()}%",
+              style = MaterialTheme.typography.labelMedium.copy(
+                color = if (isMuted || sliderVal == 0f) RedAccent else GreenAccent,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
+              ),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+          }
+
+          IconButton(
+            onClick = { viewModel.timelineEngine.toggleClipMute(targetClipId) },
+            modifier = Modifier
+              .size(32.dp)
+              .clip(CircleShape)
+              .background(StudioSurface)
+              .testTag("volume_mute_btn")
+          ) {
+            Icon(
+              imageVector = if (isMuted || sliderVal == 0f) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+              contentDescription = "Mute Toggle",
+              tint = if (isMuted || sliderVal == 0f) RedAccent else GreenAccent,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+        }
+      }
+
+      Slider(
+        value = sliderVal,
+        onValueChange = { newValue ->
+          sliderVal = newValue
+          viewModel.timelineEngine.setClipVolume(targetClipId, newValue)
+        },
+        valueRange = 0f..2.0f,
+        colors = SliderDefaults.colors(
+          thumbColor = GreenAccent,
+          activeTrackColor = GreenAccent,
+          inactiveTrackColor = StudioBorder
+        ),
+        modifier = Modifier.testTag("volume_gain_slider")
+      )
+
+      val presets = listOf(
+        0.0f to "Mute",
+        0.5f to "50%",
+        1.0f to "100%",
+        1.5f to "150%",
+        2.0f to "200% Boost"
+      )
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        presets.forEach { (volVal, label) ->
+          val isSelected = (sliderVal - volVal).let { kotlin.math.abs(it) < 0.05f }
+          Surface(
+            onClick = {
+              sliderVal = volVal
+              viewModel.timelineEngine.setClipVolume(targetClipId, volVal)
+            },
+            shape = RoundedCornerShape(8.dp),
+            color = if (isSelected) GreenAccent.copy(alpha = 0.25f) else StudioSurface,
+            border = BorderStroke(1.dp, if (isSelected) GreenAccent else StudioBorder),
+            modifier = Modifier.testTag("vol_preset_${label.replace("%", "").replace(" ", "_").lowercase()}")
+          ) {
+            Text(
+              text = label,
+              style = MaterialTheme.typography.labelSmall.copy(
+                color = if (isSelected) GreenAccent else TextPrimary,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                fontSize = 10.sp
+              ),
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun VolumeToolPanel(
+  viewModel: StudioViewModel,
+  modifier: Modifier = Modifier
+) {
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .background(StudioSurface)
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp)
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.VolumeUp, contentDescription = null, tint = GreenAccent)
+        Text(
+          text = "Track / Clip Volume Gain",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+        )
+      }
+      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+      }
+    }
+
+    VolumeSliderSection(viewModel = viewModel)
   }
 }
 
@@ -398,60 +602,226 @@ fun FiltersToolPanel(
       .fillMaxWidth()
       .background(StudioSurface)
       .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
+    verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
+    // Header
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text(
-        text = "Color Filters & LUTs",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-      )
-      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
-        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Default.FilterBAndW, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(22.dp))
+        Column {
+          Text(
+            text = "Media3 Video Filters & Presets",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+          )
+          Text(
+            text = "Real-time GPU accelerated color matrix presets",
+            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+          )
+        }
+      }
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        if (currentFilter.type != FilterType.NONE) {
+          TextButton(
+            onClick = {
+              currentFilter = FilterSettings(type = FilterType.NONE, intensity = 1.0f)
+              viewModel.timelineEngine.updateFilter(currentFilter)
+            }
+          ) {
+            Text("Reset", color = TextSecondary, fontSize = 12.sp)
+          }
+        }
+        IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
+          Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+        }
       }
     }
 
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Filter Cards Row
+    val pluginFilters = remember {
+      com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
+        com.example.domain.plugin.PluginCategory.FILTER
+      )
+    }
+
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      contentPadding = PaddingValues(horizontal = 2.dp)
+    ) {
       items(FilterType.values()) { type ->
         val isSelected = currentFilter.type == type
-        FilterChip(
-          selected = isSelected,
-          onClick = {
-            currentFilter = currentFilter.copy(type = type)
-            viewModel.timelineEngine.updateFilter(currentFilter)
-          },
-          label = { Text(type.displayName) },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = PurpleAccent,
-            selectedLabelColor = Color.White,
-            containerColor = StudioSurfaceVariant,
-            labelColor = TextPrimary
+        val swatchColors = when (type) {
+          FilterType.NONE -> listOf(Color(0xFF64748B), Color(0xFF334155))
+          FilterType.BLACK_AND_WHITE -> listOf(Color(0xFF111111), Color(0xFFEEEEEE))
+          FilterType.VINTAGE -> listOf(Color(0xFFB45309), Color(0xFFFDE68A))
+          FilterType.SATURATION -> listOf(Color(0xFFEC4899), Color(0xFF3B82F6))
+          FilterType.CINEMATIC -> listOf(Color(0xFF0D9488), Color(0xFFF97316))
+          FilterType.WARM -> listOf(Color(0xFFF59E0B), Color(0xFFD97706))
+          FilterType.COOL -> listOf(Color(0xFF0284C7), Color(0xFF38BDF8))
+          FilterType.PORTRAIT -> listOf(Color(0xFFF43F5E), Color(0xFFFDA4AF))
+          FilterType.HDR -> listOf(Color(0xFF8B5CF6), Color(0xFF06B6D4))
+          FilterType.FILM -> listOf(Color(0xFF78350F), Color(0xFFA16207))
+          FilterType.RETRO -> listOf(Color(0xFFD946EF), Color(0xFF8B5CF6))
+          FilterType.NATURE -> listOf(Color(0xFF10B981), Color(0xFF047857))
+          FilterType.FOOD -> listOf(Color(0xFFEA580C), Color(0xFFFACC15))
+          FilterType.TRAVEL -> listOf(Color(0xFF0284C7), Color(0xFF10B981))
+          FilterType.SOCIAL_MEDIA -> listOf(Color(0xFFFF007F), Color(0xFF7928CA))
+        }
+
+        Card(
+          modifier = Modifier
+            .size(width = 96.dp, height = 90.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable {
+              currentFilter = currentFilter.copy(type = type)
+              viewModel.timelineEngine.updateFilter(currentFilter)
+            }
+            .testTag("filter_preset_${type.name.lowercase()}"),
+          colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) StudioSurfaceVariant else Color(0xFF1E293B)
+          ),
+          border = BorderStroke(
+            width = if (isSelected) 2.dp else 1.dp,
+            color = if (isSelected) PurpleAccent else StudioBorder
           )
-        )
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(8.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            // Color Swatch Badge
+            Box(
+              modifier = Modifier
+                .size(width = 80.dp, height = 40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Brush.horizontalGradient(swatchColors)),
+              contentAlignment = Alignment.Center
+            ) {
+              if (isSelected) {
+                Box(
+                  modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.6f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                }
+              }
+            }
+
+            Text(
+              text = type.displayName,
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) PurpleAccent else TextPrimary,
+                fontSize = 11.sp
+              ),
+              maxLines = 1,
+              textAlign = TextAlign.Center,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+        }
       }
     }
 
-    if (currentFilter.type != FilterType.NONE) {
-      Column {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-          Text("Filter Intensity", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-          Text("${(currentFilter.intensity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = PurpleAccent, fontWeight = FontWeight.Bold))
+    // Plugin Filters Section
+    if (pluginFilters.isNotEmpty()) {
+      Text("Installed Plugin Filters", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
+      LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(pluginFilters) { (plugin, filterItem) ->
+          Card(
+            modifier = Modifier
+              .size(width = 110.dp, height = 85.dp)
+              .clip(RoundedCornerShape(14.dp))
+              .clickable {
+                currentFilter = currentFilter.copy(type = FilterType.CINEMATIC, intensity = 1.0f)
+                viewModel.timelineEngine.updateFilter(currentFilter)
+                viewModel.timelineEngine.updateAdjustments(
+                  VideoAdjustments(
+                    brightness = filterItem.brightness,
+                    contrast = filterItem.contrast,
+                    saturation = filterItem.saturation,
+                    temperature = filterItem.temperature,
+                    tint = filterItem.tint,
+                    vignette = filterItem.vignette
+                  )
+                )
+              },
+            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+            border = BorderStroke(1.dp, CyanAccent)
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+              verticalArrangement = Arrangement.SpaceBetween,
+              horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+              Text(filterItem.emoji, fontSize = 24.sp)
+              Text(
+                text = filterItem.name,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 10.sp),
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+                overflow = TextOverflow.Ellipsis
+              )
+              Text(
+                text = plugin.manifest.name,
+                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 8.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
         }
-        Slider(
-          value = currentFilter.intensity,
-          onValueChange = {
-            currentFilter = currentFilter.copy(intensity = it)
-            viewModel.timelineEngine.updateFilter(currentFilter)
-          },
-          valueRange = 0f..1f,
-          colors = SliderDefaults.colors(thumbColor = PurpleAccent, activeTrackColor = PurpleAccent)
-        )
+      }
+    }
+
+    // Filter Intensity Slider
+    if (currentFilter.type != FilterType.NONE) {
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = StudioSurfaceVariant,
+        border = BorderStroke(1.dp, StudioBorder),
+        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "${currentFilter.type.displayName} Intensity",
+              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
+            )
+            Text(
+              text = "${(currentFilter.intensity * 100).toInt()}%",
+              style = MaterialTheme.typography.bodySmall.copy(color = PurpleAccent, fontWeight = FontWeight.Bold)
+            )
+          }
+          Slider(
+            value = currentFilter.intensity,
+            onValueChange = {
+              currentFilter = currentFilter.copy(intensity = it)
+              viewModel.timelineEngine.updateFilter(currentFilter)
+            },
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(
+              thumbColor = PurpleAccent,
+              activeTrackColor = PurpleAccent,
+              inactiveTrackColor = StudioBorder
+            )
+          )
+        }
       }
     }
   }
@@ -877,6 +1247,9 @@ fun AudioToolPanel(
         }
       }
     }
+
+    // Audio Track Volume Gain Slider
+    VolumeSliderSection(viewModel = viewModel)
   }
 }
 
@@ -885,7 +1258,13 @@ fun StickersToolPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
-  val stickerList = listOf("🎬", "🔥", "✨", "💯", "🚀", "⚡", "❤️", "🤩", "🎉", "👑", "👍", "💥", "🎯", "🎵", "🏆", "🌟")
+  val defaultStickerList = listOf("🎬", "🔥", "✨", "💯", "🚀", "⚡", "❤️", "🤩", "🎉", "👑", "👍", "💥", "🎯", "🎵", "🏆", "🌟")
+
+  val pluginStickers = remember {
+    com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
+      com.example.domain.plugin.PluginCategory.STICKER
+    )
+  }
 
   Column(
     modifier = modifier
@@ -899,17 +1278,34 @@ fun StickersToolPanel(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text(
-        text = "Stickers & Badges",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-      )
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          text = "Stickers & Badges",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+        )
+        if (pluginStickers.isNotEmpty()) {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = PurpleAccent.copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, PurpleAccent)
+          ) {
+            Text(
+              text = "${pluginStickers.size} Plugin Assets",
+              style = MaterialTheme.typography.labelSmall.copy(color = PurpleAccent, fontWeight = FontWeight.Bold),
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+        }
+      }
       IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
         Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
       }
     }
 
+    // Default Emojis Row
+    Text("Standard Emojis", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-      items(stickerList) { emoji ->
+      items(defaultStickerList) { emoji ->
         Box(
           modifier = Modifier
             .size(48.dp)
@@ -921,6 +1317,42 @@ fun StickersToolPanel(
           contentAlignment = Alignment.Center
         ) {
           Text(emoji, fontSize = 26.sp)
+        }
+      }
+    }
+
+    // Plugin Stickers Section
+    if (pluginStickers.isNotEmpty()) {
+      Text("Installed Plugin Sticker Packs", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
+      LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(pluginStickers) { (plugin, stickerItem) ->
+          val stickerAsset = stickerItem.file.ifBlank { stickerItem.emoji }
+          Card(
+            modifier = Modifier
+              .size(width = 110.dp, height = 80.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .clickable {
+                viewModel.timelineEngine.addStickerClip(stickerAsset)
+              },
+            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+            border = BorderStroke(1.dp, CyanAccent)
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text(stickerItem.emoji, fontSize = 28.sp)
+              Text(
+                text = stickerItem.name,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 10.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
         }
       }
     }

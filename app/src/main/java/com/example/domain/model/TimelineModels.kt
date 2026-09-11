@@ -271,12 +271,13 @@ data class VideoAdjustments(
 
 enum class FilterType(val displayName: String) {
   NONE("Normal"),
-  CINEMATIC("Cinematic Teal & Orange"),
+  BLACK_AND_WHITE("Black & White"),
   VINTAGE("Vintage 1970s"),
+  SATURATION("Saturation Boost"),
+  CINEMATIC("Cinematic Teal & Orange"),
   WARM("Golden Warm"),
   COOL("Arctic Cool"),
   PORTRAIT("Portrait Soft"),
-  BLACK_AND_WHITE("Noir B&W"),
   HDR("High Dynamic Range"),
   FILM("35mm Film Grain"),
   RETRO("80s Retro Synth"),

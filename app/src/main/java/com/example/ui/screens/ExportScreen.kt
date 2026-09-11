@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -326,7 +327,11 @@ fun ExportScreen(
               .weight(1f),
             contentAlignment = Alignment.Center
           ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(16.dp),
+              modifier = Modifier.padding(16.dp)
+            ) {
               Box(
                 modifier = Modifier
                   .size(80.dp)
@@ -341,42 +346,106 @@ fun ExportScreen(
                 text = "Export Complete!",
                 style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
               )
-              Text(
-                text = "Saved to: ${state.file.name}",
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-              )
+
+              // Gallery Auto-Save Confirmation Banner
+              Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = StudioSurfaceVariant,
+                border = BorderStroke(1.dp, GreenAccent)
+              ) {
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                  Icon(
+                    Icons.Default.PhotoLibrary,
+                    contentDescription = null,
+                    tint = GreenAccent,
+                    modifier = Modifier.size(28.dp)
+                  )
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      text = "Auto-Saved to Device Gallery",
+                      style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+                    )
+                    Text(
+                      text = "Movies/VideoStudio/${state.file.name}",
+                      style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary),
+                      maxLines = 1
+                    )
+                  }
+                  Icon(Icons.Default.CheckCircle, contentDescription = null, tint = GreenAccent, modifier = Modifier.size(20.dp))
+                }
+              }
+
               Text(
                 text = "Size: ${String.format("%.1f MB", state.fileSizeBytes / (1024f * 1024f))}",
                 style = MaterialTheme.typography.labelMedium.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
               )
 
-              Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                  onClick = {
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                      type = "video/mp4"
-                      val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", state.file)
-                      putExtra(Intent.EXTRA_STREAM, uri)
-                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share Exported Video"))
-                  },
-                  colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-                  modifier = Modifier.testTag("export_share_button")
+              // Action Buttons
+              Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(10.dp),
+                  modifier = Modifier.fillMaxWidth()
                 ) {
-                  Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text("Share Video", fontWeight = FontWeight.Bold)
+                  Button(
+                    onClick = {
+                      val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "video/mp4"
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", state.file)
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      }
+                      context.startActivity(Intent.createChooser(shareIntent, "Share Exported Video"))
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                    modifier = Modifier
+                      .weight(1f)
+                      .testTag("export_share_button")
+                  ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Share", fontWeight = FontWeight.Bold)
+                  }
+
+                  Button(
+                    onClick = {
+                      val res = com.example.engine.media.GalleryMediaSaver.saveVideoToGallery(
+                        context = context,
+                        sourceFile = state.file,
+                        title = state.file.nameWithoutExtension
+                      )
+                      Toast.makeText(context, "Saved to Gallery Movies/VideoStudio!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = Color.Black),
+                    modifier = Modifier
+                      .weight(1f)
+                      .testTag("export_save_gallery_button")
+                  ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Re-Save Gallery", fontWeight = FontWeight.Bold)
+                  }
                 }
 
                 Button(
                   onClick = { viewModel.navigateTo(AppScreen.EXPORTED_LIBRARY) },
                   colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White),
-                  modifier = Modifier.testTag("export_library_button")
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("export_library_button")
                 ) {
                   Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(18.dp))
                   Spacer(modifier = Modifier.width(6.dp))
-                  Text("View in Library", fontWeight = FontWeight.Bold)
+                  Text("View in App Library", fontWeight = FontWeight.Bold)
                 }
               }
 

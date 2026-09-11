@@ -909,6 +909,13 @@ class VideoExporter(private val context: Context) {
     audioProcessor.clearCache()
   }
 
+  fun updateSuccessFile(file: File) {
+    val currentState = _exportState.value
+    if (currentState is ExportState.Success) {
+      _exportState.value = currentState.copy(file = file, fileSizeBytes = file.length())
+    }
+  }
+
   private fun drainVideoEncoder(
     encoder: MediaCodec,
     coordinator: MuxerCoordinator,

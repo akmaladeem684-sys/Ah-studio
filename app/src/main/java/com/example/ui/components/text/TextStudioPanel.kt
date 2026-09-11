@@ -154,7 +154,7 @@ fun TextStudioPanel(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      val tabs = listOf("Typography", "Style & Color", "Motion & Position", "Captions & Timing")
+      val tabs = listOf("Typography", "Style & Color", "Templates", "Motion & Position", "Captions & Timing")
       items(tabs) { tab ->
         val isSelected = activeSubTab == tab
         FilterChip(
@@ -184,6 +184,10 @@ fun TextStudioPanel(
         }
       )
       "Style & Color" -> StyleAndColorSettings(
+        clip = selectedTextClip,
+        onUpdate = { viewModel.timelineEngine.updateTextClip(it) }
+      )
+      "Templates" -> TextTemplatesSettings(
         clip = selectedTextClip,
         onUpdate = { viewModel.timelineEngine.updateTextClip(it) }
       )
@@ -793,6 +797,102 @@ private fun CaptionsAndTimingSettings(
               text = "${formatDurationShort(c.timelineStartMs)} - ${formatDurationShort(c.timelineStartMs + c.durationMs)}",
               style = MaterialTheme.typography.labelSmall.copy(color = if (isCurrent) CyanAccent else TextSecondary, fontSize = 10.sp)
             )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun TextTemplatesSettings(
+  clip: TextClip,
+  onUpdate: (TextClip) -> Unit
+) {
+  val pluginTemplates = remember {
+    com.example.engine.plugin.PluginManager.getEnabledItemsForCategory(
+      com.example.domain.plugin.PluginCategory.TEXT_TEMPLATE
+    )
+  }
+
+  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Text("Title & Lower-Third Templates", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+
+    if (pluginTemplates.isEmpty()) {
+      Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant)
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Icon(Icons.Default.Extension, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(28.dp))
+          Text("No Text Template Plugins Installed", style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.Bold))
+          Text("Go to Settings → Plugins to install motion title template ZIP packs.", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary), textAlign = TextAlign.Center)
+        }
+      }
+    } else {
+      LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(pluginTemplates) { (plugin, tplItem) ->
+          Card(
+            modifier = Modifier
+              .size(width = 160.dp, height = 90.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .clickable {
+                // Apply template parameters to clip
+                val params = tplItem.parameters
+                val textColor = params["textColor"]?.toString()?.toLongOrNull() ?: 0xFFFFFFFFL
+                val hasBg = params["hasBackground"] as? Boolean ?: false
+                val bgColor = params["backgroundColor"]?.toString()?.toLongOrNull() ?: 0xCC000000L
+                val animType = params["animationType"] as? String ?: "Fade"
+
+                onUpdate(
+                  clip.copy(
+                    textColor = textColor,
+                    backgroundColor = if (hasBg) bgColor else 0x00000000L,
+                    animationType = animType
+                  )
+                )
+              },
+            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+            border = BorderStroke(1.dp, CyanAccent)
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(tplItem.emoji, fontSize = 20.sp)
+                Surface(
+                  shape = RoundedCornerShape(4.dp),
+                  color = CyanAccent.copy(alpha = 0.2f)
+                ) {
+                  Text(plugin.manifest.name, fontSize = 8.sp, color = CyanAccent, modifier = Modifier.padding(2.dp))
+                }
+              }
+              Text(
+                text = tplItem.name,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+              Text(
+                text = tplItem.description,
+                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
           }
         }
       }

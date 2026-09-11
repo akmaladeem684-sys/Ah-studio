@@ -292,13 +292,35 @@ fun MediaImportPanel(
 
     // Device Storage Import Actions
     Text(
-      text = "Import from Device",
+      text = "Import from Device Gallery",
       style = MaterialTheme.typography.labelMedium.copy(
         fontWeight = FontWeight.Bold,
         color = TextSecondary,
         fontSize = 11.sp
       )
     )
+
+    // Primary Full-Width Import Media from Gallery Button
+    Button(
+      onClick = {
+        pickMultipleMediaLauncher.launch(
+          PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+        )
+      },
+      colors = ButtonDefaults.buttonColors(
+        containerColor = CyanAccent,
+        contentColor = Color.Black
+      ),
+      shape = RoundedCornerShape(12.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(50.dp)
+        .testTag("import_media_from_gallery_primary_btn")
+    ) {
+      Icon(Icons.Default.Collections, contentDescription = null, modifier = Modifier.size(20.dp))
+      Spacer(modifier = Modifier.width(8.dp))
+      Text("Import Media from Gallery", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
 
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -318,13 +340,13 @@ fun MediaImportPanel(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
           .weight(1f)
-          .height(48.dp)
+          .height(44.dp)
           .border(1.dp, CyanAccent.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
           .testTag("import_device_video_button")
       ) {
-        Icon(Icons.Default.VideoCameraBack, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Videos", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Icon(Icons.Default.VideoCameraBack, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Videos Only", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
       }
 
       // Pick Images Button
@@ -341,36 +363,13 @@ fun MediaImportPanel(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
           .weight(1f)
-          .height(48.dp)
+          .height(44.dp)
           .border(1.dp, PurpleAccent.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
           .testTag("import_device_image_button")
       ) {
-        Icon(Icons.Default.Image, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Photos", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-      }
-
-      // Pick Any Media Button
-      Button(
-        onClick = {
-          pickMultipleMediaLauncher.launch(
-            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-          )
-        },
-        colors = ButtonDefaults.buttonColors(
-          containerColor = Color(0xFF1E293B),
-          contentColor = TextPrimary
-        ),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-          .weight(1f)
-          .height(48.dp)
-          .border(1.dp, AmberAccent.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-          .testTag("import_device_any_button")
-      ) {
-        Icon(Icons.Default.PermMedia, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("All Files", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Icon(Icons.Default.Image, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Photos Only", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
       }
     }
 

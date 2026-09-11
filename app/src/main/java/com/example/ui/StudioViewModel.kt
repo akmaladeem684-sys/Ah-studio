@@ -61,6 +61,7 @@ enum class EditorToolbarTab {
   EDIT,
   TRIM,
   AUDIO,
+  VOLUME,
   TEXT,
   STICKERS,
   EFFECTS,
@@ -167,6 +168,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   private var autoSaveJob: Job? = null
 
   init {
+    // 0. Initialize Plugin System Registry
+    com.example.engine.plugin.PluginManager.initialize(application)
+
     // 1. Immediately seed default cinematic timeline so timeline UI has full non-null content on frame 1
     val defaultTimeline = Timeline(
       videoClips = listOf(
@@ -999,23 +1003,63 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
   fun startExport(config: ExportConfig) {
     viewModelScope.launch {
-      val file = videoExporter.exportProject(
+      val tempFile = videoExporter.exportProject(
         projectName = _activeProjectName.value,
         timeline = timelineEngine.timeline.value,
         config = config
       )
-      if (file != null) {
+      if (tempFile != null) {
+        val saveResult = com.example.engine.media.GalleryMediaSaver.saveVideoToGallery(
+          context = getApplication(),
+          sourceFile = tempFile,
+          title = _activeProjectName.value
+        )
+
+        val finalFile = saveResult.file
+
         repository.recordExport(
           projectId = _activeProjectId.value,
           title = "${_activeProjectName.value}.mp4",
-          filePath = file.absolutePath,
+          filePath = finalFile.absolutePath,
           durationMs = timelineEngine.timeline.value.totalDurationMs,
           resolution = config.resolution.label,
           fps = config.frameRate.fps,
-          fileSizeBytes = file.length()
+          fileSizeBytes = finalFile.length()
         )
+
+        videoExporter.updateSuccessFile(finalFile)
       }
     }
+  }
+
+  // ==========================================
+  // ZIP Plugin System State & Operations
+  // ==========================================
+  val installedPlugins: StateFlow<List<com.example.domain.plugin.InstalledPlugin>> =
+    com.example.engine.plugin.PluginManager.installedPlugins
+
+  fun installPluginFromUri(uri: android.net.Uri): com.example.domain.plugin.PluginValidationResult {
+    return com.example.engine.plugin.PluginManager.installPluginFromUri(getApplication(), uri)
+  }
+
+  fun installSamplePluginPack(sampleType: String): com.example.domain.plugin.PluginValidationResult {
+    val context = getApplication<Application>()
+    val zipFile = when (sampleType.lowercase()) {
+      "filter", "filters" -> com.example.engine.plugin.PluginSampleGenerator.generateFiltersPluginZip(context)
+      "sticker", "stickers" -> com.example.engine.plugin.PluginSampleGenerator.generateStickersPluginZip(context)
+      "font", "fonts" -> com.example.engine.plugin.PluginSampleGenerator.generateFontsPluginZip(context)
+      "text_template", "templates" -> com.example.engine.plugin.PluginSampleGenerator.generateTextTemplatesPluginZip(context)
+      else -> com.example.engine.plugin.PluginSampleGenerator.generateFiltersPluginZip(context)
+    }
+    return com.example.engine.plugin.PluginManager.installPluginFromZipFile(context, zipFile)
+  }
+
+  fun togglePluginEnabled(pluginId: String, isEnabled: Boolean) {
+    com.example.engine.plugin.PluginManager.togglePluginEnabled(getApplication(), pluginId, isEnabled)
+  }
+
+  fun uninstallPlugin(pluginId: String): Boolean {
+    return com.example.engine.plugin.PluginManager.uninstallPlugin(getApplication(), pluginId)
   }
 
   override fun onCleared() {

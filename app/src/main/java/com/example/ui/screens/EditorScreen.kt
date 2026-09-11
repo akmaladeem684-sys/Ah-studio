@@ -201,6 +201,7 @@ fun EditorScreen(
             )
             EditorToolbarTab.TEXT -> TextEditorPanel(viewModel)
             EditorToolbarTab.AUDIO -> AudioToolPanel(viewModel)
+            EditorToolbarTab.VOLUME -> VolumeToolPanel(viewModel)
             EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
             EditorToolbarTab.CHROMA -> ChromaKeyPanel(viewModel)
             EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
@@ -388,11 +389,31 @@ fun EditorScreen(
             }
           }
 
-          // Right: Fullscreen & Feedback controls
+          // Right: Filters Panel Toggle & Fullscreen
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
           ) {
+            IconButton(
+              onClick = {
+                viewModel.setActiveToolbarTab(
+                  if (activeTab == EditorToolbarTab.FILTERS) null else EditorToolbarTab.FILTERS
+                )
+              },
+              modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(if (activeTab == EditorToolbarTab.FILTERS) PurpleAccent else StudioSurface)
+                .testTag("below_video_filters_button")
+            ) {
+              Icon(
+                Icons.Default.FilterBAndW,
+                contentDescription = "Filters Panel",
+                tint = if (activeTab == EditorToolbarTab.FILTERS) Color.White else TextSecondary,
+                modifier = Modifier.size(18.dp)
+              )
+            }
+
             IconButton(
               onClick = { isFullscreenPreview = true },
               modifier = Modifier
@@ -409,6 +430,19 @@ fun EditorScreen(
               )
             }
           }
+        }
+      }
+
+      // Inline Filters Panel directly below video preview controls
+      if (activeTab == EditorToolbarTab.FILTERS) {
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("filters_panel_below_video"),
+          color = StudioSurface,
+          border = BorderStroke(1.dp, StudioBorder)
+        ) {
+          FiltersToolPanel(viewModel = viewModel)
         }
       }
 
@@ -1831,6 +1865,15 @@ private fun EditorBottomToolbar(
       isSelected = activeTab == EditorToolbarTab.AUDIO,
       testTag = "audio_btn",
       onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
+    )
+
+    // 2b. Volume 🔊
+    EditorToolbarItem(
+      icon = Icons.Default.VolumeUp,
+      label = "Volume",
+      isSelected = activeTab == EditorToolbarTab.VOLUME,
+      testTag = "volume_btn",
+      onClick = { onTabSelected(EditorToolbarTab.VOLUME) }
     )
 
     // 3. Text T

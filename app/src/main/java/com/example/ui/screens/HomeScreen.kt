@@ -67,6 +67,14 @@ fun HomeScreen(
     }
   }
 
+  val pickGalleryForNewProjectLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 20)
+  ) { uris: List<Uri> ->
+    if (uris.isNotEmpty()) {
+      viewModel.createProjectWithMedia("Gallery Project", uris.map { it.toString() }, isVideo = true)
+    }
+  }
+
   val filteredProjects = remember(projects, searchQuery, selectedTab) {
     projects.filter { project ->
       val matchesSearch = searchQuery.isBlank() || project.name.contains(searchQuery, ignoreCase = true)
@@ -252,6 +260,11 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
               ) {
+                QuickActionChip(icon = Icons.Default.Collections, label = "Gallery") {
+                  pickGalleryForNewProjectLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                  )
+                }
                 QuickActionChip(icon = Icons.Default.VideoLibrary, label = "Videos") {
                   pickVideosForNewProjectLauncher.launch(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
@@ -263,7 +276,6 @@ fun HomeScreen(
                   )
                 }
                 QuickActionChip(icon = Icons.Default.CameraAlt, label = "Camera") { showNewProjectDialog = true }
-                QuickActionChip(icon = Icons.Default.History, label = "Restore") { viewModel.restorePreviousProject() }
                 QuickActionChip(icon = Icons.Default.AutoFixHigh, label = "AI Edit") { viewModel.navigateTo(AppScreen.AI_SUITE) }
               }
             }

@@ -91,6 +91,9 @@ object ColorFilterGenerator {
       FilterType.BLACK_AND_WHITE -> {
         ColorMatrix().apply { setSaturation(0f) }
       }
+      FilterType.SATURATION -> {
+        ColorMatrix().apply { setSaturation(1.85f) }
+      }
       FilterType.CINEMATIC -> {
         // Teal and orange look
         ColorMatrix(
