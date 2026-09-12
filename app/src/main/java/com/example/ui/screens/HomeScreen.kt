@@ -29,11 +29,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.data.local.ProjectEntity
 import com.example.domain.model.*
 import com.example.ui.AppScreen
 import com.example.ui.StudioViewModel
 import com.example.ui.components.*
+import com.example.ui.components.home.*
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -51,6 +53,7 @@ fun HomeScreen(
   var showNewProjectDialog by remember { mutableStateOf(false) }
   var showRenameDialog by remember { mutableStateOf<ProjectEntity?>(null) }
   var selectedTab by remember { mutableStateOf("All Projects") } // "All Projects" or "Drafts"
+  var activeHomeTab by rememberSaveable { mutableStateOf(HomeTab.PROJECTS) }
 
   val pickVideosForNewProjectLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 15)
@@ -90,33 +93,44 @@ fun HomeScreen(
       .background(StudioDarkBg),
     containerColor = StudioDarkBg,
     topBar = {
-      StudioHeader(
-        title = "AH Video Studio",
-        subtitle = "Professional Mobile Editing Suite",
-        showProBadge = true,
-        onSearchClick = {},
-        onSettingsClick = { viewModel.navigateTo(AppScreen.SETTINGS) }
-      )
+      if (activeHomeTab == HomeTab.PROJECTS) {
+        StudioHeader(
+          title = "AH Video Studio",
+          subtitle = "Professional Mobile Editing Suite",
+          showProBadge = true,
+          onSearchClick = {},
+          onSettingsClick = { viewModel.navigateTo(AppScreen.SETTINGS) }
+        )
+      }
     },
-    floatingActionButton = {
-      ExtendedFloatingActionButton(
-        onClick = { showNewProjectDialog = true },
-        icon = { Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black) },
-        text = { Text("New Project", fontWeight = FontWeight.Bold, color = Color.Black) },
-        containerColor = CyanAccent,
-        modifier = Modifier
-          .minimumInteractiveComponentSize()
-          .testTag("fab_new_project")
+    bottomBar = {
+      HomeBottomNavigationBar(
+        activeTab = activeHomeTab,
+        onTabSelected = { activeHomeTab = it }
       )
     }
   ) { padding ->
-    LazyColumn(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(padding)
-        .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    when (activeHomeTab) {
+      HomeTab.TEMPLATES -> {
+        HomeTemplatesTabView(
+          viewModel = viewModel,
+          modifier = Modifier.padding(padding)
+        )
+      }
+      HomeTab.MY_ACCOUNT -> {
+        HomeAccountTabView(
+          viewModel = viewModel,
+          modifier = Modifier.padding(padding)
+        )
+      }
+      HomeTab.PROJECTS -> {
+        LazyColumn(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(horizontal = 16.dp),
+          verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
       // Crash Recovery Alert Banner
       activeRecovery?.let { recovery ->
         item {
@@ -426,6 +440,8 @@ fun HomeScreen(
       }
 
       item { Spacer(modifier = Modifier.height(64.dp)) }
+        }
+      }
     }
   }
 

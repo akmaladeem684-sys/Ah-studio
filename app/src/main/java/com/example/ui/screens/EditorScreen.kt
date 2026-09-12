@@ -234,10 +234,6 @@ fun EditorScreen(
             viewModel.saveCurrentProject()
             viewModel.navigateTo(AppScreen.HOME)
           },
-          onSearchClick = { showProjectSettingsDialog = true },
-          onResolutionSelect = { res ->
-            viewModel.updateProjectSettings(aspectRatio, res, activeFps, activeSampleRate, activeCanvasColor)
-          },
           onExportClick = {
             viewModel.saveCurrentProject()
             showExportConfigDialog = true
@@ -384,7 +380,7 @@ fun EditorScreen(
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .weight(1.6f)
+          .weight(2.8f)
           .background(Color.Black)
           .testTag("video_preview_container"),
         contentAlignment = Alignment.Center
@@ -416,6 +412,82 @@ fun EditorScreen(
             .fillMaxSize()
             .testTag("video_preview")
         )
+      }
+
+      // 2. PLAYBACK CONTROLS BAR (Moved below video preview, scaled-up play button)
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(Color.Black)
+          .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        // Left: Timecode Display (e.g. 00:04 / 00:12)
+        Text(
+          text = "${formatDurationShort(currentPosMs)} / ${formatDurationShort(timeline.totalDurationMs)}",
+          style = MaterialTheme.typography.bodyMedium.copy(
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp
+          ),
+          modifier = Modifier.testTag("playback_timecode_display")
+        )
+
+        // Center: Step Back (⏮), Scaled-Up Play/Pause (⏯), Step Forward (⏭)
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+          IconButton(
+            onClick = { viewModel.timelineEngine.stepBackwardOneFrame() },
+            modifier = Modifier
+              .size(36.dp)
+              .testTag("playback_step_backward")
+          ) {
+            Icon(
+              imageVector = Icons.Default.SkipPrevious,
+              contentDescription = "Previous Frame",
+              tint = Color.White,
+              modifier = Modifier.size(24.dp)
+            )
+          }
+
+          // Scaled Up Play/Pause Button with Cyan Ring Accent
+          IconButton(
+            onClick = { viewModel.timelineEngine.togglePlayPause() },
+            modifier = Modifier
+              .size(52.dp)
+              .clip(CircleShape)
+              .background(Color.Black)
+              .border(2.5.dp, CyanAccent, CircleShape)
+              .testTag("playback_play_pause")
+          ) {
+            Icon(
+              imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+              contentDescription = if (isPlaying) "Pause" else "Play",
+              tint = Color.White,
+              modifier = Modifier.size(30.dp)
+            )
+          }
+
+          IconButton(
+            onClick = { viewModel.timelineEngine.stepForwardOneFrame() },
+            modifier = Modifier
+              .size(36.dp)
+              .testTag("playback_step_forward")
+          ) {
+            Icon(
+              imageVector = Icons.Default.SkipNext,
+              contentDescription = "Next Frame",
+              tint = Color.White,
+              modifier = Modifier.size(24.dp)
+            )
+          }
+        }
+
+        // Right side Spacer to maintain horizontal centering of play controls
+        Spacer(modifier = Modifier.width(72.dp))
       }
 
       var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
@@ -794,54 +866,38 @@ private fun EditorTopBar(
   onUndoClick: () -> Unit = {},
   onRedoClick: () -> Unit = {},
   onBackClick: () -> Unit,
-  onSearchClick: () -> Unit,
-  onResolutionSelect: (Resolution) -> Unit,
   onExportClick: () -> Unit
 ) {
-  var showResolutionMenu by remember { mutableStateOf(false) }
-
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .height(56.dp)
+      .height(52.dp)
       .background(Color.Black)
-      .padding(horizontal = 16.dp),
+      .padding(horizontal = 12.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
-    // Left: Close (X) + Search + Undo + Redo
+    // Left: Close (X) + Undo + Redo
     IconButton(
       onClick = onBackClick,
       modifier = Modifier
-        .size(48.dp)
+        .size(40.dp)
         .testTag("close_btn")
     ) {
       Icon(
         imageVector = Icons.Default.Close,
         contentDescription = "Close",
         tint = Color.White,
-        modifier = Modifier.size(24.dp)
+        modifier = Modifier.size(22.dp)
       )
     }
 
-    IconButton(
-      onClick = onSearchClick,
-      modifier = Modifier
-        .size(48.dp)
-        .testTag("search_btn")
-    ) {
-      Icon(
-        imageVector = Icons.Default.Search,
-        contentDescription = "Search",
-        tint = Color.White,
-        modifier = Modifier.size(24.dp)
-      )
-    }
+    Spacer(modifier = Modifier.width(4.dp))
 
     IconButton(
       onClick = onUndoClick,
       enabled = canUndo,
       modifier = Modifier
-        .size(40.dp)
+        .size(38.dp)
         .testTag("top_undo_btn")
     ) {
       Icon(
@@ -856,7 +912,7 @@ private fun EditorTopBar(
       onClick = onRedoClick,
       enabled = canRedo,
       modifier = Modifier
-        .size(40.dp)
+        .size(38.dp)
         .testTag("top_redo_btn")
     ) {
       Icon(
@@ -867,118 +923,79 @@ private fun EditorTopBar(
       )
     }
 
-    // Center: Empty Spacer
     Spacer(modifier = Modifier.weight(1f))
 
-    // Right: "AI UHD" Dropdown
-    Box {
-      Surface(
-        onClick = { showResolutionMenu = true },
-        shape = RoundedCornerShape(8.dp),
-        color = Color(0xFF1E293B),
-        border = BorderStroke(1.dp, Color(0xFF334155)),
-        modifier = Modifier
-          .height(38.dp)
-          .testTag("quality_spinner")
+    // Right: Modern Blue + Black Professional "Export" Button
+    val isRendering = exportState is ExportState.Rendering
+    Surface(
+      onClick = { if (!isRendering) onExportClick() },
+      shape = RoundedCornerShape(10.dp),
+      color = Color.Transparent,
+      enabled = !isRendering,
+      modifier = Modifier
+        .height(36.dp)
+        .clip(RoundedCornerShape(10.dp))
+        .background(
+          Brush.horizontalGradient(
+            colors = if (!isRendering) listOf(
+              Color(0xFF0052CC),
+              Color(0xFF0088FF)
+            ) else listOf(
+              Color(0xFF1E293B),
+              Color(0xFF334155)
+            )
+          )
+        )
+        .border(
+          width = 1.dp,
+          brush = Brush.horizontalGradient(
+            listOf(
+              Color(0xFF60A5FA),
+              Color(0xFF00E5FF)
+            )
+          ),
+          shape = RoundedCornerShape(10.dp)
+        )
+        .testTag("export_btn")
+    ) {
+      Row(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
       ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+        if (isRendering) {
+          val progress = (exportState as ExportState.Rendering).progressPercent
+          CircularProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.size(14.dp),
+            strokeWidth = 2.dp,
+            color = Color.White
+          )
           Text(
-            text = "AI UHD",
+            text = "${(progress * 100).toInt()}%",
             style = MaterialTheme.typography.labelSmall.copy(
               fontWeight = FontWeight.Bold,
               color = Color.White,
               fontSize = 12.sp
             )
           )
+        } else {
           Icon(
-            imageVector = Icons.Default.ArrowDropDown,
-            contentDescription = "Quality Options",
+            imageVector = Icons.Default.FileUpload,
+            contentDescription = null,
             tint = Color.White,
             modifier = Modifier.size(16.dp)
           )
-        }
-      }
-
-      DropdownMenu(
-        expanded = showResolutionMenu,
-        onDismissRequest = { showResolutionMenu = false },
-        modifier = Modifier.background(StudioSurface)
-      ) {
-        listOf(
-          Resolution.RES_4K to "4K UHD (3840×2160)",
-          Resolution.RES_2K to "2K QHD (2560×1440)",
-          Resolution.RES_1080P to "Full HD (1920×1080)",
-          Resolution.RES_VERTICAL_4K to "Vertical 4K (2160×3840)",
-          Resolution.RES_VERTICAL_2K to "Vertical 2K (1440×2560)",
-          Resolution.RES_SQUARE_2K to "Square 2K (2048×2048)",
-          Resolution.RES_720P to "720p HD",
-          Resolution.RES_480P to "480p SD"
-        ).forEach { (res, label) ->
-          DropdownMenuItem(
-            text = {
-              Text(
-                text = label,
-                color = if (res == activeResolution) CyanAccent else TextPrimary,
-                fontWeight = if (res == activeResolution) FontWeight.Bold else FontWeight.Normal
-              )
-            },
-            onClick = {
-              onResolutionSelect(res)
-              showResolutionMenu = false
-            }
+          Text(
+            text = "Export",
+            style = MaterialTheme.typography.labelMedium.copy(
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              fontSize = 13.sp,
+              letterSpacing = 0.3.sp
+            )
           )
         }
-      }
-    }
-
-    // Right: Cyan "Export" Button
-    val isRendering = exportState is ExportState.Rendering
-    Button(
-      onClick = onExportClick,
-      enabled = !isRendering,
-      colors = ButtonDefaults.buttonColors(
-        containerColor = CyanAccent,
-        contentColor = Color.Black,
-        disabledContainerColor = CyanAccent.copy(alpha = 0.6f),
-        disabledContentColor = Color.Black
-      ),
-      shape = RoundedCornerShape(8.dp),
-      contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-      modifier = Modifier
-        .height(38.dp)
-        .padding(start = 12.dp)
-        .testTag("export_btn")
-    ) {
-      if (isRendering) {
-        val progress = (exportState as ExportState.Rendering).progressPercent
-        CircularProgressIndicator(
-          progress = { progress },
-          modifier = Modifier.size(14.dp),
-          strokeWidth = 2.dp,
-          color = Color.Black
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-          text = "${(progress * 100).toInt()}%",
-          style = MaterialTheme.typography.labelSmall.copy(
-            fontWeight = FontWeight.Bold,
-            color = Color.Black,
-            fontSize = 12.sp
-          )
-        )
-      } else {
-        Text(
-          text = "Export",
-          style = MaterialTheme.typography.labelMedium.copy(
-            fontWeight = FontWeight.Bold,
-            color = Color.Black,
-            fontSize = 13.sp
-          )
-        )
       }
     }
   }

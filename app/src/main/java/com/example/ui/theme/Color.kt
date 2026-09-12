@@ -21,6 +21,7 @@ val AmberAccent = Color(0xFFF59E0B)
 val GoldAccent = Color(0xFFEAB308)
 val GreenAccent = Color(0xFF10B981)
 val RedAccent = Color(0xFFEF4444)
+val RoseAccent = Color(0xFFF43F5E)
 
 // Text Colors (Dark text on white/light surfaces)
 val TextPrimary = Color(0xFF0F172A) // Dark slate primary text

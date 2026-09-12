@@ -264,8 +264,16 @@ data class TextClip(
   val posX: Float = 0f, // -1f to 1f normalized
   val posY: Float = 0.35f, // -1f to 1f normalized
   val scale: Float = 1f,
-  val animationType: String = "Fade", // "None", "Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Pop", "Shake"
+  val animationType: String = "Fade", // "None", "Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Pop", "Shake", "Glow", "Neon", "Glitch", "Cinematic", "Elastic"
   val animDurationMs: Long = 400L,
+  val hasGlow: Boolean = false,
+  val glowColor: Long = 0xFF00E5FF,
+  val glowRadius: Float = 10f,
+  val backgroundShape: String = "Rounded",
+  val animationIn: String = "Pop",
+  val animationOut: String = "Fade",
+  val animationDelayMs: Long = 0L,
+  val animationEasing: String = "Ease Out",
   val subtitleStyle: String = "Classic", // "Classic", "Bold", "HighlightWord", "Karaoke", "Animated"
   val highlightColor: Long = 0xFFFFEB3B,
   val words: List<WordTiming> = emptyList()

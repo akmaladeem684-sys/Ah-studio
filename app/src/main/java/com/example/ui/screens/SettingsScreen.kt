@@ -340,19 +340,6 @@ fun SettingsScreen(
         }
       }
 
-      // Section: App & About
-      item {
-        SettingsSection(title = "About AH Video Studio") {
-          SettingsInfoRow(title = "App Version", value = "v1.0.0 Pro Edition")
-          Divider(color = StudioBorder)
-          SettingsInfoRow(title = "Framework", value = "Kotlin + Jetpack Compose")
-          Divider(color = StudioBorder)
-          SettingsInfoRow(title = "Architecture", value = "MVVM + Clean Architecture")
-          Divider(color = StudioBorder)
-          SettingsInfoRow(title = "AI Engine", value = "Gemini Pro / Flash Model")
-        }
-      }
-
       item { Spacer(modifier = Modifier.height(40.dp)) }
     }
   }

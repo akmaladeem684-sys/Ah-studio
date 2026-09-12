@@ -222,6 +222,119 @@ class TimelineEngine {
     _isMagneticEnabled.value = enabled
   }
 
+  /**
+   * Hard-enforces the Zero Point Lock (🔒 0.0s) rule on the Primary/First Media Track.
+   * The first video clip in the main track MUST start at exactly 0.0s.
+   * If any operation moves, trims, or deletes clips such that the first clip is not at 0.0s,
+   * this automatically snaps the primary clip to 0.0s.
+   */
+  fun enforceZeroPointLock(): Boolean {
+    val clips = _timeline.value.videoClips
+    if (clips.isEmpty()) return false
+    val sorted = clips.sortedBy { it.timelineStartMs }
+    if (sorted.first().timelineStartMs != 0L) {
+      val firstClip = sorted.first().copy(timelineStartMs = 0L)
+      val updated = listOf(firstClip) + sorted.drop(1)
+      _timeline.value = _timeline.value.copy(videoClips = updated)
+      return true
+    }
+    return false
+  }
+
+  private val _isVideoTrackEndLocked = MutableStateFlow(true)
+  val isVideoTrackEndLocked: StateFlow<Boolean> = _isVideoTrackEndLocked.asStateFlow()
+
+  val videoTrackEndMs: Long
+    get() = _timeline.value.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+
+  fun setVideoTrackEndLocked(locked: Boolean) {
+    _isVideoTrackEndLocked.value = locked
+    if (locked) enforceVideoTrackBounds()
+  }
+
+  fun toggleVideoTrackEndLock() {
+    setVideoTrackEndLocked(!_isVideoTrackEndLocked.value)
+  }
+
+  /**
+   * Hard-enforces the Video Track End Point Lock (🔒 Video End) rule.
+   * When locked, the master video track duration sets the timeline boundary limit.
+   * Constrains non-video tracks (overlay, audio, text, sticker, effect) within [0.0s, videoTrackEndMs].
+   */
+  fun enforceVideoTrackBounds(): Boolean {
+    enforceZeroPointLock()
+    val clips = _timeline.value.videoClips
+    if (clips.isEmpty()) return false
+    val vEnd = clips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: return false
+    var modified = false
+
+    val newOverlay = _timeline.value.overlayClips.mapNotNull { clip ->
+      if (clip.timelineStartMs >= vEnd) {
+        modified = true
+        null
+      } else if (clip.timelineStartMs + clip.durationMs > vEnd) {
+        modified = true
+        clip.copy(durationMs = (vEnd - clip.timelineStartMs).coerceAtLeast(200L))
+      } else clip
+    }
+
+    val newAudio = _timeline.value.audioClips.mapNotNull { clip ->
+      if (clip.timelineStartMs >= vEnd) {
+        modified = true
+        null
+      } else if (clip.timelineStartMs + clip.durationMs > vEnd) {
+        modified = true
+        clip.copy(durationMs = (vEnd - clip.timelineStartMs).coerceAtLeast(200L))
+      } else clip
+    }
+
+    val newText = _timeline.value.textClips.mapNotNull { clip ->
+      if (clip.timelineStartMs >= vEnd) {
+        modified = true
+        null
+      } else if (clip.timelineStartMs + clip.durationMs > vEnd) {
+        modified = true
+        clip.copy(durationMs = (vEnd - clip.timelineStartMs).coerceAtLeast(200L))
+      } else clip
+    }
+
+    val newSticker = _timeline.value.stickerClips.mapNotNull { clip ->
+      if (clip.timelineStartMs >= vEnd) {
+        modified = true
+        null
+      } else if (clip.timelineStartMs + clip.durationMs > vEnd) {
+        modified = true
+        clip.copy(durationMs = (vEnd - clip.timelineStartMs).coerceAtLeast(200L))
+      } else clip
+    }
+
+    val newEffect = _timeline.value.effectClips.mapNotNull { clip ->
+      if (clip.timelineStartMs >= vEnd) {
+        modified = true
+        null
+      } else if (clip.timelineStartMs + clip.durationMs > vEnd) {
+        modified = true
+        clip.copy(durationMs = (vEnd - clip.timelineStartMs).coerceAtLeast(200L))
+      } else clip
+    }
+
+    if (modified) {
+      _timeline.value = _timeline.value.copy(
+        overlayClips = newOverlay,
+        audioClips = newAudio,
+        textClips = newText,
+        stickerClips = newSticker,
+        effectClips = newEffect
+      )
+    }
+
+    if (_currentPositionMs.value > vEnd) {
+      _currentPositionMs.value = vEnd
+    }
+
+    return modified
+  }
+
   fun reorderVideoClips(fromIndex: Int, toIndex: Int): Boolean {
     if (isTrackLocked(TrackType.MAIN_VIDEO)) return false
     val clips = _timeline.value.videoClips.toMutableList()
@@ -1072,17 +1185,36 @@ class TimelineEngine {
       is SelectedTrackElement.Video -> {
         if (isTrackLocked(TrackType.MAIN_VIDEO)) return
         val clip = _timeline.value.videoClips.find { it.id == clipId } ?: return
-        val currentEnd = clip.timelineStartMs + clip.durationMs
-        val targetStart = if (snap && _isSnappingEnabled.value) calculateSnap(newStartMs, ignoreClipIds = setOf(clipId)).snappedPosMs else newStartMs
-        val clampedStart = targetStart.coerceIn(0L, currentEnd - 200L)
-        val newDur = currentEnd - clampedStart
-        val deltaMs = clampedStart - clip.timelineStartMs
-        val newSourceStart = (clip.sourceStartMs + (deltaMs * clip.speed).toLong()).coerceIn(0L, clip.sourceEndMs - 200L)
-        val list = _timeline.value.videoClips.map {
-          if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur, sourceStartMs = newSourceStart)
-          else it
+        val firstClipId = _timeline.value.videoClips.minByOrNull { it.timelineStartMs }?.id
+        val isFirstClip = (clipId == firstClipId)
+
+        if (isFirstClip) {
+          // Zero Point Lock: The first clip must ALWAYS start at 0.0s.
+          // Trimming the left edge of the first clip adjusts its sourceStart and duration,
+          // but keeps timelineStartMs pinned at 0L so no gap opens.
+          val currentEnd = clip.timelineStartMs + clip.durationMs
+          val targetDeltaMs = (newStartMs - clip.timelineStartMs).coerceIn(0L, clip.durationMs - 200L)
+          val newDur = (clip.durationMs - targetDeltaMs).coerceAtLeast(200L)
+          val newSourceStart = (clip.sourceStartMs + (targetDeltaMs * clip.speed).toLong()).coerceIn(0L, clip.sourceEndMs - 200L)
+          val list = _timeline.value.videoClips.map {
+            if (it.id == clipId) it.copy(timelineStartMs = 0L, durationMs = newDur, sourceStartMs = newSourceStart)
+            else it
+          }
+          _timeline.value = _timeline.value.copy(videoClips = list)
+          enforceZeroPointLock()
+        } else {
+          val currentEnd = clip.timelineStartMs + clip.durationMs
+          val targetStart = if (snap && _isSnappingEnabled.value) calculateSnap(newStartMs, ignoreClipIds = setOf(clipId)).snappedPosMs else newStartMs
+          val clampedStart = targetStart.coerceIn(0L, currentEnd - 200L)
+          val newDur = currentEnd - clampedStart
+          val deltaMs = clampedStart - clip.timelineStartMs
+          val newSourceStart = (clip.sourceStartMs + (deltaMs * clip.speed).toLong()).coerceIn(0L, clip.sourceEndMs - 200L)
+          val list = _timeline.value.videoClips.map {
+            if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur, sourceStartMs = newSourceStart)
+            else it
+          }
+          _timeline.value = _timeline.value.copy(videoClips = list)
         }
-        _timeline.value = _timeline.value.copy(videoClips = list)
       }
       is SelectedTrackElement.Overlay -> {
         if (isTrackLocked(TrackType.OVERLAY)) return
@@ -1343,8 +1475,12 @@ class TimelineEngine {
     val moveDesc = if (targets.size > 1) "Move (${targets.size} clips)" else "Move Clip"
     recordHistory(TimelineActionType.MOVE_CLIP, moveDesc, targets)
     val newVideo = if (!isTrackLocked(TrackType.MAIN_VIDEO)) {
+      val firstClipId = _timeline.value.videoClips.minByOrNull { it.timelineStartMs }?.id
       _timeline.value.videoClips.map {
-        if (it.id in targets) it.copy(timelineStartMs = (it.timelineStartMs + effectiveDelta).coerceAtLeast(0L)) else it
+        if (it.id in targets) {
+          val candidate = if (it.id == firstClipId) 0L else (it.timelineStartMs + effectiveDelta).coerceAtLeast(0L)
+          it.copy(timelineStartMs = candidate)
+        } else it
       }.sortedBy { it.timelineStartMs }
     } else _timeline.value.videoClips
 
@@ -1454,10 +1590,13 @@ class TimelineEngine {
     when (element) {
       is SelectedTrackElement.Video -> {
         if (isTrackLocked(TrackType.MAIN_VIDEO)) return
+        val firstClipId = _timeline.value.videoClips.minByOrNull { it.timelineStartMs }?.id
+        val finalStart = if (clipId == firstClipId) 0L else start
         val list = _timeline.value.videoClips.map {
-          if (it.id == clipId) it.copy(timelineStartMs = start) else it
+          if (it.id == clipId) it.copy(timelineStartMs = finalStart) else it
         }.sortedBy { it.timelineStartMs }
         _timeline.value = _timeline.value.copy(videoClips = list)
+        enforceZeroPointLock()
       }
       is SelectedTrackElement.Overlay -> {
         if (isTrackLocked(TrackType.OVERLAY)) return
@@ -2075,6 +2214,7 @@ class TimelineEngine {
       stickerClips = newSticker,
       effectClips = newEffect
     )
+    enforceZeroPointLock()
     clearSelection()
     return true
   }
@@ -2111,6 +2251,7 @@ class TimelineEngine {
       stickerClips = newSticker,
       effectClips = newEffect
     )
+    enforceZeroPointLock()
     clearSelection()
     return true
   }

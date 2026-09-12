@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -405,6 +406,18 @@ fun MultiTrackTimeline(
                       // Add Media / Add Ending controls at the end of the video track
                       val maxVideoEndMs = timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
                       val addMediaOffset = if (timeline.videoClips.isEmpty()) 0.dp else (maxVideoEndMs / msPerPixel).dp + 8.dp
+
+                      // Locked Video Track End Boundary Line
+                      if (timeline.videoClips.isNotEmpty()) {
+                        val vEndOffset = (maxVideoEndMs / msPerPixel).dp
+                        Box(
+                          modifier = Modifier
+                            .offset(x = vEndOffset - 1.dp)
+                            .width(2.dp)
+                            .height(videoTrackHeight)
+                            .background(Color(0xFF00C853).copy(alpha = 0.9f))
+                        )
+                      }
 
                       Box(
                         modifier = Modifier
@@ -928,35 +941,46 @@ fun MultiTrackTimeline(
             .width(timelineViewportWidthDp)
             .fillMaxHeight()
         ) {
-          // Vertical Center Playhead Line
+          // Vertical Center Playhead Line (Professional Electric Blue)
           Box(
             modifier = Modifier
               .align(Alignment.Center)
               .fillMaxHeight()
-              .width(2.dp)
-              .background(Color.White)
-              .border(0.5.dp, Color.Black.copy(alpha = 0.5f))
+              .width(2.5.dp)
+              .background(
+                Brush.verticalGradient(
+                  listOf(
+                    Color(0xFF00E5FF),
+                    Color(0xFF007AFF),
+                    Color(0xFF0052CC)
+                  )
+                )
+              )
               .testTag("fixed_center_playhead_line")
           )
 
-          // CTI Top Needle Cap Badge on Ruler
+          // CTI Top Needle Cap Badge on Ruler (Subtle Dark Black handle with Blue Accent)
           Box(
             modifier = Modifier
               .align(Alignment.TopCenter)
-              .offset(y = 1.dp)
-              .width(11.dp)
+              .offset(y = 0.dp)
+              .width(13.dp)
               .height(18.dp)
-              .clip(RoundedCornerShape(3.dp))
-              .background(Color.White)
-              .border(1.dp, Color(0xFF1E222D), RoundedCornerShape(3.dp))
+              .clip(RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp, topStart = 3.dp, topEnd = 3.dp))
+              .background(Color(0xFF0A0D14))
+              .border(
+                width = 1.25.dp,
+                color = Color(0xFF0088FF),
+                shape = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp, topStart = 3.dp, topEnd = 3.dp)
+              )
               .testTag("fixed_center_playhead_cap"),
             contentAlignment = Alignment.Center
           ) {
             Box(
               modifier = Modifier
-                .width(1.5.dp)
+                .width(2.dp)
                 .height(10.dp)
-                .background(Color.Black.copy(alpha = 0.5f))
+                .background(Color(0xFF00E5FF))
             )
           }
 
@@ -1162,34 +1186,20 @@ private fun TimelineRulerHeader(
       .background(Color.Black),
     verticalAlignment = Alignment.CenterVertically
   ) {
-    // Timecode display & Ruler Play/Pause
-    Row(
+    // Left header block aligned with track utility sidebar below
+    Box(
       modifier = Modifier
         .width(if (hasAnyTrack) 88.dp else 72.dp)
         .fillMaxHeight()
         .padding(horizontal = 4.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(2.dp)
+      contentAlignment = Alignment.CenterStart
     ) {
-      IconButton(
-        onClick = { onTogglePlayPause?.invoke() },
-        modifier = Modifier
-          .size(24.dp)
-          .testTag("timeline_ruler_play_pause")
-      ) {
-        Icon(
-          imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-          contentDescription = if (isPlaying) "Pause" else "Play",
-          tint = Color.White,
-          modifier = Modifier.size(15.dp)
-        )
-      }
       Text(
-        text = if (hasAnyTrack) "${formatDurationShort(currentPosMs)} / ${formatDurationShort(totalDurationMs)}" else "00:00 / 00:00",
+        text = if (hasAnyTrack) formatDurationShort(currentPosMs) else "00:00",
         style = MaterialTheme.typography.bodySmall.copy(
-          color = Color.White.copy(alpha = 0.9f),
-          fontSize = 9.5.sp,
-          fontWeight = FontWeight.Medium
+          color = Color.White.copy(alpha = 0.8f),
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Bold
         ),
         maxLines = 1,
         modifier = Modifier.testTag("timeline_timecode_text")
@@ -1227,7 +1237,7 @@ private fun TimelineEmptyView(
 ) {
   Box(
     modifier = modifier
-      .background(Color(0xFF0D0F14)),
+      .background(Color(0xFF090B10)),
     contentAlignment = Alignment.Center
   ) {
     Column(
@@ -1237,8 +1247,8 @@ private fun TimelineEmptyView(
     ) {
       Surface(
         shape = CircleShape,
-        color = CyanAccent.copy(alpha = 0.15f),
-        border = BorderStroke(1.5.dp, CyanAccent),
+        color = Color(0xFF0066FF).copy(alpha = 0.15f),
+        border = BorderStroke(1.5.dp, Color(0xFF007AFF)),
         modifier = Modifier
           .size(56.dp)
           .clickable { onAddMedia?.invoke() }
@@ -1248,7 +1258,7 @@ private fun TimelineEmptyView(
           Icon(
             imageVector = Icons.Default.Add,
             contentDescription = "Add Media",
-            tint = CyanAccent,
+            tint = Color(0xFF0088FF),
             modifier = Modifier.size(30.dp)
           )
         }
@@ -1256,7 +1266,7 @@ private fun TimelineEmptyView(
       Text(
         text = "Tap + to add your first video or photo",
         style = MaterialTheme.typography.bodyMedium.copy(
-          color = Color.White.copy(alpha = 0.75f),
+          color = Color.White.copy(alpha = 0.85f),
           fontSize = 13.5.sp,
           fontWeight = FontWeight.Medium
         )

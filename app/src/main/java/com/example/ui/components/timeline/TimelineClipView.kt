@@ -364,19 +364,24 @@ fun TimelineClipView(
             .padding(horizontal = 4.dp, vertical = 2.dp)
         ) {
           if (clipIndex != null) {
+            val isZeroLocked = isVideoClip && clipIndex == 0
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(3.dp))
-                .background(if (isSelected) CyanAccent else Color.Black.copy(alpha = 0.65f))
+                .background(
+                  if (isZeroLocked) Color(0xFF00C853).copy(alpha = if (isSelected) 0.95f else 0.75f)
+                  else if (isSelected) CyanAccent
+                  else Color.Black.copy(alpha = 0.65f)
+                )
                 .padding(horizontal = 4.dp, vertical = 1.dp)
                 .testTag("clip_index_${clipIndex}_$clipId")
             ) {
               Text(
-                text = "#${clipIndex + 1}",
+                text = if (isZeroLocked) "🔒 0.0s" else "#${clipIndex + 1}",
                 style = MaterialTheme.typography.labelSmall.copy(
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
-                  color = if (isSelected) Color.Black else CyanAccent
+                  color = if (isZeroLocked) Color.White else if (isSelected) Color.Black else CyanAccent
                 )
               )
             }
@@ -618,6 +623,26 @@ fun TimelineClipView(
                   )
                 }
               }
+            }
+          }
+
+          val isEndLocked = isVideoClip && clipIndex != null && clipIndex == (totalClipsInTrack - 1)
+          if (isEndLocked) {
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color(0xFF00C853).copy(alpha = if (isSelected) 0.95f else 0.75f))
+                .padding(horizontal = 4.dp, vertical = 1.dp)
+                .testTag("clip_end_lock_$clipId")
+            ) {
+              Text(
+                text = "🔒 End",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White
+                )
+              )
             }
           }
 

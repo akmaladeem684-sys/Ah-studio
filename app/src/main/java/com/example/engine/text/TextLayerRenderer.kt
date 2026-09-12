@@ -95,9 +95,36 @@ object TextLayerRenderer {
         animAlpha = (progress * 1.5f).coerceIn(0f, 1f)
       }
       "glow", "glow pulse", "glow_pulse" -> {
-        val pulse = sin(relTime.toFloat() / 220f * PI.toFloat()) * 0.5f + 0.5f
-        animAlpha = progress.coerceIn(0.6f, 1f)
-        animScale = 1.0f + pulse * 0.035f
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        val entranceScale = 0.85f + 0.15f * easeOut
+        val pulse = if (progress >= 0.7f) sin((relTime - animDur * 0.7f).toFloat() / 220f * PI.toFloat()) * 0.04f else 0f
+        animAlpha = progress.coerceIn(0.2f, 1f)
+        animScale = entranceScale + pulse
+      }
+      "elastic", "elastic motion", "elastic_motion" -> {
+        val spring = 1f - cos(progress * PI.toFloat() * 3.8f) * exp(-progress * 3.5f)
+        animScale = spring.coerceIn(0f, 1.3f)
+        animAlpha = (progress * 3.5f).coerceIn(0f, 1f)
+      }
+      "character reveal", "letter reveal", "reveal in" -> {
+        val totalChars = clip.text.length
+        val charCount = (totalChars * (1f - (1f - progress) * (1f - progress))).toInt().coerceIn(0, totalChars)
+        visibleText = clip.text.substring(0, charCount)
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animPosY = clip.posY + (1f - easeOut) * 0.08f
+        animAlpha = progress
+      }
+      "word reveal", "word_reveal" -> {
+        val words = clip.text.split(" ")
+        val wordCount = (words.size * progress).toInt().coerceIn(1, words.size)
+        visibleText = words.take(wordCount).joinToString(" ")
+        animAlpha = (progress * 2f).coerceIn(0f, 1f)
+      }
+      "stroke reveal", "stroke_reveal" -> {
+        val totalChars = clip.text.length
+        val charCount = (totalChars * progress).toInt().coerceIn(0, totalChars)
+        visibleText = clip.text.substring(0, charCount)
+        animAlpha = progress
       }
       "neon", "neon flicker", "neon_flicker" -> {
         animAlpha = if (progress < 0.7f) {
@@ -140,6 +167,26 @@ object TextLayerRenderer {
         val easeOut = 1f - (1f - progress) * (1f - progress)
         animAlpha = easeOut
         animScale = 0.96f + 0.04f * easeOut
+      }
+      "rotate", "rotate in", "rotate_in" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animRotation = clip.rotation + (1f - easeOut) * -60f
+        animScale = 0.4f + 0.6f * easeOut
+        animAlpha = progress
+      }
+      "flicker", "light flicker" -> {
+        animAlpha = if (progress < 0.7f) {
+          val cycle = ((relTime / 70L) % 3).toInt()
+          if (cycle == 0) 1f else 0.2f
+        } else 1f
+      }
+      "mask reveal", "mask_reveal" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        val totalChars = clip.text.length
+        val charCount = (totalChars * easeOut).toInt().coerceIn(0, totalChars)
+        visibleText = clip.text.substring(0, charCount)
+        animPosY = clip.posY + (1f - easeOut) * 0.06f
+        animAlpha = progress
       }
       else -> {
         // "None" or fallback
@@ -193,8 +240,49 @@ object TextLayerRenderer {
     context: Context
   ) {
     if (width <= 0 || height <= 0 || clip.opacity <= 0f) return
-
     val state = evaluateAnimation(clip, currentPosMs)
+    drawInternal(canvas, clip, state, width, height, context)
+  }
+
+  /**
+   * Draws a live animated template preview frame using the EXACT same vector rendering engine
+   * as the Screen Editor. Smoothly loops the animation and provides vertical centering.
+   */
+  fun drawTemplatePreview(
+    canvas: Canvas,
+    clip: TextClip,
+    previewLoopMs: Long,
+    width: Int,
+    height: Int,
+    context: Context,
+    overridePosY: Float? = null,
+    speedMultiplier: Float = 1.0f
+  ) {
+    if (width <= 0 || height <= 0 || clip.opacity <= 0f) return
+    val scaledMs = (previewLoopMs * speedMultiplier).toLong()
+    val totalLoopDur = 2400L
+    val loopTime = (scaledMs % totalLoopDur).coerceAtLeast(0L)
+    val effectiveClip = if (overridePosY != null) {
+      clip.copy(posX = 0f, posY = overridePosY)
+    } else {
+      clip.copy(posX = 0f, posY = 0f)
+    }
+    val state = evaluateAnimation(effectiveClip, loopTime)
+    val loopFadeAlpha = if (loopTime > 2050L) {
+      (1f - (loopTime - 2050L).toFloat() / 350f).coerceIn(0f, 1f)
+    } else 1f
+    val finalState = state.copy(opacity = state.opacity * loopFadeAlpha)
+    drawInternal(canvas, effectiveClip, finalState, width, height, context)
+  }
+
+  private fun drawInternal(
+    canvas: Canvas,
+    clip: TextClip,
+    state: EvaluatedTextState,
+    width: Int,
+    height: Int,
+    context: Context
+  ) {
     val rawText = if (clip.isAllCaps) state.visibleText.uppercase() else state.visibleText
     if (state.opacity <= 0f || rawText.isEmpty()) return
 
@@ -274,7 +362,12 @@ object TextLayerRenderer {
         val bgAlpha = (state.opacity * (Color.alpha(color) / 255f) * 255).toInt().coerceIn(0, 255)
         alpha = bgAlpha
       }
-      val cornerRad = clip.cornerRadius * scaleFactor
+      val cornerRad = when {
+        clip.backgroundShape.equals("Pill", true) -> (bgBottom - bgTop) / 2f
+        clip.backgroundShape.equals("Rectangle", true) -> 0f
+        clip.backgroundShape.equals("Square", true) -> 4f * scaleFactor
+        else -> clip.cornerRadius * scaleFactor
+      }
       canvas.drawRoundRect(RectF(bgLeft, bgTop, bgRight, bgBottom), cornerRad, cornerRad, bgPaint)
     }
 
@@ -315,6 +408,18 @@ object TextLayerRenderer {
     opacity: Float
   ) {
     if (text.isEmpty()) return
+
+    // Glow pass if enabled
+    if (clip.hasGlow) {
+      val glowPaint = Paint(paint).apply {
+        clearShadowLayer()
+        setShadowLayer(clip.glowRadius * scaleFactor, 0f, 0f, clip.glowColor.toInt())
+        color = clip.glowColor.toInt()
+        style = Paint.Style.FILL
+        alpha = (opacity * 200).toInt().coerceIn(0, 255)
+      }
+      canvas.drawText(text, x, y, glowPaint)
+    }
 
     // Shadow
     if (clip.hasShadow || clip.subtitleStyle.equals("Classic", true)) {

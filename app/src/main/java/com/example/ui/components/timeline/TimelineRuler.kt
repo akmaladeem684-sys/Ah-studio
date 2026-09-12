@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -53,7 +54,7 @@ fun AccurateTimecodeRuler(
     modifier = modifier
       .width(rulerWidthDp)
       .height(34.dp)
-      .background(StudioSurface)
+      .background(Color(0xFF080A0F))
       .testTag("timeline_timecode_ruler")
       .pointerInput(safeTotalDuration, msPerDp, isFrameSnapping, fps, density) {
         detectTapGestures(
@@ -117,28 +118,28 @@ fun AccurateTimecodeRuler(
       // Subtle ruler top gradient background
       drawRect(
         brush = Brush.verticalGradient(
-          listOf(StudioDarkBg, StudioSurface)
+          listOf(Color(0xFF040508), Color(0xFF0C0F17))
         )
       )
 
       // Bottom border line
       drawLine(
-        color = StudioBorder,
+        color = Color(0xFF1B202D),
         start = Offset(0f, canvasHeight),
         end = Offset(canvasWidth, canvasHeight),
         strokeWidth = 1.dp.toPx()
       )
 
       val textPaint = android.graphics.Paint().apply {
-        color = android.graphics.Color.argb(220, 203, 213, 225)
-        textSize = 9.sp.toPx()
+        color = android.graphics.Color.WHITE
+        textSize = 9.5.sp.toPx()
         isAntiAlias = true
-        typeface = android.graphics.Typeface.MONOSPACE
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
       }
 
       val frameTextPaint = android.graphics.Paint().apply {
-        color = android.graphics.Color.argb(190, 6, 182, 212)
-        textSize = 7.5.sp.toPx()
+        color = android.graphics.Color.argb(220, 0, 229, 255)
+        textSize = 8.sp.toPx()
         isAntiAlias = true
         typeface = android.graphics.Typeface.MONOSPACE
       }
@@ -159,10 +160,10 @@ fun AccurateTimecodeRuler(
         }
 
         val tickColor = when {
-          isMajor -> TextPrimary.copy(alpha = 0.9f)
-          isHalfMajor -> TextSecondary.copy(alpha = 0.6f)
-          showFrameTicks && (i % 5 == 0) -> CyanAccent.copy(alpha = 0.6f)
-          else -> TextTertiary.copy(alpha = 0.35f)
+          isMajor -> Color.White.copy(alpha = 0.95f)
+          isHalfMajor -> Color.White.copy(alpha = 0.6f)
+          showFrameTicks && (i % 5 == 0) -> CyanAccent.copy(alpha = 0.7f)
+          else -> Color.White.copy(alpha = 0.3f)
         }
 
         drawLine(
