@@ -38,6 +38,9 @@ object PluginManager {
     if (isInitialized) return
     isInitialized = true
     loadRegistry(context)
+    autoDiscoverExtractedPlugins(context)
+    autoDiscoverUploadedZips(context)
+    ensureDefaultFiltersPackInstalled(context)
     
     // Initialize loaded modules
     for (plugin in _installedPlugins.value) {
@@ -49,6 +52,101 @@ object PluginManager {
         module.onDisable()
       }
       activeModules[plugin.manifest.id] = module
+    }
+  }
+
+  /**
+   * Ensures default Hollywood & Cinematic filter plugins are pre-installed so the filters tool is never empty.
+   */
+  fun ensureDefaultFiltersPackInstalled(context: Context) {
+    val filterItems = getEnabledItemsForCategory(PluginCategory.FILTER)
+    if (filterItems.isEmpty()) {
+      try {
+        val sampleZip = PluginSampleGenerator.generateFiltersPluginZip(context)
+        installPluginFromZipFile(context, sampleZip)
+        if (sampleZip.exists()) sampleZip.delete()
+        Log.d(TAG, "Successfully initialized default Hollywood Filters plugin pack.")
+      } catch (e: Exception) {
+        Log.w(TAG, "Could not auto-install default filters pack", e)
+      }
+    }
+  }
+
+  /**
+   * Automatically scans for untracked extracted plugins in the plugins directory.
+   */
+  fun autoDiscoverExtractedPlugins(context: Context) {
+    try {
+      val pluginsBaseDir = File(context.filesDir, "plugins")
+      if (!pluginsBaseDir.exists() || !pluginsBaseDir.isDirectory) return
+      
+      val existingIds = _installedPlugins.value.map { it.manifest.id }.toSet()
+      val subDirs = pluginsBaseDir.listFiles { f -> f.isDirectory } ?: return
+      var discoveredAny = false
+      val currentList = _installedPlugins.value.toMutableList()
+
+      for (dir in subDirs) {
+        if (dir.name in existingIds) continue
+        val allJsonFiles = dir.walkTopDown().filter { it.isFile && it.extension.equals("json", ignoreCase = true) }.toList()
+        val manifestFile = allJsonFiles.find { it.name.equals("plugin.json", ignoreCase = true) }
+          ?: allJsonFiles.find { it.name.equals("manifest.json", ignoreCase = true) }
+          ?: allJsonFiles.find { it.name.equals("integration.json", ignoreCase = true) }
+          ?: allJsonFiles.find { it.name.equals("package.json", ignoreCase = true) }
+          ?: allJsonFiles.find { it.name.equals("filters.json", ignoreCase = true) }
+          ?: allJsonFiles.find { it.name.equals("luts.json", ignoreCase = true) }
+
+        val integrationFile = allJsonFiles.find { it.name.equals("integration.json", ignoreCase = true) }
+        val readmeFile = dir.walkTopDown().find { it.isFile && (it.name.equals("README.txt", ignoreCase = true) || it.name.equals("README.md", ignoreCase = true)) }
+
+        val manifest = parseAndBuildManifest(
+          manifestFile = manifestFile,
+          integrationFile = integrationFile,
+          readmeFile = readmeFile,
+          rootDir = dir,
+          zipFileName = dir.name
+        )
+
+        val installedPlugin = InstalledPlugin(
+          manifest = manifest,
+          installDirAbsolutePath = dir.absolutePath,
+          isEnabled = true,
+          installedTimestamp = System.currentTimeMillis()
+        )
+        currentList.removeAll { it.manifest.id == manifest.id }
+        currentList.add(installedPlugin)
+        discoveredAny = true
+        Log.d(TAG, "Auto-discovered unindexed plugin: ${manifest.name} (${manifest.id})")
+      }
+
+      if (discoveredAny) {
+        _installedPlugins.value = currentList
+        saveRegistry(context)
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error during autoDiscoverExtractedPlugins", e)
+    }
+  }
+
+  /**
+   * Scans storage locations for any uploaded ZIP files and auto-installs them.
+   */
+  fun autoDiscoverUploadedZips(context: Context) {
+    try {
+      val searchDirs = listOfNotNull(
+        context.cacheDir,
+        context.filesDir,
+        context.getExternalFilesDir(null)
+      )
+
+      for (dir in searchDirs) {
+        val zipFiles = dir.listFiles { f -> f.isFile && f.extension.equals("zip", ignoreCase = true) && !f.name.startsWith("plugin_upload_") } ?: continue
+        for (zip in zipFiles) {
+          Log.d(TAG, "Found uploaded plugin zip: ${zip.name}, attempting auto-installation...")
+          installPluginFromZipFile(context, zip)
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error in autoDiscoverUploadedZips", e)
     }
   }
 
@@ -260,13 +358,14 @@ object PluginManager {
     val result = mutableListOf<Pair<InstalledPlugin, PluginItemManifest>>()
     for (plugin in _installedPlugins.value) {
       if (!plugin.isEnabled) continue
+      val pluginCat = plugin.manifest.category
       for (item in plugin.manifest.items) {
-        val itemCategory = if (item.categoryKey.isNotBlank()) {
+        val itemCategory = if (item.categoryKey.isNotBlank() && item.categoryKey != "items" && item.categoryKey != "assets" && item.categoryKey != "other") {
           PluginCategory.fromKey(item.categoryKey)
         } else {
-          plugin.manifest.category
+          pluginCat
         }
-        if (itemCategory == category) {
+        if (itemCategory == category || (category == PluginCategory.FILTER && pluginCat == PluginCategory.FILTER)) {
           result.add(Pair(plugin, item))
         }
       }
@@ -385,7 +484,11 @@ object PluginManager {
       description = "Creative templates and typography pack for AH Video Studio."
     }
 
-    val rawType = optField("type", "category", "plugin_type")
+    var rawType = optField("type", "category", "plugin_type", "kind")
+    if (rawType.isBlank() && (zipFileName.contains("filter", ignoreCase = true) || zipFileName.contains("lut", ignoreCase = true))) {
+      rawType = "filter"
+    }
+
     val icon = optField("icon", "preview", "thumbnail")
     val minVersion = optField("minimumAppVersion", "min_version").ifBlank { "1.0.0" }
 
@@ -401,15 +504,99 @@ object PluginManager {
     }
 
     // A. Parse explicitly declared items in manifestJsonObj / integrationJsonObj
-    val explicitArrays = listOf("items", "assets", "templates", "fonts", "captions", "quotes", "business", "youtube", "islamic", "reels", "stickers", "filters", "audio")
+    val explicitArrays = listOf("items", "assets", "filters", "luts", "presets", "templates", "fonts", "captions", "quotes", "business", "youtube", "islamic", "reels", "stickers", "audio")
     for (arrName in explicitArrays) {
       val arr = manifestJsonObj?.optJSONArray(arrName) ?: integrationJsonObj?.optJSONArray(arrName)
       if (arr != null) {
+        val effectiveDefaultCategory = when {
+          arrName in listOf("filters", "luts", "presets") -> "filter"
+          arrName in listOf("fonts") -> "font"
+          arrName in listOf("templates", "captions", "quotes", "business", "youtube", "islamic", "reels") -> "text_template"
+          arrName in listOf("stickers") -> "sticker"
+          arrName in listOf("audio") -> "audio"
+          rawType.isNotBlank() && rawType != "items" && rawType != "assets" -> rawType
+          zipFileName.contains("filter", ignoreCase = true) -> "filter"
+          else -> "filter"
+        }
         for (i in 0 until arr.length()) {
           val itemObj = arr.optJSONObject(i) ?: continue
-          val item = parseItemJsonObject(itemObj, id, discoveredItems.size, arrName)
+          val item = parseItemJsonObject(itemObj, id, discoveredItems.size, effectiveDefaultCategory)
           addItem(item)
         }
+      }
+    }
+
+    // B. Scan filters/ and luts/ directories for filters.json, luts.json, and .cube/.lut files
+    val filterDirNames = listOf("filters", "luts", "presets", "color_grading", "LUTs", "Filters", "Presets")
+    for (fDirName in filterDirNames) {
+      val fDir = File(rootDir, fDirName)
+      if (fDir.exists() && fDir.isDirectory) {
+        fDir.walkTopDown().forEach { file ->
+          if (file.isFile) {
+            if (file.extension.equals("json", ignoreCase = true)) {
+              try {
+                val fJsonText = file.readText().trim()
+                if (fJsonText.startsWith("[")) {
+                  val arr = JSONArray(fJsonText)
+                  for (j in 0 until arr.length()) {
+                    val fObj = arr.optJSONObject(j) ?: continue
+                    addItem(parseItemJsonObject(fObj, id, discoveredItems.size, "filter"))
+                  }
+                } else if (fJsonText.startsWith("{")) {
+                  val rootFObj = JSONObject(fJsonText)
+                  val arr = rootFObj.optJSONArray("filters") ?: rootFObj.optJSONArray("items") ?: rootFObj.optJSONArray("luts")
+                  if (arr != null) {
+                    for (j in 0 until arr.length()) {
+                      val fObj = arr.optJSONObject(j) ?: continue
+                      addItem(parseItemJsonObject(fObj, id, discoveredItems.size, "filter"))
+                    }
+                  } else {
+                    addItem(parseItemJsonObject(rootFObj, id, discoveredItems.size, "filter"))
+                  }
+                }
+              } catch (e: Exception) {
+                Log.w(TAG, "Error parsing filter json: ${file.path}", e)
+              }
+            } else if (file.extension.equals("cube", ignoreCase = true) || file.extension.equals("lut", ignoreCase = true)) {
+              val filterId = "${id}_lut_${file.nameWithoutExtension.lowercase().replace(Regex("[^a-z0-9_]"), "_")}"
+              val filterName = file.nameWithoutExtension.replace('_', ' ').split(' ')
+                .joinToString(" ") { it.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.titlecase() else ch.toString() } }
+              addItem(
+                PluginItemManifest(
+                  id = filterId,
+                  name = filterName,
+                  description = "3D Cinematic LUT Filter",
+                  preview = "",
+                  file = file.relativeTo(rootDir).path,
+                  emoji = "🎬",
+                  categoryKey = "filter",
+                  parameters = mapOf("lutFile" to file.relativeTo(rootDir).path)
+                )
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // C. Scan rootDir for top-level .cube/.lut files or filters.json
+    rootDir.listFiles()?.forEach { file ->
+      if (file.isFile && (file.extension.equals("cube", ignoreCase = true) || file.extension.equals("lut", ignoreCase = true))) {
+        val filterId = "${id}_lut_${file.nameWithoutExtension.lowercase().replace(Regex("[^a-z0-9_]"), "_")}"
+        val filterName = file.nameWithoutExtension.replace('_', ' ').split(' ')
+          .joinToString(" ") { it.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.titlecase() else ch.toString() } }
+        addItem(
+          PluginItemManifest(
+            id = filterId,
+            name = filterName,
+            description = "3D Cinematic LUT Filter",
+            preview = "",
+            file = file.relativeTo(rootDir).path,
+            emoji = "🎬",
+            categoryKey = "filter",
+            parameters = mapOf("lutFile" to file.relativeTo(rootDir).path)
+          )
+        )
       }
     }
 
@@ -599,14 +786,14 @@ object PluginManager {
 
     // Determine finalized plugin category/type
     val finalType = when {
-      rawType.isNotBlank() -> rawType
+      rawType.isNotBlank() && rawType != "items" && rawType != "assets" -> rawType
+      discoveredItems.any { it.itemCategory == PluginCategory.FILTER || it.categoryKey == "filter" } -> "filter"
       discoveredItems.any { it.categoryKey == "font" } && discoveredItems.any { it.categoryKey == "text_template" } -> "templates_and_fonts"
       discoveredItems.any { it.categoryKey == "font" } -> "font"
       discoveredItems.any { it.categoryKey == "text_template" } -> "text_template"
-      discoveredItems.any { it.categoryKey == "filter" } -> "filter"
       discoveredItems.any { it.categoryKey == "sticker" } -> "sticker"
       discoveredItems.any { it.categoryKey == "audio" } -> "audio"
-      else -> "other"
+      else -> "filter"
     }
 
     return PluginManifest(
@@ -629,7 +816,13 @@ object PluginManager {
     val itemPreview = itemObj.optString("preview", "")
     val itemFile = itemObj.optString("file", itemObj.optString("path", ""))
     val itemEmoji = itemObj.optString("emoji", "🎬")
-    val itemCatKey = itemObj.optString("categoryKey", itemObj.optString("category", defaultCategory))
+    
+    val rawCat = itemObj.optString("categoryKey", itemObj.optString("category", defaultCategory))
+    val itemCatKey = if (rawCat.isBlank() || rawCat == "items" || rawCat == "assets") {
+      if (defaultCategory.isNotBlank() && defaultCategory != "items" && defaultCategory != "assets") defaultCategory else "filter"
+    } else {
+      rawCat
+    }
 
     val paramsMap = mutableMapOf<String, Any>()
     val paramsObj = itemObj.optJSONObject("parameters")

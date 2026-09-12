@@ -3723,6 +3723,46 @@ class TimelineEngine {
   // ==========================================
 
   /**
+   * Explicitly extracts audio from a video/overlay clip into a dedicated audio track.
+   * Mutes or disables audio on the source video so sound is not duplicated.
+   */
+  fun extractAudioFromClip(clipId: String): String? {
+    val clip = _timeline.value.videoClips.find { it.id == clipId }
+      ?: _timeline.value.overlayClips.find { it.id == clipId }
+      ?: return null
+
+    recordHistory()
+    val audioId = "audio_extracted_${UUID.randomUUID().toString().take(8)}"
+    val extractedAudioClip = com.example.domain.model.AudioClip(
+      id = audioId,
+      uri = clip.uri,
+      title = "Extracted Audio (${clip.name})",
+      timelineStartMs = clip.timelineStartMs,
+      durationMs = clip.durationMs,
+      volume = clip.volume,
+      fadeInMs = 0L,
+      fadeOutMs = 0L
+    )
+
+    val updatedVideos = _timeline.value.videoClips.map {
+      if (it.id == clipId) it.copy(hasAudio = false, isMuted = true) else it
+    }
+    val updatedOverlays = _timeline.value.overlayClips.map {
+      if (it.id == clipId) it.copy(hasAudio = false, isMuted = true) else it
+    }
+    val currentAudios = _timeline.value.audioClips.toMutableList().apply { add(extractedAudioClip) }
+    currentAudios.sortBy { it.timelineStartMs }
+
+    _timeline.value = _timeline.value.copy(
+      videoClips = updatedVideos,
+      overlayClips = updatedOverlays,
+      audioClips = currentAudios
+    )
+    _selectedElement.value = SelectedTrackElement.Audio(audioId)
+    return audioId
+  }
+
+  /**
    * Ensures at least one audio track exists on the timeline.
    * If none exists, creates a default background audio track matching the timeline duration.
    */

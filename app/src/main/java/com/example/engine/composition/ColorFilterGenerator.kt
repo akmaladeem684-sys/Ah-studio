@@ -360,4 +360,92 @@ object ColorFilterGenerator {
     val matrix = getFilterMatrix(type, intensity) ?: ColorMatrix()
     return matrix.array
   }
+
+  /**
+   * Generates a ColorMatrix representing a PluginItemManifest filter parameters or custom color matrix.
+   */
+  fun getPluginFilterMatrix(item: com.example.domain.plugin.PluginItemManifest, intensity: Float = 1.0f): ColorMatrix {
+    val result = ColorMatrix()
+
+    // 1. Explicit colorMatrix float array
+    item.colorMatrix?.let { arr ->
+      if (arr.size >= 20) {
+        val customMat = ColorMatrix(arr)
+        if (intensity < 0.99f) {
+          val identity = ColorMatrix()
+          val baseArr = customMat.array
+          val idArr = identity.array
+          val outArr = FloatArray(20)
+          for (i in 0 until 20) {
+            outArr[i] = idArr[i] + (baseArr[i] - idArr[i]) * intensity
+          }
+          return ColorMatrix(outArr)
+        }
+        return customMat
+      }
+    }
+
+    // 2. Adjustments-based parameters
+    val sat = 1f + (item.saturation - 1f) * intensity
+    val satMatrix = ColorMatrix()
+    satMatrix.setSaturation(sat.coerceIn(0f, 3f))
+    result.postConcat(satMatrix)
+
+    val totalBright = item.brightness * 100f * intensity
+    if (totalBright != 0f) {
+      val brightArray = floatArrayOf(
+        1f, 0f, 0f, 0f, totalBright,
+        0f, 1f, 0f, 0f, totalBright,
+        0f, 0f, 1f, 0f, totalBright,
+        0f, 0f, 0f, 1f, 0f
+      )
+      result.postConcat(ColorMatrix(brightArray))
+    }
+
+    val contrast = (1f + (item.contrast - 1f) * intensity).coerceIn(0.1f, 3f)
+    if (contrast != 1f) {
+      val contrastOffset = (1f - contrast) * 128f
+      val contrastArray = floatArrayOf(
+        contrast, 0f, 0f, 0f, contrastOffset,
+        0f, contrast, 0f, 0f, contrastOffset,
+        0f, 0f, contrast, 0f, contrastOffset,
+        0f, 0f, 0f, 1f, 0f
+      )
+      result.postConcat(ColorMatrix(contrastArray))
+    }
+
+    val temp = item.temperature * intensity
+    if (temp != 0f) {
+      val clampedTemp = temp.coerceIn(-1f, 1f)
+      val rOffset = if (clampedTemp > 0) clampedTemp * 40f else 0f
+      val bOffset = if (clampedTemp < 0) -clampedTemp * 40f else 0f
+      val tempArray = floatArrayOf(
+        1f, 0f, 0f, 0f, rOffset,
+        0f, 1f, 0f, 0f, rOffset * 0.5f,
+        0f, 0f, 1f, 0f, bOffset,
+        0f, 0f, 0f, 1f, 0f
+      )
+      result.postConcat(ColorMatrix(tempArray))
+    }
+
+    val tint = item.tint * intensity
+    if (tint != 0f) {
+      val clampedTint = tint.coerceIn(-1f, 1f)
+      val gOffset = if (clampedTint < 0) -clampedTint * 35f else 0f
+      val rbOffset = if (clampedTint > 0) clampedTint * 25f else 0f
+      val tintArray = floatArrayOf(
+        1f, 0f, 0f, 0f, rbOffset,
+        0f, 1f, 0f, 0f, gOffset,
+        0f, 0f, 1f, 0f, rbOffset,
+        0f, 0f, 0f, 1f, 0f
+      )
+      result.postConcat(ColorMatrix(tintArray))
+    }
+
+    return result
+  }
+
+  fun getPluginFilterMatrixArray(item: com.example.domain.plugin.PluginItemManifest, intensity: Float = 1.0f): FloatArray {
+    return getPluginFilterMatrix(item, intensity).array
+  }
 }

@@ -509,12 +509,6 @@ fun EditorScreen(
 
       var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
 
-      LaunchedEffect(timeline.audioClips.isEmpty(), timeline.videoClips.isNotEmpty()) {
-        if (timeline.audioClips.isEmpty() && timeline.videoClips.isNotEmpty()) {
-          viewModel.timelineEngine.ensureAudioTrackExists()
-        }
-      }
-
       if (draggedTransitionType != null) {
         Surface(
           modifier = Modifier

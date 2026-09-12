@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,6 +54,8 @@ import com.example.domain.model.*
 import com.example.engine.SelectedTrackElement
 import com.example.engine.audio.SoundEffectsCatalog
 import com.example.ui.StudioViewModel
+import com.example.ui.components.filter.StudioFilterPreviewCard
+import com.example.ui.components.filter.StudioPluginFilterPreviewCard
 import com.example.ui.components.formatDuration
 import com.example.ui.components.text.TextStudioPanel
 import com.example.ui.components.timeline.AudioVolumeEnvelopeGraph
@@ -697,6 +701,7 @@ fun FiltersToolPanel(
   // Active filter either from selected clip or global timeline filter
   val activeFilterState = selectedClip?.filter ?: timeline.filter
   var currentFilter by remember(activeFilterState) { mutableStateOf(activeFilterState) }
+  var selectedPluginItemId by remember { mutableStateOf<String?>(null) }
   var selectedCategory by remember { mutableStateOf("All") }
   val categories = listOf("All", "Pro Enhancements", "Cinematic & Nature", "Aesthetic Looks", "Installed Plugins")
 
@@ -714,6 +719,22 @@ fun FiltersToolPanel(
       "Cinematic & Nature" -> FilterType.values().filter { it.category == "Cinematic & Nature" || it == FilterType.NONE }
       "Aesthetic Looks" -> FilterType.values().filter { it.category == "Aesthetic Looks" || it == FilterType.NONE }
       else -> emptyList()
+    }
+  }
+
+  // Active preview video reference from timeline clip
+  val previewUri = remember(selectedClip, timeline) {
+    selectedClip?.uri?.ifBlank { null }
+      ?: timeline.videoClips.firstOrNull { it.uri.isNotBlank() }?.uri
+      ?: ""
+  }
+  val previewSourceStartMs = selectedClip?.sourceStartMs ?: 0L
+
+  // Scroll state & visible item tracking so off-screen cards pause video decoding
+  val filtersScrollState = rememberLazyListState()
+  val visibleIndices by remember {
+    derivedStateOf {
+      filtersScrollState.layoutInfo.visibleItemsInfo.map { it.index }.toSet()
     }
   }
 
@@ -753,11 +774,13 @@ fun FiltersToolPanel(
       }
 
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (currentFilter.type != FilterType.NONE) {
+        if (currentFilter.type != FilterType.NONE || selectedPluginItemId != null) {
           TextButton(
             onClick = {
               currentFilter = FilterSettings(type = FilterType.NONE, intensity = 1.0f)
-              viewModel.timelineEngine.updateFilter(currentFilter)
+              selectedPluginItemId = null
+              viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
+              viewModel.timelineEngine.updateAdjustments(VideoAdjustments())
             },
             modifier = Modifier.testTag("filter_reset_button")
           ) {
@@ -796,111 +819,65 @@ fun FiltersToolPanel(
       }
     }
 
-    // Live Animated Filter Thumbnails Grid / Row
+    // Live Animated Filter Previews Grid / Row
     if (selectedCategory != "Installed Plugins") {
       LazyRow(
+        state = filtersScrollState,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(horizontal = 2.dp)
       ) {
-        items(displayFilters) { type ->
+        itemsIndexed(displayFilters) { index, type ->
           val isSelected = currentFilter.type == type
+          val isVisible = index in visibleIndices || visibleIndices.isEmpty()
 
-          Card(
-            modifier = Modifier
-              .size(width = 98.dp, height = 110.dp)
-              .clip(RoundedCornerShape(14.dp))
-              .clickable {
-                currentFilter = currentFilter.copy(type = type)
-                viewModel.timelineEngine.updateFilter(currentFilter)
-              }
-              .testTag("filter_preset_${type.name.lowercase()}"),
-            colors = CardDefaults.cardColors(
-              containerColor = if (isSelected) StudioSurfaceVariant else Color(0xFF1E293B)
-            ),
-            border = BorderStroke(
-              width = if (isSelected) 2.dp else 1.dp,
-              color = if (isSelected) PurpleAccent else StudioBorder
-            )
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(6.dp),
-              verticalArrangement = Arrangement.SpaceBetween,
-              horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-              // Live Animated Thumbnail
-              FilterAnimatedThumbnail(
-                type = type,
-                isSelected = isSelected,
-                modifier = Modifier
-                  .size(width = 86.dp, height = 62.dp)
-              )
-
-              Text(
-                text = type.displayName,
-                style = MaterialTheme.typography.labelSmall.copy(
-                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                  color = if (isSelected) PurpleAccent else TextPrimary,
-                  fontSize = 10.5.sp
-                ),
-                maxLines = 2,
-                textAlign = TextAlign.Center,
-                overflow = TextOverflow.Ellipsis
-              )
+          StudioFilterPreviewCard(
+            type = type,
+            isSelected = isSelected,
+            isVisible = isVisible,
+            videoUri = previewUri,
+            sourceStartMs = previewSourceStartMs,
+            onClick = {
+              currentFilter = currentFilter.copy(type = type)
+              viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
             }
-          }
+          )
         }
       }
     } else {
       // Installed Plugins Section
       if (pluginFilters.isNotEmpty()) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-          items(pluginFilters) { (plugin, filterItem) ->
-            Card(
-              modifier = Modifier
-                .size(width = 110.dp, height = 95.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .clickable {
-                  currentFilter = currentFilter.copy(type = FilterType.CINEMATIC, intensity = 1.0f)
-                  viewModel.timelineEngine.updateFilter(currentFilter)
-                  viewModel.timelineEngine.updateAdjustments(
-                    VideoAdjustments(
-                      brightness = filterItem.brightness,
-                      contrast = filterItem.contrast,
-                      saturation = filterItem.saturation,
-                      temperature = filterItem.temperature,
-                      tint = filterItem.tint,
-                      vignette = filterItem.vignette
-                    )
+        LazyRow(
+          state = filtersScrollState,
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          contentPadding = PaddingValues(horizontal = 2.dp)
+        ) {
+          itemsIndexed(pluginFilters) { index, (plugin, filterItem) ->
+            val isSelected = selectedPluginItemId == filterItem.id
+            val isVisible = index in visibleIndices || visibleIndices.isEmpty()
+
+            StudioPluginFilterPreviewCard(
+              item = filterItem,
+              plugin = plugin,
+              isSelected = isSelected,
+              isVisible = isVisible,
+              videoUri = previewUri,
+              sourceStartMs = previewSourceStartMs,
+              onClick = {
+                selectedPluginItemId = filterItem.id
+                currentFilter = currentFilter.copy(type = FilterType.CINEMATIC, intensity = 1.0f)
+                viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
+                viewModel.timelineEngine.updateAdjustments(
+                  VideoAdjustments(
+                    brightness = filterItem.brightness,
+                    contrast = filterItem.contrast,
+                    saturation = filterItem.saturation,
+                    temperature = filterItem.temperature,
+                    tint = filterItem.tint,
+                    vignette = filterItem.vignette
                   )
-                },
-              colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-              border = BorderStroke(1.dp, CyanAccent)
-            ) {
-              Column(
-                modifier = Modifier
-                  .fillMaxSize()
-                  .padding(8.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.CenterHorizontally
-              ) {
-                Text(filterItem.emoji, fontSize = 24.sp)
-                Text(
-                  text = filterItem.name,
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 11.sp),
-                  maxLines = 1,
-                  textAlign = TextAlign.Center,
-                  overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                  text = plugin.manifest.name,
-                  style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
                 )
               }
-            }
+            )
           }
         }
       } else {
@@ -949,7 +926,7 @@ fun FiltersToolPanel(
             value = currentFilter.intensity,
             onValueChange = {
               currentFilter = currentFilter.copy(intensity = it)
-              viewModel.timelineEngine.updateFilter(currentFilter)
+              viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
             },
             valueRange = 0f..1f,
             colors = SliderDefaults.colors(
@@ -977,7 +954,7 @@ fun FiltersToolPanel(
                     .clip(RoundedCornerShape(8.dp))
                     .clickable {
                       currentFilter = currentFilter.copy(intensity = preset)
-                      viewModel.timelineEngine.updateFilter(currentFilter)
+                      viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
                     }
                 ) {
                   Text(
@@ -1006,160 +983,6 @@ fun FiltersToolPanel(
               Text("Apply to All", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
           }
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun FilterAnimatedThumbnail(
-  type: FilterType,
-  isSelected: Boolean,
-  modifier: Modifier = Modifier
-) {
-  val matrixArray = remember(type) {
-    com.example.engine.composition.ColorFilterGenerator.getFilterMatrixArray(type, 1.0f)
-  }
-  val colorFilter = remember(matrixArray) {
-    if (type == FilterType.NONE) null
-    else ColorFilter.colorMatrix(ColorMatrix(matrixArray))
-  }
-
-  val infiniteTransition = rememberInfiniteTransition(label = "FilterAnimation")
-  val wavePhase by infiniteTransition.animateFloat(
-    initialValue = 0f,
-    targetValue = (2 * Math.PI).toFloat(),
-    animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 3500, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
-    ),
-    label = "wavePhase"
-  )
-  val shimmerOffset by infiniteTransition.animateFloat(
-    initialValue = -0.3f,
-    targetValue = 1.3f,
-    animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 2800, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
-    ),
-    label = "shimmerOffset"
-  )
-
-  // Gradient base for thumbnail landscape
-  val swatchColors = remember(type) {
-    when (type) {
-      FilterType.NONE -> listOf(Color(0xFF475569), Color(0xFF1E293B))
-      FilterType.FOUR_K -> listOf(Color(0xFF00E5FF), Color(0xFF1D4ED8), Color(0xFF0F172A))
-      FilterType.BLACKLIGHT_FIX -> listOf(Color(0xFFF59E0B), Color(0xFFD97706), Color(0xFF1E293B))
-      FilterType.ENHANCE -> listOf(Color(0xFF38BDF8), Color(0xFF818CF8), Color(0xFFC084FC))
-      FilterType.HDR -> listOf(Color(0xFFFF007F), Color(0xFF7928CA), Color(0xFF00E5FF))
-      FilterType.GLOW -> listOf(Color(0xFFFDE047), Color(0xFFF472B6), Color(0xFF6366F1))
-      FilterType.FOCUS -> listOf(Color(0xFF10B981), Color(0xFF0EA5E9), Color(0xFF0F172A))
-      FilterType.QUALITY_RESTORATION -> listOf(Color(0xFF2DD4BF), Color(0xFF3B82F6), Color(0xFF1E1B4B))
-      FilterType.GOLDEN_AUTUMN -> listOf(Color(0xFFF97316), Color(0xFFB45309), Color(0xFF78350F))
-      FilterType.OCEANIC_VIEW -> listOf(Color(0xFF06B6D4), Color(0xFF0284C7), Color(0xFF0369A1))
-      FilterType.ALMOND -> listOf(Color(0xFFFDE68A), Color(0xFFD4A373), Color(0xFFCCD5AE))
-      FilterType.SUNLIGHT_ORANGE_BLUE -> listOf(Color(0xFFFB923C), Color(0xFF0284C7), Color(0xFF0F172A))
-      FilterType.CINEMATIC -> listOf(Color(0xFF0D9488), Color(0xFFF97316))
-      FilterType.WARM -> listOf(Color(0xFFF59E0B), Color(0xFFD97706))
-      FilterType.COOL -> listOf(Color(0xFF0284C7), Color(0xFF38BDF8))
-      FilterType.PORTRAIT -> listOf(Color(0xFFF43F5E), Color(0xFFFDA4AF))
-      FilterType.BLACK_AND_WHITE -> listOf(Color(0xFF111111), Color(0xFFEEEEEE))
-      FilterType.VINTAGE -> listOf(Color(0xFFB45309), Color(0xFFFDE68A))
-      FilterType.SATURATION -> listOf(Color(0xFFEC4899), Color(0xFF3B82F6))
-      FilterType.FILM -> listOf(Color(0xFF78350F), Color(0xFFA16207))
-      FilterType.RETRO -> listOf(Color(0xFFD946EF), Color(0xFF8B5CF6))
-      FilterType.NATURE -> listOf(Color(0xFF10B981), Color(0xFF047857))
-      FilterType.FOOD -> listOf(Color(0xFFEA580C), Color(0xFFFACC15))
-      FilterType.TRAVEL -> listOf(Color(0xFF0284C7), Color(0xFF10B981))
-      FilterType.SOCIAL_MEDIA -> listOf(Color(0xFFFF007F), Color(0xFF7928CA))
-    }
-  }
-
-  Box(
-    modifier = modifier
-      .clip(RoundedCornerShape(8.dp))
-      .background(Brush.verticalGradient(swatchColors)),
-    contentAlignment = Alignment.Center
-  ) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-      val w = size.width
-      val h = size.height
-
-      // 1. Sun / Light sphere
-      drawCircle(
-        color = Color(0xFFFFFAEB).copy(alpha = 0.85f),
-        radius = h * 0.22f,
-        center = Offset(w * 0.72f, h * 0.35f)
-      )
-
-      // 2. Distant mountain ridge
-      val mtnPath = Path().apply {
-        moveTo(0f, h * 0.65f)
-        lineTo(w * 0.35f, h * 0.38f)
-        lineTo(w * 0.68f, h * 0.55f)
-        lineTo(w, h * 0.42f)
-        lineTo(w, h)
-        lineTo(0f, h)
-        close()
-      }
-      drawPath(
-        path = mtnPath,
-        color = Color(0xFF0F172A).copy(alpha = 0.55f)
-      )
-
-      // 3. Foreground animated water wave with wavePhase
-      val wavePath = Path().apply {
-        moveTo(0f, h * 0.72f)
-        var x = 0f
-        while (x <= w) {
-          val waveY = h * 0.75f + (kotlin.math.sin((x / w) * 6f + wavePhase) * (h * 0.08f))
-          lineTo(x, waveY)
-          x += 6f
-        }
-        lineTo(w, h)
-        lineTo(0f, h)
-        close()
-      }
-      drawPath(
-        path = wavePath,
-        color = Color(0xFF0284C7).copy(alpha = 0.65f)
-      )
-
-      // 4. Animated Light shimmer sweep across the thumbnail
-      val shimmerX = w * shimmerOffset
-      drawLine(
-        brush = Brush.horizontalGradient(
-          colors = listOf(
-            Color.Transparent,
-            Color.White.copy(alpha = 0.35f),
-            Color.Transparent
-          ),
-          startX = shimmerX - 30f,
-          endX = shimmerX + 30f
-        ),
-        start = Offset(shimmerX - 25f, 0f),
-        end = Offset(shimmerX + 25f, h),
-        strokeWidth = 35f
-      )
-    }
-
-    if (isSelected) {
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(Color.Black.copy(alpha = 0.25f)),
-        contentAlignment = Alignment.Center
-      ) {
-        Box(
-          modifier = Modifier
-            .size(22.dp)
-            .clip(CircleShape)
-            .background(PurpleAccent),
-          contentAlignment = Alignment.Center
-        ) {
-          Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
         }
       }
     }
