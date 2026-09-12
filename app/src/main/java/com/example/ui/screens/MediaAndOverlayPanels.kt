@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,6 +59,7 @@ fun MediaImportPanel(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
+  val coroutineScope = rememberCoroutineScope()
   var selectedTarget by remember { mutableStateOf(defaultTarget) }
   var selectedFilterCategory by remember { mutableStateOf("All") }
   var imageDurationSec by remember { mutableFloatStateOf(3.0f) }
@@ -68,44 +70,51 @@ fun MediaImportPanel(
     contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
   ) { uris: List<Uri> ->
     if (uris.isNotEmpty()) {
-      uris.forEach { uri ->
-        val fileName = getFileNameFromUri(context, uri) ?: "Imported Media"
-        val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(
-          context,
-          uri.toString(),
-          defaultImageDurationMs = (imageDurationSec * 1000).toLong()
-        )
+      coroutineScope.launch {
+        uris.forEach { uri ->
+          val fileName = getFileNameFromUri(context, uri) ?: "Imported Media"
+          val persistentPath = com.example.engine.media.MediaPersistenceManager.persistMedia(
+            context = context,
+            sourceUriString = uri.toString(),
+            suggestedName = fileName
+          )
+          val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(
+            context,
+            persistentPath,
+            defaultImageDurationMs = (imageDurationSec * 1000).toLong()
+          )
 
-        if (selectedTarget == MediaImportTarget.MAIN_TRACK) {
-          viewModel.timelineEngine.addVideoClip(
-            uri = uri.toString(),
-            name = fileName,
-            isVideo = metadata.isVideo,
-            durationMs = metadata.durationMs,
-            atPlayhead = insertAtPlayhead,
-            width = metadata.width,
-            height = metadata.height,
-            rotationDegrees = metadata.rotationDegrees,
-            frameRate = metadata.frameRate,
-            mimeType = metadata.mimeType,
-            hasAudio = metadata.hasAudio
-          )
-        } else {
-          viewModel.timelineEngine.addOverlayClip(
-            uri = uri.toString(),
-            name = fileName,
-            isVideo = metadata.isVideo,
-            durationMs = metadata.durationMs,
-            width = metadata.width,
-            height = metadata.height,
-            rotationDegrees = metadata.rotationDegrees,
-            frameRate = metadata.frameRate,
-            mimeType = metadata.mimeType,
-            hasAudio = metadata.hasAudio
-          )
+          if (selectedTarget == MediaImportTarget.MAIN_TRACK) {
+            viewModel.timelineEngine.addVideoClip(
+              uri = persistentPath,
+              name = fileName,
+              isVideo = metadata.isVideo,
+              durationMs = metadata.durationMs,
+              atPlayhead = insertAtPlayhead,
+              width = metadata.width,
+              height = metadata.height,
+              rotationDegrees = metadata.rotationDegrees,
+              frameRate = metadata.frameRate,
+              mimeType = metadata.mimeType,
+              hasAudio = metadata.hasAudio
+            )
+          } else {
+            viewModel.timelineEngine.addOverlayClip(
+              uri = persistentPath,
+              name = fileName,
+              isVideo = metadata.isVideo,
+              durationMs = metadata.durationMs,
+              width = metadata.width,
+              height = metadata.height,
+              rotationDegrees = metadata.rotationDegrees,
+              frameRate = metadata.frameRate,
+              mimeType = metadata.mimeType,
+              hasAudio = metadata.hasAudio
+            )
+          }
         }
+        onDismiss()
       }
-      onDismiss()
     }
   }
 
@@ -113,39 +122,46 @@ fun MediaImportPanel(
     contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
   ) { uris: List<Uri> ->
     if (uris.isNotEmpty()) {
-      uris.forEach { uri ->
-        val fileName = getFileNameFromUri(context, uri) ?: "Imported Video"
-        val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(context, uri.toString())
-        if (selectedTarget == MediaImportTarget.MAIN_TRACK) {
-          viewModel.timelineEngine.addVideoClip(
-            uri = uri.toString(),
-            name = fileName,
-            isVideo = true,
-            durationMs = metadata.durationMs,
-            atPlayhead = insertAtPlayhead,
-            width = metadata.width,
-            height = metadata.height,
-            rotationDegrees = metadata.rotationDegrees,
-            frameRate = metadata.frameRate,
-            mimeType = metadata.mimeType,
-            hasAudio = metadata.hasAudio
+      coroutineScope.launch {
+        uris.forEach { uri ->
+          val fileName = getFileNameFromUri(context, uri) ?: "Imported Video"
+          val persistentPath = com.example.engine.media.MediaPersistenceManager.persistMedia(
+            context = context,
+            sourceUriString = uri.toString(),
+            suggestedName = fileName
           )
-        } else {
-          viewModel.timelineEngine.addOverlayClip(
-            uri = uri.toString(),
-            name = fileName,
-            isVideo = true,
-            durationMs = metadata.durationMs,
-            width = metadata.width,
-            height = metadata.height,
-            rotationDegrees = metadata.rotationDegrees,
-            frameRate = metadata.frameRate,
-            mimeType = metadata.mimeType,
-            hasAudio = metadata.hasAudio
-          )
+          val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(context, persistentPath)
+          if (selectedTarget == MediaImportTarget.MAIN_TRACK) {
+            viewModel.timelineEngine.addVideoClip(
+              uri = persistentPath,
+              name = fileName,
+              isVideo = true,
+              durationMs = metadata.durationMs,
+              atPlayhead = insertAtPlayhead,
+              width = metadata.width,
+              height = metadata.height,
+              rotationDegrees = metadata.rotationDegrees,
+              frameRate = metadata.frameRate,
+              mimeType = metadata.mimeType,
+              hasAudio = metadata.hasAudio
+            )
+          } else {
+            viewModel.timelineEngine.addOverlayClip(
+              uri = persistentPath,
+              name = fileName,
+              isVideo = true,
+              durationMs = metadata.durationMs,
+              width = metadata.width,
+              height = metadata.height,
+              rotationDegrees = metadata.rotationDegrees,
+              frameRate = metadata.frameRate,
+              mimeType = metadata.mimeType,
+              hasAudio = metadata.hasAudio
+            )
+          }
         }
+        onDismiss()
       }
-      onDismiss()
     }
   }
 
@@ -153,43 +169,50 @@ fun MediaImportPanel(
     contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
   ) { uris: List<Uri> ->
     if (uris.isNotEmpty()) {
-      uris.forEach { uri ->
-        val fileName = getFileNameFromUri(context, uri) ?: "Imported Photo"
-        val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(
-          context,
-          uri.toString(),
-          defaultImageDurationMs = (imageDurationSec * 1000).toLong()
-        )
-        if (selectedTarget == MediaImportTarget.MAIN_TRACK) {
-          viewModel.timelineEngine.addVideoClip(
-            uri = uri.toString(),
-            name = fileName,
-            isVideo = false,
-            durationMs = metadata.durationMs,
-            atPlayhead = insertAtPlayhead,
-            width = metadata.width,
-            height = metadata.height,
-            rotationDegrees = metadata.rotationDegrees,
-            frameRate = metadata.frameRate,
-            mimeType = metadata.mimeType,
-            hasAudio = false
+      coroutineScope.launch {
+        uris.forEach { uri ->
+          val fileName = getFileNameFromUri(context, uri) ?: "Imported Photo"
+          val persistentPath = com.example.engine.media.MediaPersistenceManager.persistMedia(
+            context = context,
+            sourceUriString = uri.toString(),
+            suggestedName = fileName
           )
-        } else {
-          viewModel.timelineEngine.addOverlayClip(
-            uri = uri.toString(),
-            name = fileName,
-            isVideo = false,
-            durationMs = metadata.durationMs,
-            width = metadata.width,
-            height = metadata.height,
-            rotationDegrees = metadata.rotationDegrees,
-            frameRate = metadata.frameRate,
-            mimeType = metadata.mimeType,
-            hasAudio = false
+          val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(
+            context,
+            persistentPath,
+            defaultImageDurationMs = (imageDurationSec * 1000).toLong()
           )
+          if (selectedTarget == MediaImportTarget.MAIN_TRACK) {
+            viewModel.timelineEngine.addVideoClip(
+              uri = persistentPath,
+              name = fileName,
+              isVideo = false,
+              durationMs = metadata.durationMs,
+              atPlayhead = insertAtPlayhead,
+              width = metadata.width,
+              height = metadata.height,
+              rotationDegrees = metadata.rotationDegrees,
+              frameRate = metadata.frameRate,
+              mimeType = metadata.mimeType,
+              hasAudio = false
+            )
+          } else {
+            viewModel.timelineEngine.addOverlayClip(
+              uri = persistentPath,
+              name = fileName,
+              isVideo = false,
+              durationMs = metadata.durationMs,
+              width = metadata.width,
+              height = metadata.height,
+              rotationDegrees = metadata.rotationDegrees,
+              frameRate = metadata.frameRate,
+              mimeType = metadata.mimeType,
+              hasAudio = false
+            )
+          }
         }
+        onDismiss()
       }
-      onDismiss()
     }
   }
 

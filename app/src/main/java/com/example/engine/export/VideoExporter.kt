@@ -288,8 +288,12 @@ class VideoExporter(private val context: Context) {
    */
   fun canExportWithMedia3Transformer(timeline: Timeline): Boolean {
     if (timeline.videoClips.isEmpty()) return false
-    // Timelines with custom canvas overlays, text layers, stickers, animations, or effects use composition engine
-    if (timeline.overlayClips.isNotEmpty() ||
+    // Timelines with filters, color adjustments, chroma key, custom canvas overlays, text layers, stickers, animations, or effects use composition engine
+    if (timeline.filter.type != com.example.domain.model.FilterType.NONE ||
+        timeline.adjustments != com.example.domain.model.VideoAdjustments() ||
+        timeline.chromaKey.enabled ||
+        timeline.videoClips.any { it.filter?.type != com.example.domain.model.FilterType.NONE } ||
+        timeline.overlayClips.isNotEmpty() ||
         timeline.textClips.isNotEmpty() ||
         timeline.stickerClips.isNotEmpty() ||
         timeline.effectClips.isNotEmpty() ||

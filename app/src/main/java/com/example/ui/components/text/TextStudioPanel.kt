@@ -9,11 +9,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,231 +30,65 @@ import androidx.compose.ui.unit.sp
 import com.example.domain.model.TextClip
 import com.example.engine.SelectedTrackElement
 import com.example.ui.StudioViewModel
-import com.example.ui.components.formatDurationShort
 import com.example.ui.theme.*
 import com.example.util.FontManager
 import com.example.util.FontOption
+import java.util.UUID
 
-data class TextTemplateItem(
-  val id: String,
-  val name: String,
-  val category: String, // "Urdu", "English", "Social", "Cinematic"
-  val sampleText: String,
-  val fontFamily: String,
-  val fontSizeSp: Float = 28f,
-  val fontWeight: Int = 800,
-  val textColor: Long = 0xFFFFFFFF,
-  val hasGradient: Boolean = false,
-  val gradientColorStart: Long = 0xFF00E5FF,
-  val gradientColorEnd: Long = 0xFF8B5CF6,
-  val strokeWidth: Float = 0f,
-  val strokeColor: Long = 0xFF000000,
-  val hasShadow: Boolean = true,
-  val shadowColor: Long = 0x88000000,
-  val hasBackground: Boolean = false,
-  val backgroundColor: Long = 0xCC000000,
-  val cornerRadius: Float = 12f,
-  val bgPadding: Float = 16f,
-  val animationType: String = "Pop",
-  val badgeEmoji: String = "✨"
-)
-
-val TEXT_TEMPLATES = listOf(
-  TextTemplateItem(
-    id = "urdu_calligraphy",
-    name = "اردو خطاطی (Urdu Calligraphy)",
-    category = "Urdu",
-    sampleText = "اردو خطاطی و خوبصورت عنوان",
-    fontFamily = "jameel_nastaliq",
-    fontSizeSp = 32f,
-    fontWeight = 800,
-    textColor = 0xFFFFD700,
-    strokeWidth = 2.5f,
-    strokeColor = 0xFF1E1035,
-    hasShadow = true,
-    shadowColor = 0xFF000000,
-    hasBackground = true,
-    backgroundColor = 0xEE111827,
-    cornerRadius = 16f,
-    animationType = "Zoom",
-    badgeEmoji = "🇵🇰"
-  ),
-  TextTemplateItem(
-    id = "urdu_news_header",
-    name = "اردو اہم خبر (News Ticker)",
-    category = "Urdu",
-    sampleText = "اہم خبر • تازہ ترین اپڈیٹ",
-    fontFamily = "nastaleeq",
-    fontSizeSp = 28f,
-    fontWeight = 900,
-    textColor = 0xFFFFFFFF,
-    hasBackground = true,
-    backgroundColor = 0xFFDC2626,
-    cornerRadius = 8f,
-    bgPadding = 18f,
-    animationType = "Slide",
-    badgeEmoji = "📰"
-  ),
-  TextTemplateItem(
-    id = "urdu_poetry",
-    name = "اردو شاعری (Urdu Poetry Card)",
-    category = "Urdu",
-    sampleText = "دل ناداں تجھے ہوا کیا ہے",
-    fontFamily = "gulzar",
-    fontSizeSp = 30f,
-    fontWeight = 800,
-    textColor = 0xFFFFF8DC,
-    strokeWidth = 1f,
-    strokeColor = 0xFF000000,
-    hasBackground = true,
-    backgroundColor = 0xEE2A134D,
-    cornerRadius = 20f,
-    animationType = "Fade",
-    badgeEmoji = "📜"
-  ),
-  TextTemplateItem(
-    id = "lower_third_blue",
-    name = "Lower Third Professional",
-    category = "English",
-    sampleText = "JOHN DOE • VIDEO PRODUCER",
-    fontFamily = "Bebas",
-    fontSizeSp = 24f,
-    fontWeight = 800,
-    textColor = 0xFF00E5FF,
-    hasBackground = true,
-    backgroundColor = 0xEE0F172A,
-    cornerRadius = 8f,
-    animationType = "Slide",
-    badgeEmoji = "💼"
-  ),
-  TextTemplateItem(
-    id = "neon_glow_magenta",
-    name = "Neon Glow Pulse",
-    category = "English",
-    sampleText = "NEON NIGHTS",
-    fontFamily = "Impact",
-    fontSizeSp = 34f,
-    fontWeight = 900,
-    textColor = 0xFFFF007F,
-    hasGradient = true,
-    gradientColorStart = 0xFFFF007F,
-    gradientColorEnd = 0xFF00F0FF,
-    strokeWidth = 3f,
-    strokeColor = 0xFF00F0FF,
-    hasShadow = true,
-    shadowColor = 0xFFFF007F,
-    animationType = "Pop",
-    badgeEmoji = "⚡"
-  ),
-  TextTemplateItem(
-    id = "retro_gold",
-    name = "Retro Vintage Gold",
-    category = "English",
-    sampleText = "GOLDEN ERA VINTAGE",
-    fontFamily = "Playfair",
-    fontSizeSp = 30f,
-    fontWeight = 800,
-    textColor = 0xFFFFC107,
-    strokeWidth = 1.5f,
-    strokeColor = 0xFFFFE082,
-    hasBackground = true,
-    backgroundColor = 0xDD1C1204,
-    cornerRadius = 10f,
-    animationType = "Fade",
-    badgeEmoji = "🏆"
-  ),
-  TextTemplateItem(
-    id = "social_vlog_red",
-    name = "Social Vlog Pill",
-    category = "Social",
-    sampleText = "LIKE & SUBSCRIBE 👍",
-    fontFamily = "Montserrat",
-    fontSizeSp = 26f,
-    fontWeight = 900,
-    textColor = 0xFFFFFFFF,
-    hasBackground = true,
-    backgroundColor = 0xFFEF4444,
-    cornerRadius = 30f,
-    bgPadding = 20f,
-    animationType = "Bounce",
-    badgeEmoji = "🔴"
-  ),
-  TextTemplateItem(
-    id = "cinematic_movie",
-    name = "Cinematic Movie Title",
-    category = "Cinematic",
-    sampleText = "T H E  J O U R N E Y",
-    fontFamily = "Cinematic",
-    fontSizeSp = 30f,
-    fontWeight = 700,
-    textColor = 0xFFF8FAFC,
-    hasShadow = true,
-    shadowColor = 0xCC000000,
-    animationType = "Fade",
-    badgeEmoji = "🎬"
-  ),
-  TextTemplateItem(
-    id = "cyberpunk_tech",
-    name = "Cyberpunk Tech Matrix",
-    category = "English",
-    sampleText = "CYBER MATRIX 2088",
-    fontFamily = "Futuristic",
-    fontSizeSp = 28f,
-    fontWeight = 900,
-    textColor = 0xFF00F0FF,
-    strokeWidth = 2f,
-    strokeColor = 0xFF8B5CF6,
-    hasBackground = true,
-    backgroundColor = 0xEE030712,
-    animationType = "Typewriter",
-    badgeEmoji = "🤖"
-  ),
-  TextTemplateItem(
-    id = "bold_caption_yellow",
-    name = "High Visibility Caption",
-    category = "Social",
-    sampleText = "WATCH UNTIL THE END! 🔥",
-    fontFamily = "Impact",
-    fontSizeSp = 28f,
-    fontWeight = 900,
-    textColor = 0xFFFFEA00,
-    strokeWidth = 4f,
-    strokeColor = 0xFF000000,
-    hasShadow = true,
-    shadowColor = 0xFF000000,
-    animationType = "Pop",
-    badgeEmoji = "🔥"
-  )
-)
+enum class TextEditorSecondaryTab(val label: String, val iconEmoji: String) {
+  TEMPLATES("Templates", "🎨"),
+  FONTS("Fonts", "🔤"),
+  STYLES("Styles", "✨"),
+  EFFECTS("Effects", "🔮"),
+  ANIMATIONS("Animations", "🎬")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TextStudioPanel(
   viewModel: StudioViewModel,
+  onDismiss: (() -> Unit)? = null,
+  initialTab: TextEditorSecondaryTab = TextEditorSecondaryTab.TEMPLATES,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
   val timeline by viewModel.timelineEngine.timeline.collectAsState()
   val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
 
-  // Auto-select existing text clip or auto-create one if none exists
+  // Get currently selected text clip if an existing text element is selected
   val selectedTextClip = remember(timeline.textClips, selectedElement) {
     if (selectedElement is SelectedTrackElement.Text) {
       timeline.textClips.find { it.id == (selectedElement as SelectedTrackElement.Text).clipId }
     } else {
-      timeline.textClips.firstOrNull()
+      null
     }
   }
 
-  // Select active text element if already present
-  LaunchedEffect(timeline.textClips, selectedElement) {
-    if (timeline.textClips.isNotEmpty() && selectedElement !is SelectedTrackElement.Text) {
-      val firstClip = timeline.textClips.first()
-      viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(firstClip.id))
+  // Draft clip for creating/customizing a new text layer
+  var draftClip by remember {
+    mutableStateOf(
+      TextClip(
+        text = "Your Text Here",
+        fontSizeSp = 28f,
+        textColor = 0xFFFFFFFF
+      )
+    )
+  }
+
+  // When selected clip changes or updates, keep in sync
+  val activeClip = selectedTextClip ?: draftClip
+
+  val onUpdateActiveClip: (TextClip) -> Unit = { updated ->
+    if (selectedTextClip != null) {
+      viewModel.timelineEngine.updateTextClip(updated)
+    } else {
+      draftClip = updated
     }
   }
 
-  var activeSubTab by remember { mutableStateOf("Templates") } // "Templates", "Urdu Fonts", "English Fonts", "Style & Color", "Motion & Position", "Captions"
+  // Secondary tabs: Templates, Fonts, Styles, Effects, Animations
+  var activeTab by remember { mutableStateOf(initialTab) }
+
   val installedPlugins by viewModel.installedPlugins.collectAsState()
   var fontOptionsList by remember { mutableStateOf(FontManager.getAvailableFonts(context)) }
 
@@ -273,12 +103,10 @@ fun TextStudioPanel(
       val imported = FontManager.importFont(context, uri)
       if (imported != null) {
         fontOptionsList = FontManager.getAvailableFonts(context)
-        selectedTextClip?.let { clip ->
-          viewModel.timelineEngine.updateTextClip(
-            clip.copy(fontFamily = imported.id, customFontPath = imported.filePath)
-          )
-        }
-        Toast.makeText(context, "Font imported: ${imported.name}", Toast.LENGTH_SHORT).show()
+        onUpdateActiveClip(
+          activeClip.copy(fontFamily = imported.id, customFontPath = imported.filePath)
+        )
+        Toast.makeText(context, "Imported font: ${imported.name}", Toast.LENGTH_SHORT).show()
       } else {
         Toast.makeText(context, "Failed to load font file", Toast.LENGTH_SHORT).show()
       }
@@ -289,10 +117,10 @@ fun TextStudioPanel(
     modifier = modifier
       .fillMaxWidth()
       .background(StudioSurface)
-      .padding(14.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp)
+      .padding(horizontal = 12.dp, vertical = 10.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
   ) {
-    // 1. Header with Title & Action Buttons
+    // 1. Header with Title & Action (Add Text / Done)
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -301,159 +129,123 @@ fun TextStudioPanel(
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
           modifier = Modifier
-            .size(32.dp)
+            .size(30.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(CyanAccent.copy(alpha = 0.2f)),
           contentAlignment = Alignment.Center
         ) {
-          Icon(Icons.Default.TextFields, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
+          Icon(Icons.Default.TextFields, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
         }
         Column {
           Text(
-            text = "Text & Subtitle Studio",
+            text = if (selectedTextClip != null) "Edit Text Layer" else "Add Text & Titles",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
           )
           Text(
-            text = "Urdu & English Fonts • Templates • Styles",
-            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
+            text = "Templates • Fonts • Styles • Effects • Animations",
+            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp)
           )
         }
       }
 
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Add New Layer
-        FilledTonalButton(
-          onClick = { viewModel.timelineEngine.addTextClip("New Title / نیا عنوان") },
-          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-          colors = ButtonDefaults.filledTonalButtonColors(containerColor = CyanAccent, contentColor = Color.Black)
-        ) {
-          Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-          Spacer(Modifier.width(4.dp))
-          Text("Add Text", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        if (selectedTextClip != null) {
+          FilledTonalButton(
+            onClick = {
+              viewModel.timelineEngine.updateTextClip(activeClip)
+              if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
+            },
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = CyanAccent, contentColor = Color.Black)
+          ) {
+            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Done", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          }
+        } else {
+          FilledTonalButton(
+            onClick = {
+              val currentPos = viewModel.timelineEngine.currentPositionMs.value
+              val totalDuration = viewModel.timelineEngine.timeline.value.totalDurationMs.coerceAtLeast(1000L)
+              val calculatedDuration = 3000L.coerceAtMost(maxOf(1000L, totalDuration - currentPos))
+              val newClip = draftClip.copy(
+                id = UUID.randomUUID().toString(),
+                timelineStartMs = currentPos,
+                durationMs = calculatedDuration
+              )
+              viewModel.timelineEngine.addTextClipObject(newClip)
+              viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
+              if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
+            },
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = CyanAccent, contentColor = Color.Black)
+          ) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Add Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          }
         }
 
-        // Close Button
         IconButton(
-          onClick = { viewModel.setActiveToolbarTab(null) },
-          modifier = Modifier.size(32.dp)
+          onClick = {
+            if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
+          },
+          modifier = Modifier.size(30.dp)
         ) {
           Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
         }
       }
     }
 
-    val activeClip = selectedTextClip ?: TextClip(text = "Your Text Here")
-
-    // 2. Text Input Editor & Quick Sample Suggestions
-    Card(
+    // 2. Text Input Card
+    OutlinedTextField(
+      value = activeClip.text,
+      onValueChange = { newText ->
+        onUpdateActiveClip(activeClip.copy(text = newText))
+      },
+      label = { Text("Text Content (Urdu & English Supported)", fontSize = 10.sp, color = CyanAccent) },
+      placeholder = { Text("Type here in English, اردو or any script...", color = TextSecondary, fontSize = 12.sp) },
       modifier = Modifier.fillMaxWidth(),
-      colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-      border = BorderStroke(1.dp, StudioBorder)
-    ) {
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        OutlinedTextField(
-          value = activeClip.text,
-          onValueChange = { newText ->
-            if (selectedTextClip != null) {
-              viewModel.timelineEngine.updateTextClip(activeClip.copy(text = newText))
-            } else if (newText.isNotBlank()) {
-              val newClip = activeClip.copy(
-                id = java.util.UUID.randomUUID().toString(),
-                text = newText,
-                timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-              )
-              viewModel.timelineEngine.addTextClipObject(newClip)
-            }
-          },
-          label = { Text("Write Custom Content (Urdu / English)", fontSize = 11.sp, color = CyanAccent) },
-          placeholder = { Text("Type here in Urdu or English...", color = TextSecondary, fontSize = 13.sp) },
-          modifier = Modifier.fillMaxWidth(),
-          maxLines = 3,
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = CyanAccent,
-            unfocusedBorderColor = StudioBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            focusedContainerColor = StudioSurface,
-            unfocusedContainerColor = StudioSurface
-          )
-        )
+      maxLines = 2,
+      colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = CyanAccent,
+        unfocusedBorderColor = StudioBorder,
+        focusedTextColor = TextPrimary,
+        unfocusedTextColor = TextPrimary,
+        focusedContainerColor = StudioSurfaceVariant,
+        unfocusedContainerColor = StudioSurfaceVariant
+      )
+    )
 
-        // Quick Preset Sample Text Chips (Urdu & English)
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Text("Quick Samples:", fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
-          LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val samples = listOf(
-              "🇵🇰 اردو خطاطی" to "اردو خطاطی و خوبصورت عنوان",
-              "🇵🇰 اہم خبر" to "اہم خبر • تازہ ترین اپڈیٹ",
-              "🇵🇰 شاعری" to "دل ناداں تجھے ہوا کیا ہے",
-              "🔤 Title" to "CREATIVE VIDEO TITLE",
-              "🔤 Vlog" to "Like & Subscribe 👍"
-            )
-            items(samples) { (label, sampleStr) ->
-              SuggestionChip(
-                onClick = {
-                  if (selectedTextClip != null) {
-                    viewModel.timelineEngine.updateTextClip(activeClip.copy(text = sampleStr))
-                  } else {
-                    val newClip = activeClip.copy(
-                      id = java.util.UUID.randomUUID().toString(),
-                      text = sampleStr,
-                      timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-                    )
-                    viewModel.timelineEngine.addTextClipObject(newClip)
-                  }
-                },
-                label = { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Medium) },
-                colors = SuggestionChipDefaults.suggestionChipColors(
-                  containerColor = StudioSurface,
-                  labelColor = TextPrimary
-                ),
-                border = SuggestionChipDefaults.suggestionChipBorder(
-                  enabled = true,
-                  borderColor = StudioBorder
-                )
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // 3. Navigation Sub-Tabs
+    // 3. Secondary Navigation / Tabs: Templates | Fonts | Styles | Effects | Animations
     LazyRow(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-      val tabs = listOf("Templates", "Urdu Fonts", "English Fonts", "Style & Color", "Motion & Position", "Captions")
-      items(tabs) { tab ->
-        val isSelected = activeSubTab == tab
+      items(TextEditorSecondaryTab.values()) { tab ->
+        val isSelected = activeTab == tab
         FilterChip(
           selected = isSelected,
-          onClick = { activeSubTab = tab },
+          onClick = { activeTab = tab },
           label = {
-            Text(
-              text = tab,
-              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-              fontSize = 12.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(tab.iconEmoji, fontSize = 12.sp)
+              Text(
+                text = tab.label,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 11.sp
+              )
+            }
           },
           colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = when (tab) {
-              "Urdu Fonts" -> Color(0xFF10B981) // Emerald Green
-              "Templates" -> AmberAccent
-              else -> CyanAccent
+              TextEditorSecondaryTab.TEMPLATES -> AmberAccent
+              TextEditorSecondaryTab.FONTS -> Color(0xFF10B981)
+              TextEditorSecondaryTab.STYLES -> CyanAccent
+              TextEditorSecondaryTab.EFFECTS -> PurpleAccent
+              TextEditorSecondaryTab.ANIMATIONS -> Color(0xFFF43F5E)
             },
-            selectedLabelColor = Color.Black,
+            selectedLabelColor = if (tab == TextEditorSecondaryTab.EFFECTS) Color.White else Color.Black,
             containerColor = StudioSurfaceVariant,
             labelColor = TextPrimary
           )
@@ -463,241 +255,81 @@ fun TextStudioPanel(
 
     HorizontalDivider(color = StudioBorder, thickness = 0.5.dp)
 
-    // 4. Sub-Tab Content Router
-    when (activeSubTab) {
-      "Templates" -> TemplatesSubTab(
+    // 4. Secondary Tab Content View
+    when (activeTab) {
+      TextEditorSecondaryTab.TEMPLATES -> TemplatesSection(
         clip = activeClip,
-        onApplyTemplate = { updatedClip ->
-          if (selectedTextClip != null) {
-            viewModel.timelineEngine.updateTextClip(updatedClip)
-          } else {
-            val newClip = updatedClip.copy(
-              id = java.util.UUID.randomUUID().toString(),
-              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-            )
-            viewModel.timelineEngine.addTextClipObject(newClip)
-          }
-        }
+        onApplyTemplate = { updatedClip -> onUpdateActiveClip(updatedClip) }
       )
-      "Urdu Fonts" -> UrduFontsSubTab(
+      TextEditorSecondaryTab.FONTS -> FontsSection(
         clip = activeClip,
-        fonts = fontOptionsList.filter { it.category == "Urdu" || it.id.lowercase().contains("urdu") || it.id.lowercase().contains("nastaliq") },
+        availableFonts = fontOptionsList,
         onSelectFont = { fontId, path ->
-          if (selectedTextClip != null) {
-            viewModel.timelineEngine.updateTextClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
-          } else {
-            val newClip = activeClip.copy(
-              id = java.util.UUID.randomUUID().toString(),
-              fontFamily = fontId,
-              customFontPath = path,
-              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-            )
-            viewModel.timelineEngine.addTextClipObject(newClip)
-          }
+          onUpdateActiveClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
         },
         onImportFont = { fontPickerLauncher.launch(arrayOf("*/*")) }
       )
-      "English Fonts" -> EnglishFontsSubTab(
+      TextEditorSecondaryTab.STYLES -> StylesSection(
         clip = activeClip,
-        fonts = fontOptionsList.filter { it.category != "Urdu" },
-        onSelectFont = { fontId, path ->
-          if (selectedTextClip != null) {
-            viewModel.timelineEngine.updateTextClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
-          } else {
-            val newClip = activeClip.copy(
-              id = java.util.UUID.randomUUID().toString(),
-              fontFamily = fontId,
-              customFontPath = path,
-              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-            )
-            viewModel.timelineEngine.addTextClipObject(newClip)
-          }
-        },
-        onImportFont = { fontPickerLauncher.launch(arrayOf("*/*")) }
+        onUpdate = { updated -> onUpdateActiveClip(updated) }
       )
-      "Style & Color" -> StyleAndColorSettings(
+      TextEditorSecondaryTab.EFFECTS -> EffectsSection(
         clip = activeClip,
-        onUpdate = {
-          if (selectedTextClip != null) {
-            viewModel.timelineEngine.updateTextClip(it)
-          } else {
-            val newClip = it.copy(
-              id = java.util.UUID.randomUUID().toString(),
-              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-            )
-            viewModel.timelineEngine.addTextClipObject(newClip)
-          }
-        }
+        onUpdate = { updated -> onUpdateActiveClip(updated) }
       )
-      "Motion & Position" -> MotionAndPositionSettings(
+      TextEditorSecondaryTab.ANIMATIONS -> AnimationsSection(
         clip = activeClip,
-        onUpdate = {
-          if (selectedTextClip != null) {
-            viewModel.timelineEngine.updateTextClip(it)
-          } else {
-            val newClip = it.copy(
-              id = java.util.UUID.randomUUID().toString(),
-              timelineStartMs = viewModel.timelineEngine.currentPositionMs.value
-            )
-            viewModel.timelineEngine.addTextClipObject(newClip)
-          }
-        }
-      )
-      "Captions" -> CaptionsAndTimingSettings(
-        clip = activeClip,
-        allClips = timeline.textClips,
-        onSelectClip = { clipId ->
-          viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(clipId))
-        },
-        onUpdate = { viewModel.timelineEngine.updateTextClip(it) },
-        onAddSegment = {
-          viewModel.timelineEngine.addTextClip("Next caption")
-        },
-        onDeleteSegment = {
-          viewModel.timelineEngine.deleteSelected()
-        }
+        onUpdate = { updated -> onUpdateActiveClip(updated) }
       )
     }
   }
 }
 
-// --- SUB TAB 1: TEXT TEMPLATES ---
+// -------------------------------------------------------------
+// TAB 1: TEMPLATES SECTION (41 Categories with search & previews)
+// -------------------------------------------------------------
 @Composable
-private fun TemplatesSubTab(
+private fun TemplatesSection(
   clip: TextClip,
   onApplyTemplate: (TextClip) -> Unit
 ) {
-  val installedPlugins by com.example.engine.plugin.PluginManager.installedPlugins.collectAsState()
-  
-  var pluginTemplates by remember { mutableStateOf(emptyList<TextTemplateItem>()) }
+  var selectedCategory by remember { mutableStateOf("Trending") }
+  var searchQuery by remember { mutableStateOf("") }
 
-  // Dynamically extract and build template presets from all installed and enabled plugins
-  LaunchedEffect(installedPlugins) {
-    val list = mutableListOf<TextTemplateItem>()
-    for (plugin in installedPlugins) {
-      if (!plugin.isEnabled) continue
-      for (item in plugin.manifest.items) {
-        val cat = if (item.categoryKey.isNotBlank()) {
-          com.example.domain.plugin.PluginCategory.fromKey(item.categoryKey)
-        } else {
-          plugin.manifest.category
-        }
-        if (cat == com.example.domain.plugin.PluginCategory.TEXT_TEMPLATE) {
-          val category = (item.parameters["category"] as? String)
-            ?: (item.parameters["type"] as? String)
-            ?: "Templates"
-          val sample = (item.parameters["sampleText"] as? String)
-            ?: (item.parameters["text"] as? String)
-            ?: (item.parameters["title"] as? String)
-            ?: item.name
-          val fontFam = (item.parameters["fontFamily"] as? String)
-            ?: (item.parameters["font"] as? String)
-            ?: if (category.contains("urdu", true) || category.contains("islamic", true)) "jameel_nastaliq" else "Sans-Serif"
-          val fontSize = (item.parameters["fontSizeSp"] as? Number)?.toFloat()
-            ?: (item.parameters["fontSize"] as? Number)?.toFloat()
-            ?: 28f
-          val fontWeight = (item.parameters["fontWeight"] as? Number)?.toInt()
-            ?: (item.parameters["weight"] as? Number)?.toInt()
-            ?: 700
+  val displayedTemplates = remember(selectedCategory, searchQuery) {
+    var list = if (selectedCategory == "All") ALL_TEXT_TEMPLATES
+    else ALL_TEXT_TEMPLATES.filter { it.category.equals(selectedCategory, ignoreCase = true) }
 
-          fun parseColor(v: Any?, def: Long): Long {
-            if (v == null) return def
-            if (v is Number) return v.toLong()
-            val s = v.toString().trim()
-            return try {
-              if (s.startsWith("#")) {
-                val hex = s.substring(1)
-                if (hex.length == 6) ("FF$hex").toLong(16) else hex.toLong(16)
-              } else s.toLong()
-            } catch (_: Exception) { def }
-          }
-
-          val textColor = parseColor(item.parameters["textColor"] ?: item.parameters["color"], 0xFFFFFFFFL)
-          val bgColor = parseColor(item.parameters["backgroundColor"] ?: item.parameters["bg_color"], 0xCC000000L)
-          val strokeColor = parseColor(item.parameters["strokeColor"], 0xFF000000L)
-          val shadowColor = parseColor(item.parameters["shadowColor"], 0x88000000L)
-          val gradStart = parseColor(item.parameters["gradientColorStart"], 0xFF00E5FFL)
-          val gradEnd = parseColor(item.parameters["gradientColorEnd"], 0xFF8B5CF6L)
-          
-          val strokeWidth = (item.parameters["strokeWidth"] as? Number)?.toFloat() ?: 0f
-          val hasShadow = (item.parameters["hasShadow"] as? Boolean) ?: (item.parameters["shadow"] as? Boolean) ?: true
-          val hasGradient = (item.parameters["hasGradient"] as? Boolean) ?: (item.parameters["gradient"] as? Boolean) ?: false
-          val hasBg = (item.parameters["hasBackground"] as? Boolean) ?: true
-          val anim = (item.parameters["animationType"] as? String) ?: (item.parameters["animation"] as? String) ?: "Pop"
-
-          list.add(
-            TextTemplateItem(
-              id = item.id,
-              name = item.name,
-              category = category,
-              sampleText = sample,
-              fontFamily = fontFam,
-              fontSizeSp = fontSize,
-              fontWeight = fontWeight,
-              textColor = textColor,
-              hasGradient = hasGradient,
-              gradientColorStart = gradStart,
-              gradientColorEnd = gradEnd,
-              strokeWidth = strokeWidth,
-              strokeColor = strokeColor,
-              hasShadow = hasShadow,
-              shadowColor = shadowColor,
-              hasBackground = hasBg,
-              backgroundColor = bgColor,
-              cornerRadius = 12f,
-              bgPadding = 16f,
-              animationType = anim,
-              badgeEmoji = item.emoji
-            )
-          )
-        }
+    if (searchQuery.isNotBlank()) {
+      list = list.filter {
+        it.name.contains(searchQuery, ignoreCase = true) ||
+          it.category.contains(searchQuery, ignoreCase = true) ||
+          it.sampleText.contains(searchQuery, ignoreCase = true)
       }
     }
-    pluginTemplates = list
-  }
-
-  val allTemplates = remember(pluginTemplates) { TEXT_TEMPLATES + pluginTemplates }
-
-  val categories = remember(allTemplates) {
-    listOf("All") + allTemplates.map { it.category }.distinct()
-  }
-  var selectedCategory by remember { mutableStateOf("All") }
-
-  val displayedTemplates = remember(selectedCategory, allTemplates) {
-    if (selectedCategory == "All") allTemplates
-    else allTemplates.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+    list
   }
 
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text(
-        text = "Ready-To-Use Text Templates",
-        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-      )
-      Text(
-        text = if (pluginTemplates.isNotEmpty()) "${allTemplates.size} Styles (${pluginTemplates.size} Plugins)" else "${allTemplates.size} Styles",
-        style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-      )
-    }
-
-    // Category Filter Chips Row (All, Urdu, English, Captions, Quotes, Business, YouTube, Islamic, Reels)
+    // 41 Category Pills
     LazyRow(
       horizontalArrangement = Arrangement.spacedBy(6.dp),
       contentPadding = PaddingValues(vertical = 2.dp)
     ) {
-      items(categories) { catName ->
-        val isSelected = selectedCategory == catName
+      items(TemplateCategories.ALL_CATEGORIES) { cat ->
+        val isSelected = selectedCategory == cat.name
         FilterChip(
           selected = isSelected,
-          onClick = { selectedCategory = catName },
-          label = { Text(catName, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+          onClick = { selectedCategory = cat.name },
+          label = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text(cat.iconEmoji, fontSize = 11.sp)
+              Text(cat.name, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+            }
+          },
           colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = PurpleAccent.copy(alpha = 0.25f),
-            selectedLabelColor = PurpleAccent,
+            selectedContainerColor = AmberAccent.copy(alpha = 0.25f),
+            selectedLabelColor = AmberAccent,
             containerColor = StudioSurfaceVariant,
             labelColor = TextSecondary
           ),
@@ -705,38 +337,41 @@ private fun TemplatesSubTab(
             enabled = true,
             selected = isSelected,
             borderColor = StudioBorder,
-            selectedBorderColor = PurpleAccent
+            selectedBorderColor = AmberAccent
           )
         )
       }
     }
 
+    // Templates Horizontal Carousel Cards
     LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      contentPadding = PaddingValues(vertical = 4.dp)
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      contentPadding = PaddingValues(vertical = 2.dp)
     ) {
       items(displayedTemplates) { tpl ->
+        val isSelected = clip.fontFamily.equals(tpl.fontFamily, true) && clip.textColor == tpl.textColor
+
         Card(
           modifier = Modifier
-            .width(180.dp)
-            .height(115.dp)
+            .width(165.dp)
+            .height(110.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable {
-              val sampleToUse = if (clip.text.isBlank() || clip.text == "Tap to edit" || clip.text == "Your Text Here") {
+              val textToKeep = if (clip.text.isBlank() || clip.text == "Tap to edit" || clip.text == "Your Text Here") {
                 tpl.sampleText
               } else clip.text
 
               onApplyTemplate(
                 clip.copy(
-                  text = sampleToUse,
+                  text = textToKeep,
                   fontFamily = tpl.fontFamily,
-                  customFontPath = null,
                   fontSizeSp = tpl.fontSizeSp,
                   fontWeight = tpl.fontWeight,
                   textColor = tpl.textColor,
                   hasGradient = tpl.hasGradient,
                   gradientColorStart = tpl.gradientColorStart,
                   gradientColorEnd = tpl.gradientColorEnd,
+                  gradientDirection = tpl.gradientDirection,
                   strokeWidth = tpl.strokeWidth,
                   strokeColor = tpl.strokeColor,
                   hasShadow = tpl.hasShadow,
@@ -750,15 +385,12 @@ private fun TemplatesSubTab(
               )
             },
           colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-          border = BorderStroke(
-            1.5.dp,
-            if (clip.fontFamily.equals(tpl.fontFamily, true) && clip.textColor == tpl.textColor) AmberAccent else StudioBorder
-          )
+          border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) AmberAccent else StudioBorder)
         ) {
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(10.dp),
+              .padding(8.dp),
             verticalArrangement = Arrangement.SpaceBetween
           ) {
             Row(
@@ -766,29 +398,8 @@ private fun TemplatesSubTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(tpl.badgeEmoji, fontSize = 18.sp)
-              Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = when {
-                  tpl.category.equals("Urdu", true) || tpl.category.equals("Islamic", true) -> Color(0xFF10B981).copy(alpha = 0.2f)
-                  tpl.category.equals("Business", true) -> AmberAccent.copy(alpha = 0.2f)
-                  tpl.category.equals("YouTube", true) -> Color(0xFFFF3B30).copy(alpha = 0.2f)
-                  else -> CyanAccent.copy(alpha = 0.2f)
-                }
-              ) {
-                Text(
-                  text = tpl.category,
-                  fontSize = 9.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = when {
-                    tpl.category.equals("Urdu", true) || tpl.category.equals("Islamic", true) -> Color(0xFF10B981)
-                    tpl.category.equals("Business", true) -> AmberAccent
-                    tpl.category.equals("YouTube", true) -> Color(0xFFFF3B30)
-                    else -> CyanAccent
-                  },
-                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-              }
+              Text(tpl.badgeEmoji, fontSize = 16.sp)
+              Text(tpl.category, fontSize = 9.sp, color = AmberAccent, fontWeight = FontWeight.Bold)
             }
 
             Text(
@@ -798,17 +409,16 @@ private fun TemplatesSubTab(
               overflow = TextOverflow.Ellipsis
             )
 
-            // Preview Box inside Template Card
             Box(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .background(Color(tpl.backgroundColor.toInt()))
-                .padding(4.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
               contentAlignment = Alignment.Center
             ) {
               Text(
-                text = tpl.sampleText,
+                text = if (clip.text.isNotBlank() && clip.text != "Tap to edit") clip.text else tpl.sampleText,
                 color = Color(tpl.textColor.toInt()),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -823,88 +433,182 @@ private fun TemplatesSubTab(
   }
 }
 
-// --- SUB TAB 2: URDU FONTS ---
+// -------------------------------------------------------------
+// TAB 2: FONTS SECTION (8 Categories + Real typography rendering)
+// -------------------------------------------------------------
 @Composable
-private fun UrduFontsSubTab(
+private fun FontsSection(
   clip: TextClip,
-  fonts: List<FontOption>,
+  availableFonts: List<FontOption>,
   onSelectFont: (fontId: String, customPath: String?) -> Unit,
   onImportFont: () -> Unit
 ) {
+  var selectedCategory by remember { mutableStateOf("Trending") }
+
+  val displayedFonts = remember(selectedCategory, availableFonts) {
+    FontCatalog.getFontsForCategory(selectedCategory, availableFonts)
+  }
+
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Top Row with Import and Brand Font actions
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("🇵🇰 Urdu Calligraphy & Nastaliq Fonts", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-      }
-      TextButton(onClick = onImportFont, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
-        Icon(Icons.Default.FileOpen, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text("Import Font (+)", color = AmberAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      Text(
+        text = "Typefaces & Typography",
+        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+      )
+
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (selectedCategory == "Brand Fonts") {
+          TextButton(
+            onClick = {
+              FontCatalog.addBrandFont(
+                BrandFontPreset(
+                  id = "brand_${System.currentTimeMillis()}",
+                  name = "Custom Brand Font",
+                  fontFamily = clip.fontFamily,
+                  customFontPath = clip.customFontPath,
+                  defaultColor = clip.textColor,
+                  fontWeight = clip.fontWeight
+                )
+              )
+            },
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+          ) {
+            Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(2.dp))
+            Text("Save Brand Font", color = Color(0xFF10B981), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+          }
+        }
+
+        TextButton(
+          onClick = onImportFont,
+          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+          Icon(Icons.Default.FileOpen, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
+          Spacer(Modifier.width(2.dp))
+          Text("Import TTF/OTF", color = Color(0xFF10B981), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
       }
     }
 
+    // 8 Font Categories: My Fonts | Brand Fonts | Trending | Urdu | English | Classic | New | Whimsical
     LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      contentPadding = PaddingValues(vertical = 4.dp)
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      contentPadding = PaddingValues(vertical = 2.dp)
     ) {
-      items(fonts) { fontOpt ->
-        val isSelected = clip.fontFamily.equals(fontOpt.id, true) ||
+      items(FontCatalog.FONT_CATEGORIES) { cat ->
+        val isSelected = selectedCategory == cat
+        FilterChip(
+          selected = isSelected,
+          onClick = { selectedCategory = cat },
+          label = { Text(cat, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = Color(0xFF10B981).copy(alpha = 0.25f),
+            selectedLabelColor = Color(0xFF10B981),
+            containerColor = StudioSurfaceVariant,
+            labelColor = TextSecondary
+          ),
+          border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = isSelected,
+            borderColor = StudioBorder,
+            selectedBorderColor = Color(0xFF10B981)
+          )
+        )
+      }
+    }
+
+    // Fonts List Carousel with realistic text previews
+    if (displayedFonts.isEmpty()) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(90.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        if (selectedCategory == "My Fonts") {
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("No imported fonts yet.", color = TextSecondary, fontSize = 11.sp)
+            TextButton(onClick = onImportFont) {
+              Text("Tap here to import .ttf or .otf files", color = Color(0xFF10B981), fontSize = 11.sp)
+            }
+          }
+        } else {
+          Text("No fonts available in $selectedCategory", color = TextSecondary, fontSize = 11.sp)
+        }
+      }
+    } else {
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp)
+      ) {
+        items(displayedFonts) { fontOpt ->
+          val isSelected = clip.fontFamily.equals(fontOpt.id, true) ||
             (clip.customFontPath != null && clip.customFontPath == fontOpt.filePath)
 
-        Card(
-          modifier = Modifier
-            .width(160.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onSelectFont(fontOpt.id, fontOpt.filePath) },
-          colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFF10B981).copy(alpha = 0.2f) else StudioSurfaceVariant
-          ),
-          border = BorderStroke(
-            if (isSelected) 2.dp else 1.dp,
-            if (isSelected) Color(0xFF10B981) else StudioBorder
-          )
-        ) {
-          Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = fontOpt.name,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-              )
-              if (isSelected) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
-              }
-            }
+          val composeFont = FontManager.getComposeFontFamily(fontOpt.id, fontOpt.filePath)
 
-            // Urdu Calligraphy Sample Box
-            Box(
+          Card(
+            modifier = Modifier
+              .width(160.dp)
+              .height(105.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .clickable { onSelectFont(fontOpt.id, fontOpt.filePath) },
+            colors = CardDefaults.cardColors(
+              containerColor = if (isSelected) Color(0xFF10B981).copy(alpha = 0.2f) else StudioSurfaceVariant
+            ),
+            border = BorderStroke(
+              if (isSelected) 2.dp else 1.dp,
+              if (isSelected) Color(0xFF10B981) else StudioBorder
+            )
+          ) {
+            Column(
               modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(StudioSurface)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-              contentAlignment = Alignment.Center
+                .fillMaxSize()
+                .padding(8.dp),
+              verticalArrangement = Arrangement.SpaceBetween
             ) {
-              Text(
-                text = if (fontOpt.nativeSample.isNotBlank()) fontOpt.nativeSample else "جمیل نوری نستعلیق",
-                color = Color(0xFFFFD700),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-              )
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = fontOpt.name,
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.weight(1f)
+                )
+                if (isSelected) {
+                  Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
+                }
+              }
+
+              // Realistic Live Preview rendering with the actual font family
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(StudioSurface)
+                  .padding(horizontal = 6.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = if (clip.text.isNotBlank() && clip.text != "Tap to edit") clip.text else fontOpt.nativeSample,
+                  color = if (isSelected) Color(0xFF10B981) else TextPrimary,
+                  fontFamily = composeFont,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                  textAlign = TextAlign.Center
+                )
+              }
             }
           }
         }
@@ -913,180 +617,62 @@ private fun UrduFontsSubTab(
   }
 }
 
-// --- SUB TAB 3: ENGLISH FONTS ---
+// -------------------------------------------------------------
+// TAB 3: STYLES SECTION (Colors, Gradients, Stroke, Shadow, Box)
+// -------------------------------------------------------------
 @Composable
-private fun EnglishFontsSubTab(
-  clip: TextClip,
-  fonts: List<FontOption>,
-  onSelectFont: (fontId: String, customPath: String?) -> Unit,
-  onImportFont: () -> Unit
-) {
-  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text("🔤 English Typefaces & Display Fonts", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-      TextButton(onClick = onImportFont, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
-        Icon(Icons.Default.FileOpen, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text("Import TTF/OTF", color = CyanAccent, fontSize = 11.sp)
-      }
-    }
-
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-      items(fonts) { fontOpt ->
-        val isSelected = clip.fontFamily.equals(fontOpt.id, true) ||
-            (clip.customFontPath != null && clip.customFontPath == fontOpt.filePath)
-
-        Card(
-          modifier = Modifier
-            .width(150.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onSelectFont(fontOpt.id, fontOpt.filePath) },
-          colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) CyanAccent.copy(alpha = 0.2f) else StudioSurfaceVariant
-          ),
-          border = BorderStroke(
-            if (isSelected) 2.dp else 1.dp,
-            if (isSelected) CyanAccent else StudioBorder
-          )
-        ) {
-          Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = fontOpt.name,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-              )
-              if (isSelected) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
-              }
-            }
-
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(StudioSurface)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-              contentAlignment = Alignment.Center
-            ) {
-              Text(
-                text = if (fontOpt.nativeSample.isNotBlank()) fontOpt.nativeSample else "SAMPLE TEXT",
-                color = CyanAccent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-// --- SUB TAB 4: STYLE & COLOR ---
-@Composable
-private fun StyleAndColorSettings(
+private fun StylesSection(
   clip: TextClip,
   onUpdate: (TextClip) -> Unit
 ) {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    // 1. Text Formatting Toggles (Bold, Italic, Underline, ALL CAPS)
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Format Toggles (B, I, U, TT) & Alignment
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("Format & Style", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Bold
+      Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         FilterChip(
           selected = clip.fontWeight >= 700,
           onClick = { onUpdate(clip.copy(fontWeight = if (clip.fontWeight >= 700) 400 else 800)) },
-          label = { Text("B", fontWeight = FontWeight.Bold) },
+          label = { Text("B", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
           colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
         )
-
-        // Italic
         FilterChip(
           selected = clip.isItalic,
           onClick = { onUpdate(clip.copy(isItalic = !clip.isItalic)) },
-          label = { Text("I", fontWeight = FontWeight.Bold) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PurpleAccent, selectedLabelColor = Color.White)
+          label = { Text("I", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
         )
-
-        // Underline
         FilterChip(
           selected = clip.isUnderline,
           onClick = { onUpdate(clip.copy(isUnderline = !clip.isUnderline)) },
-          label = { Text("U", textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Bold) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AmberAccent, selectedLabelColor = Color.Black)
+          label = { Text("U", textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
         )
-
-        // All Caps
         FilterChip(
           selected = clip.isAllCaps,
           onClick = { onUpdate(clip.copy(isAllCaps = !clip.isAllCaps)) },
-          label = { Text("TT", fontWeight = FontWeight.Bold) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF10B981), selectedLabelColor = Color.Black)
+          label = { Text("TT", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
         )
       }
-    }
 
-    // Alignment Setup
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text("Text Alignment", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         listOf("Left", "Center", "Right").forEach { align ->
           FilterChip(
             selected = clip.alignment.equals(align, true),
             onClick = { onUpdate(clip.copy(alignment = align)) },
-            label = { Text(align) },
-            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = CyanAccent, selectedLabelColor = Color.Black)
+            label = { Text(align, fontSize = 10.sp) },
+            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PurpleAccent, selectedLabelColor = Color.White)
           )
         }
       }
     }
 
-    // Font Size Slider
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text("Font Size: ${clip.fontSizeSp.toInt()} sp", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-      Slider(
-        value = clip.fontSizeSp,
-        onValueChange = { onUpdate(clip.copy(fontSizeSp = it)) },
-        valueRange = 12f..100f,
-        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-        colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
-      )
-    }
-
-    // Text Color Swatches
-    Text("Text Color", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+    // Color Swatches
+    Text("Text Color Palette", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
     val palette = listOf(
       0xFFFFFFFF, 0xFFFFD700, 0xFF00E5FF, 0xFFFF007F, 0xFF10B981, 0xFF8B5CF6,
       0xFFF59E0B, 0xFFEF4444, 0xFFFFEA00, 0xFF3B82F6, 0xFFEC4899, 0xFF000000
@@ -1096,7 +682,7 @@ private fun StyleAndColorSettings(
         val isSelected = clip.textColor == colorHex
         Box(
           modifier = Modifier
-            .size(32.dp)
+            .size(28.dp)
             .clip(CircleShape)
             .background(Color(colorHex))
             .border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) CyanAccent else Color.White.copy(alpha = 0.4f), CircleShape)
@@ -1105,236 +691,302 @@ private fun StyleAndColorSettings(
       }
     }
 
-    // Gradient Fill
+    // Font Size & Letter Spacing
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+      horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-      Text("Gradient Fill Effect", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-      Switch(
-        checked = clip.hasGradient,
-        onCheckedChange = { onUpdate(clip.copy(hasGradient = it)) },
-        colors = SwitchDefaults.colors(checkedThumbColor = CyanAccent, checkedTrackColor = CyanAccent.copy(alpha = 0.5f))
-      )
-    }
-
-    if (clip.hasGradient) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        listOf("Horizontal", "Vertical", "Diagonal").forEach { dir ->
-          FilterChip(
-            selected = clip.gradientDirection.equals(dir, true),
-            onClick = { onUpdate(clip.copy(gradientDirection = dir)) },
-            label = { Text(dir) },
-            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PurpleAccent, selectedLabelColor = Color.White)
-          )
-        }
+      Column(modifier = Modifier.weight(1f)) {
+        Text("Size: ${clip.fontSizeSp.toInt()} sp", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
+        Slider(
+          value = clip.fontSizeSp,
+          onValueChange = { onUpdate(clip.copy(fontSizeSp = it)) },
+          valueRange = 12f..100f,
+          colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
+        )
+      }
+      Column(modifier = Modifier.weight(1f)) {
+        Text("Letter Spacing: ${clip.letterSpacing.toInt()}px", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
+        Slider(
+          value = clip.letterSpacing,
+          onValueChange = { onUpdate(clip.copy(letterSpacing = it)) },
+          valueRange = 0f..20f,
+          colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
+        )
       }
     }
 
-    // Outline Stroke Width
+    // Outline Stroke & Shadow Switches
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("Outline Stroke: ${clip.strokeWidth.toInt()}px", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-      Slider(
-        value = clip.strokeWidth,
-        onValueChange = { onUpdate(clip.copy(strokeWidth = it)) },
-        valueRange = 0f..16f,
-        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-        colors = SliderDefaults.colors(thumbColor = AmberAccent, activeTrackColor = AmberAccent)
-      )
-    }
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Outline: ${clip.strokeWidth.toInt()}px", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+        Slider(
+          value = clip.strokeWidth,
+          onValueChange = { onUpdate(clip.copy(strokeWidth = it)) },
+          valueRange = 0f..16f,
+          modifier = Modifier.width(90.dp),
+          colors = SliderDefaults.colors(thumbColor = AmberAccent, activeTrackColor = AmberAccent)
+        )
+      }
 
-    // Drop Shadow
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text("Drop Shadow", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-      Switch(
-        checked = clip.hasShadow,
-        onCheckedChange = { onUpdate(clip.copy(hasShadow = it)) },
-        colors = SwitchDefaults.colors(checkedThumbColor = AmberAccent)
-      )
-    }
-
-    // Rounded Background Box
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text("Background Box Badge", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-      Switch(
-        checked = clip.hasBackground,
-        onCheckedChange = { onUpdate(clip.copy(hasBackground = it)) },
-        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF10B981))
-      )
-    }
-
-    if (clip.hasBackground) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
-      ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text("Corner Radius: ${clip.cornerRadius.toInt()}dp", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-          Slider(
-            value = clip.cornerRadius,
-            onValueChange = { onUpdate(clip.copy(cornerRadius = it)) },
-            valueRange = 0f..32f,
-            colors = SliderDefaults.colors(thumbColor = Color(0xFF10B981), activeTrackColor = Color(0xFF10B981))
-          )
-        }
-        Column(modifier = Modifier.weight(1f)) {
-          Text("Padding: ${clip.bgPadding.toInt()}dp", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-          Slider(
-            value = clip.bgPadding,
-            onValueChange = { onUpdate(clip.copy(bgPadding = it)) },
-            valueRange = 4f..32f,
-            colors = SliderDefaults.colors(thumbColor = Color(0xFF10B981), activeTrackColor = Color(0xFF10B981))
-          )
-        }
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Drop Shadow", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+        Switch(
+          checked = clip.hasShadow,
+          onCheckedChange = { onUpdate(clip.copy(hasShadow = it)) },
+          colors = SwitchDefaults.colors(checkedThumbColor = AmberAccent)
+        )
       }
     }
 
-    // Opacity
+    // Background Box & Gradient Switches
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("Opacity: ${(clip.opacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-      Slider(
-        value = clip.opacity,
-        onValueChange = { onUpdate(clip.copy(opacity = it)) },
-        valueRange = 0.1f..1f,
-        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-        colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
-      )
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Background Box", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+        Switch(
+          checked = clip.hasBackground,
+          onCheckedChange = { onUpdate(clip.copy(hasBackground = it)) },
+          colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF10B981))
+        )
+      }
+
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Gradient Fill", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+        Switch(
+          checked = clip.hasGradient,
+          onCheckedChange = { onUpdate(clip.copy(hasGradient = it)) },
+          colors = SwitchDefaults.colors(checkedThumbColor = PurpleAccent)
+        )
+      }
     }
   }
 }
 
-// --- SUB TAB 5: MOTION & POSITION ---
+// -------------------------------------------------------------
+// TAB 4: EFFECTS SECTION (3D, Neon, Glitch, Chrome, Arc, Comic)
+// -------------------------------------------------------------
 @Composable
-private fun MotionAndPositionSettings(
+private fun EffectsSection(
   clip: TextClip,
   onUpdate: (TextClip) -> Unit
 ) {
+  val effectsList = listOf(
+    "None" to "Normal Default",
+    "Neon Glow" to "Cyber Neon Pulse",
+    "3D Extrusion" to "Isometric 3D Extruded",
+    "Chrome Metal" to "Metallic Mirror Shine",
+    "Comic Pop" to "Retro Pop Art Halftone",
+    "Glitch RGB" to "Digital RGB Channel Shift",
+    "Curved Arc" to "Circular Curved Arc",
+    "Glassmorphism" to "Frosted Translucent Blur"
+  )
+
   Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    Text("Entrance Motion Animation", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-    val animList = listOf("Pop", "Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Shake", "None")
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      items(animList) { anim ->
+    Text("Artistic Text Effects & Transformations", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      items(effectsList) { (fxName, fxDesc) ->
+        val isSelected = clip.subtitleStyle == fxName || (fxName == "None" && clip.subtitleStyle == "Classic")
+
+        Card(
+          modifier = Modifier
+            .width(140.dp)
+            .height(95.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable {
+              when (fxName) {
+                "Neon Glow" -> onUpdate(
+                  clip.copy(
+                    subtitleStyle = fxName,
+                    textColor = 0xFF00FFFF,
+                    hasShadow = true,
+                    shadowColor = 0xFF00FFFF,
+                    shadowBlur = 12f,
+                    strokeWidth = 2f,
+                    strokeColor = 0xFF003366
+                  )
+                )
+                "3D Extrusion" -> onUpdate(
+                  clip.copy(
+                    subtitleStyle = fxName,
+                    hasShadow = true,
+                    shadowColor = 0xFF4C1D95,
+                    shadowOffsetX = 6f,
+                    shadowOffsetY = 6f,
+                    strokeWidth = 2.5f,
+                    strokeColor = 0xFF1E1035
+                  )
+                )
+                "Chrome Metal" -> onUpdate(
+                  clip.copy(
+                    subtitleStyle = fxName,
+                    hasGradient = true,
+                    gradientColorStart = 0xFFE2E8F0,
+                    gradientColorEnd = 0xFF64748B,
+                    strokeWidth = 2f,
+                    strokeColor = 0xFF0F172A
+                  )
+                )
+                "Comic Pop" -> onUpdate(
+                  clip.copy(
+                    subtitleStyle = fxName,
+                    textColor = 0xFFFFEA00,
+                    strokeWidth = 4f,
+                    strokeColor = 0xFF000000,
+                    hasShadow = true,
+                    shadowColor = 0xFFFF0055
+                  )
+                )
+                "Glitch RGB" -> onUpdate(
+                  clip.copy(
+                    subtitleStyle = fxName,
+                    animationType = "Shake",
+                    textColor = 0xFF00FFCC,
+                    strokeWidth = 2f,
+                    strokeColor = 0xFFFF0055
+                  )
+                )
+                else -> onUpdate(clip.copy(subtitleStyle = "Classic"))
+              }
+            },
+          colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) PurpleAccent.copy(alpha = 0.25f) else StudioSurfaceVariant
+          ),
+          border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) PurpleAccent else StudioBorder)
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(8.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text("🔮", fontSize = 14.sp)
+              if (isSelected) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = PurpleAccent, modifier = Modifier.size(14.dp))
+              }
+            }
+            Text(
+              text = fxName,
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
+              maxLines = 1
+            )
+            Text(
+              text = fxDesc,
+              style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// TAB 5: ANIMATIONS SECTION (In, Out, Loop + Duration)
+// -------------------------------------------------------------
+@Composable
+private fun AnimationsSection(
+  clip: TextClip,
+  onUpdate: (TextClip) -> Unit
+) {
+  var animCategory by remember { mutableStateOf("In") }
+
+  val inAnimations = listOf("Pop", "Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Shake", "Drop", "Flip")
+  val outAnimations = listOf("Fade Out", "Slide Down", "Zoom Out", "Pop Out", "Wipe")
+  val loopAnimations = listOf("Pulse", "Float", "Shake Loop", "Wave", "Rainbow")
+
+  val currentList = when (animCategory) {
+    "In" -> inAnimations
+    "Out" -> outAnimations
+    else -> loopAnimations
+  }
+
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // In / Out / Loop Filter Chips
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf("In", "Out", "Loop").forEach { cat ->
+          val isSelected = animCategory == cat
+          FilterChip(
+            selected = isSelected,
+            onClick = { animCategory = cat },
+            label = { Text(cat, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+            colors = FilterChipDefaults.filterChipColors(
+              selectedContainerColor = Color(0xFFF43F5E),
+              selectedLabelColor = Color.White
+            )
+          )
+        }
+      }
+
+      Text(
+        text = "Duration: ${(clip.animDurationMs / 1000f)}s",
+        style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFFF43F5E), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+      )
+    }
+
+    // Animation presets carousel
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      items(currentList) { anim ->
         val isSelected = clip.animationType.equals(anim, true)
         FilterChip(
           selected = isSelected,
           onClick = { onUpdate(clip.copy(animationType = anim)) },
-          label = { Text(anim) },
+          label = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+              Icon(Icons.Default.Animation, contentDescription = null, modifier = Modifier.size(12.dp))
+              Text(anim, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+            }
+          },
           colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = CyanAccent,
-            selectedLabelColor = Color.Black
+            selectedContainerColor = Color(0xFFF43F5E),
+            selectedLabelColor = Color.White,
+            containerColor = StudioSurfaceVariant,
+            labelColor = TextPrimary
           )
         )
       }
     }
 
-    // Position Coordinates & Quick Placement
-    Text("Quick Position Preset", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
+    // Animation Duration Slider
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
     ) {
-      OutlinedButton(
-        onClick = { onUpdate(clip.copy(posX = 0f, posY = -0.35f)) },
-        modifier = Modifier.weight(1f)
-      ) {
-        Text("Top Header", fontSize = 11.sp)
-      }
-      OutlinedButton(
-        onClick = { onUpdate(clip.copy(posX = 0f, posY = 0f)) },
-        modifier = Modifier.weight(1f)
-      ) {
-        Text("Center", fontSize = 11.sp)
-      }
-      OutlinedButton(
-        onClick = { onUpdate(clip.copy(posX = 0f, posY = 0.35f)) },
-        modifier = Modifier.weight(1f)
-      ) {
-        Text("Subtitle (Bottom)", fontSize = 11.sp)
-      }
-    }
-  }
-}
-
-// --- SUB TAB 6: CAPTIONS & TIMING ---
-@Composable
-private fun CaptionsAndTimingSettings(
-  clip: TextClip,
-  allClips: List<TextClip>,
-  onSelectClip: (String) -> Unit,
-  onUpdate: (TextClip) -> Unit,
-  onAddSegment: () -> Unit,
-  onDeleteSegment: () -> Unit
-) {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    // Timing Controls
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text("Start: ${formatDurationShort(clip.timelineStartMs)}", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          IconButton(onClick = { onUpdate(clip.copy(timelineStartMs = (clip.timelineStartMs - 200L).coerceAtLeast(0L))) }) {
-            Icon(Icons.Default.Remove, contentDescription = "-200ms", tint = CyanAccent)
-          }
-          Slider(
-            value = clip.timelineStartMs.toFloat(),
-            onValueChange = { onUpdate(clip.copy(timelineStartMs = it.toLong())) },
-            valueRange = 0f..60000f,
-            modifier = Modifier.weight(1f),
-            colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
-          )
-          IconButton(onClick = { onUpdate(clip.copy(timelineStartMs = clip.timelineStartMs + 200L)) }) {
-            Icon(Icons.Default.Add, contentDescription = "+200ms", tint = CyanAccent)
-          }
-        }
-      }
-    }
-
-    // Segment Actions
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      Button(
-        onClick = onAddSegment,
-        modifier = Modifier.weight(1f),
-        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
-      ) {
-        Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text("Add Next Caption", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-      }
-      Button(
-        onClick = onDeleteSegment,
-        modifier = Modifier.weight(1f),
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)
-      ) {
-        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(4.dp))
-        Text("Delete", fontSize = 11.sp)
-      }
+      Text("Speed / Duration", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
+      Slider(
+        value = clip.animDurationMs.toFloat(),
+        onValueChange = { onUpdate(clip.copy(animDurationMs = it.toLong())) },
+        valueRange = 100f..3000f,
+        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+        colors = SliderDefaults.colors(thumbColor = Color(0xFFF43F5E), activeTrackColor = Color(0xFFF43F5E))
+      )
     }
   }
 }

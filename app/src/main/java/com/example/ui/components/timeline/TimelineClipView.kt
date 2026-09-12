@@ -93,8 +93,10 @@ fun TimelineClipView(
   onEndReorderDrag: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
-  val startPx = (timelineStartMs / msPerPixel).dp
-  val widthPx = (durationMs / msPerPixel).dp.coerceAtLeast(28.dp)
+  val msPerDp = msPerPixel
+  val density = LocalDensity.current
+  val startPx = (timelineStartMs / msPerDp).dp
+  val widthPx = (durationMs / msPerDp).dp.coerceAtLeast(4.dp)
   val clipHeight = heightDp - 6.dp
 
   // Waveform analysis & dynamic slicing for trimmed clips
@@ -326,13 +328,14 @@ fun TimelineClipView(
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .pointerInput(clipId, isLocked, hasAudio) {
+        .pointerInput(clipId, isLocked, hasAudio, density) {
           if (!isLocked) {
             detectTapGestures(
               onTap = { onSelect() },
               onDoubleTap = { offset ->
                 if (hasAudio && onAddVolumeKeyframe != null) {
-                  val clickedMs = (offset.x * msPerPixel).toLong().coerceIn(0L, durationMs)
+                  val xDp = offset.x / density.density
+                  val clickedMs = (xDp * msPerDp).toLong().coerceIn(0L, durationMs)
                   val normY = 1f - (offset.y / (heightDp.value * 2.5f)).coerceIn(0f, 1f)
                   val clickedVol = (normY * 1.5f).coerceIn(0f, 1.5f)
                   onAddVolumeKeyframe(clickedMs, clickedVol)
@@ -344,14 +347,15 @@ fun TimelineClipView(
             detectTapGestures(onTap = { onSelect() })
           }
         }
-        .pointerInput(clipId, isLocked, msPerPixel) {
+        .pointerInput(clipId, isLocked, msPerDp, density) {
           if (!isLocked) {
             detectDragGestures(
               onDragStart = { dragAccumulatorX = 0f },
               onDrag = { change, dragAmount ->
                 change.consume()
-                dragAccumulatorX += dragAmount.x
-                val deltaMs = (dragAccumulatorX * msPerPixel).toLong()
+                val dragAmountDp = dragAmount.x / density.density
+                dragAccumulatorX += dragAmountDp
+                val deltaMs = (dragAccumulatorX * msPerDp).toLong()
                 if (kotlin.math.abs(deltaMs) >= 15L) {
                   onMoveClip(deltaMs)
                   dragAccumulatorX = 0f
@@ -651,7 +655,7 @@ fun TimelineClipView(
       // Keyframe diamonds along the clip (at bottom for video/overlay, or at volume level for audio)
       if (keyframes.isNotEmpty()) {
         keyframes.forEach { kf ->
-          val kfX = (kf.timeMs / msPerPixel).dp
+          val kfX = (kf.timeMs / msPerDp).dp
           val isKfSelected = kf.id in selectedKeyframeIds
           var kfDragAccumulatorX by remember(kf.id) { mutableFloatStateOf(0f) }
           var kfDragAccumulatorY by remember(kf.id) { mutableFloatStateOf(0f) }
@@ -675,7 +679,7 @@ fun TimelineClipView(
                   onLongPress = { onDeleteVolumeKeyframe?.invoke(kf.id) }
                 )
               }
-              .pointerInput(kf.id, msPerPixel, hasAudio) {
+              .pointerInput(kf.id, msPerDp, hasAudio, density) {
                 detectDragGestures(
                   onDragStart = {
                     kfDragAccumulatorX = 0f
@@ -684,9 +688,10 @@ fun TimelineClipView(
                   },
                   onDrag = { change, dragAmount ->
                     change.consume()
-                    kfDragAccumulatorX += dragAmount.x
+                    val dragAmountDp = dragAmount.x / density.density
+                    kfDragAccumulatorX += dragAmountDp
                     kfDragAccumulatorY += dragAmount.y
-                    val deltaMs = (kfDragAccumulatorX * msPerPixel).toLong()
+                    val deltaMs = (kfDragAccumulatorX * msPerDp).toLong()
 
                     if (hasAudio && onUpdateVolumeKeyframe != null) {
                       val trackUsableHeight = (heightDp.value - 24f).coerceAtLeast(10f)
@@ -736,13 +741,14 @@ fun TimelineClipView(
           .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
           .background(CyanAccent)
           .testTag("trim_left_$clipId")
-          .pointerInput(clipId, msPerPixel) {
+          .pointerInput(clipId, msPerDp, density) {
             detectDragGestures(
               onDragStart = { leftTrimAccumulator = 0f },
               onDrag = { change, dragAmount ->
                 change.consume()
-                leftTrimAccumulator += dragAmount.x
-                val deltaMs = (leftTrimAccumulator * msPerPixel).toLong()
+                val dragAmountDp = dragAmount.x / density.density
+                leftTrimAccumulator += dragAmountDp
+                val deltaMs = (leftTrimAccumulator * msPerDp).toLong()
                 if (kotlin.math.abs(deltaMs) >= 15L) {
                   onTrimLeft(deltaMs)
                   leftTrimAccumulator = 0f
@@ -774,13 +780,14 @@ fun TimelineClipView(
           .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
           .background(AmberAccent)
           .testTag("trim_right_$clipId")
-          .pointerInput(clipId, msPerPixel) {
+          .pointerInput(clipId, msPerDp, density) {
             detectDragGestures(
               onDragStart = { rightTrimAccumulator = 0f },
               onDrag = { change, dragAmount ->
                 change.consume()
-                rightTrimAccumulator += dragAmount.x
-                val deltaMs = (rightTrimAccumulator * msPerPixel).toLong()
+                val dragAmountDp = dragAmount.x / density.density
+                rightTrimAccumulator += dragAmountDp
+                val deltaMs = (rightTrimAccumulator * msPerDp).toLong()
                 if (kotlin.math.abs(deltaMs) >= 15L) {
                   onTrimRight(deltaMs)
                   rightTrimAccumulator = 0f

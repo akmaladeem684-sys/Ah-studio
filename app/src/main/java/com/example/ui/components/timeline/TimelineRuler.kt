@@ -1,34 +1,21 @@
 package com.example.ui.components.timeline
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
-import kotlin.math.roundToInt
 
 @Composable
 fun AccurateTimecodeRuler(
@@ -41,21 +28,23 @@ fun AccurateTimecodeRuler(
   onDoubleTapSnap: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
-  val safeTotalDuration = totalDurationMs.coerceAtLeast(10000L)
-  val rulerWidthDp = (safeTotalDuration / msPerPixel).dp
+  val msPerDp = msPerPixel
+  val safeTotalDuration = totalDurationMs.coerceAtLeast(1000L)
+  val rulerWidthDp = (safeTotalDuration / msPerDp).dp
   val frameDurationMs = 1000.0 / fps
+  val density = LocalDensity.current
 
   var isScrubbing by remember { mutableStateOf(false) }
   var scrubPreviewMs by remember { mutableLongStateOf(currentPosMs) }
 
-  // Dynamic tick calculation based on zoom level (msPerPixel)
-  val (majorIntervalMs, minorIntervalMs, showFrameTicks) = remember(msPerPixel, fps) {
+  // Dynamic tick calculation based on zoom level (msPerDp)
+  val (majorIntervalMs, minorIntervalMs, showFrameTicks) = remember(msPerDp, fps) {
     when {
-      msPerPixel <= 3f -> Triple(500L, (1000L / fps).coerceAtLeast(1L), true) // Sub-frame/Frame precision
-      msPerPixel <= 8f -> Triple(1000L, (1000L / fps).coerceAtLeast(1L), true) // 1 frame precision
-      msPerPixel <= 18f -> Triple(1000L, 200L, false)
-      msPerPixel <= 35f -> Triple(2000L, 500L, false)
-      msPerPixel <= 80f -> Triple(5000L, 1000L, false)
+      msPerDp <= 3f -> Triple(500L, (1000L / fps).coerceAtLeast(1L), true)
+      msPerDp <= 8f -> Triple(1000L, (1000L / fps).coerceAtLeast(1L), true)
+      msPerDp <= 18f -> Triple(1000L, 200L, false)
+      msPerDp <= 35f -> Triple(2000L, 500L, false)
+      msPerDp <= 80f -> Triple(5000L, 1000L, false)
       else -> Triple(10000L, 2000L, false)
     }
   }
@@ -66,13 +55,14 @@ fun AccurateTimecodeRuler(
       .height(34.dp)
       .background(StudioSurface)
       .testTag("timeline_timecode_ruler")
-      .pointerInput(safeTotalDuration, msPerPixel, isFrameSnapping, fps) {
+      .pointerInput(safeTotalDuration, msPerDp, isFrameSnapping, fps, density) {
         detectTapGestures(
           onDoubleTap = { offset ->
             if (onDoubleTapSnap != null) {
               onDoubleTapSnap()
             } else {
-              val rawMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+              val xDp = offset.x / density.density
+              val rawMs = (xDp * msPerDp).toLong().coerceIn(0L, safeTotalDuration)
               val targetMs = if (isFrameSnapping) {
                 (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
               } else rawMs
@@ -80,7 +70,8 @@ fun AccurateTimecodeRuler(
             }
           },
           onTap = { offset ->
-            val rawMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+            val xDp = offset.x / density.density
+            val rawMs = (xDp * msPerDp).toLong().coerceIn(0L, safeTotalDuration)
             val targetMs = if (isFrameSnapping) {
               (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
             } else rawMs
@@ -88,11 +79,12 @@ fun AccurateTimecodeRuler(
           }
         )
       }
-      .pointerInput(safeTotalDuration, msPerPixel, isFrameSnapping, fps) {
+      .pointerInput(safeTotalDuration, msPerDp, isFrameSnapping, fps, density) {
         detectDragGestures(
           onDragStart = { offset ->
             isScrubbing = true
-            val rawMs = (offset.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+            val xDp = offset.x / density.density
+            val rawMs = (xDp * msPerDp).toLong().coerceIn(0L, safeTotalDuration)
             val targetMs = if (isFrameSnapping) {
               (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
             } else rawMs
@@ -107,7 +99,8 @@ fun AccurateTimecodeRuler(
           },
           onDrag = { change, _ ->
             change.consume()
-            val rawMs = (change.position.x * msPerPixel).toLong().coerceIn(0L, safeTotalDuration)
+            val xDp = change.position.x / density.density
+            val rawMs = (xDp * msPerDp).toLong().coerceIn(0L, safeTotalDuration)
             val targetMs = if (isFrameSnapping) {
               (Math.round(rawMs / frameDurationMs) * frameDurationMs).toLong()
             } else rawMs
@@ -137,14 +130,14 @@ fun AccurateTimecodeRuler(
       )
 
       val textPaint = android.graphics.Paint().apply {
-        color = android.graphics.Color.argb(220, 203, 213, 225) // Slate-300 for crisp readability
+        color = android.graphics.Color.argb(220, 203, 213, 225)
         textSize = 9.sp.toPx()
         isAntiAlias = true
         typeface = android.graphics.Typeface.MONOSPACE
       }
 
       val frameTextPaint = android.graphics.Paint().apply {
-        color = android.graphics.Color.argb(190, 6, 182, 212) // Cyan-500 for frame tags
+        color = android.graphics.Color.argb(190, 6, 182, 212)
         textSize = 7.5.sp.toPx()
         isAntiAlias = true
         typeface = android.graphics.Typeface.MONOSPACE
@@ -154,7 +147,7 @@ fun AccurateTimecodeRuler(
 
       for (i in 0..totalTicks) {
         val tickTimeMs = i * minorIntervalMs
-        val x = tickTimeMs / msPerPixel
+        val x = (tickTimeMs / msPerDp).dp.toPx()
         val isMajor = tickTimeMs % majorIntervalMs == 0L
         val isHalfMajor = tickTimeMs % (majorIntervalMs / 2) == 0L
 
@@ -187,8 +180,7 @@ fun AccurateTimecodeRuler(
             canvasHeight - tickHeight - 4f,
             textPaint
           )
-        } else if (showFrameTicks && isHalfMajor && msPerPixel <= 5f) {
-          // Draw frame index mark
+        } else if (showFrameTicks && isHalfMajor && msPerDp <= 5f) {
           val frameNum = msToFrameIndex(tickTimeMs, fps)
           drawContext.canvas.nativeCanvas.drawText(
             "F$frameNum",

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
@@ -34,6 +36,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -47,6 +50,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -54,6 +58,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.graphics.asImageBitmap
 import com.example.engine.media.VideoThumbnailManager
+import com.example.ui.components.text.*
 import coil.compose.AsyncImage
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -124,6 +129,7 @@ fun EditorScreen(
 
   val configuration = LocalConfiguration.current
   val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+  val coroutineScope = rememberCoroutineScope()
   var isLayersOpen by remember { mutableStateOf(false) }
 
   var showRenameDialog by remember { mutableStateOf(false) }
@@ -134,18 +140,26 @@ fun EditorScreen(
   var isFullscreenPreview by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
   var draggedTransitionType by remember { mutableStateOf<TransitionType?>(null) }
+  var activeTextSubTool by remember { mutableStateOf(TextSubTool.ADD_TEXT) }
 
   val replaceMediaPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.PickVisualMedia()
   ) { uri ->
     if (uri != null && pendingReplaceClipId != null) {
       val clipId = pendingReplaceClipId!!
-      viewModel.timelineEngine.replaceMedia(
-        clipId = clipId,
-        newUri = uri.toString(),
-        newName = "Replaced Media"
-      )
-      pendingReplaceClipId = null
+      coroutineScope.launch {
+        val persistentPath = com.example.engine.media.MediaPersistenceManager.persistMedia(
+          context = context,
+          sourceUriString = uri.toString(),
+          suggestedName = "Replaced Media"
+        )
+        viewModel.timelineEngine.replaceMedia(
+          clipId = clipId,
+          newUri = persistentPath,
+          newName = "Replaced Media"
+        )
+        pendingReplaceClipId = null
+      }
     }
   }
 
@@ -154,42 +168,50 @@ fun EditorScreen(
     contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
   ) { uris: List<Uri> ->
     if (uris.isNotEmpty()) {
-      uris.forEach { uri ->
-        val fileName = try {
-          var result: String? = null
-          if (uri.scheme == "content") {
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-              if (it.moveToFirst()) {
-                val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index != -1) result = it.getString(index)
+      coroutineScope.launch {
+        uris.forEach { uri ->
+          val fileName = try {
+            var result: String? = null
+            if (uri.scheme == "content") {
+              val cursor = context.contentResolver.query(uri, null, null, null, null)
+              cursor?.use {
+                if (it.moveToFirst()) {
+                  val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                  if (index != -1) result = it.getString(index)
+                }
               }
             }
+            result ?: uri.lastPathSegment ?: "Imported Media"
+          } catch (e: Exception) {
+            uri.lastPathSegment ?: "Imported Media"
           }
-          result ?: uri.lastPathSegment ?: "Imported Media"
-        } catch (e: Exception) {
-          uri.lastPathSegment ?: "Imported Media"
+
+          val persistentPath = com.example.engine.media.MediaPersistenceManager.persistMedia(
+            context = context,
+            sourceUriString = uri.toString(),
+            suggestedName = fileName
+          )
+
+          val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(
+            context,
+            persistentPath,
+            defaultImageDurationMs = 3000L
+          )
+
+          viewModel.timelineEngine.addVideoClip(
+            uri = persistentPath,
+            name = fileName,
+            isVideo = metadata.isVideo,
+            durationMs = metadata.durationMs,
+            atPlayhead = false,
+            width = metadata.width,
+            height = metadata.height,
+            rotationDegrees = metadata.rotationDegrees,
+            frameRate = metadata.frameRate,
+            mimeType = metadata.mimeType,
+            hasAudio = metadata.hasAudio
+          )
         }
-
-        val metadata = com.example.engine.media.MediaMetadataHelper.extractMetadata(
-          context,
-          uri.toString(),
-          defaultImageDurationMs = 3000L
-        )
-
-        viewModel.timelineEngine.addVideoClip(
-          uri = uri.toString(),
-          name = fileName,
-          isVideo = metadata.isVideo,
-          durationMs = metadata.durationMs,
-          atPlayhead = false,
-          width = metadata.width,
-          height = metadata.height,
-          rotationDegrees = metadata.rotationDegrees,
-          frameRate = metadata.frameRate,
-          mimeType = metadata.mimeType,
-          hasAudio = metadata.hasAudio
-        )
       }
     }
   }
@@ -252,7 +274,32 @@ fun EditorScreen(
               viewModel = viewModel,
               onStartDragTransition = { draggedTransitionType = it }
             )
-            EditorToolbarTab.TEXT -> TextEditorPanel(viewModel)
+            EditorToolbarTab.TEXT -> {
+              when (activeTextSubTool) {
+                TextSubTool.ADD_TEXT -> TextStudioPanel(
+                  viewModel = viewModel,
+                  onDismiss = { viewModel.setActiveToolbarTab(null) }
+                )
+                TextSubTool.AUTO_CAPTIONS -> CaptionsToolPanel(viewModel)
+                TextSubTool.STICKERS -> StickersToolPanel(viewModel)
+                TextSubTool.DRAW -> DrawToolPanel(
+                  viewModel = viewModel,
+                  onDismiss = { viewModel.setActiveToolbarTab(null) }
+                )
+                TextSubTool.TEXT_TEMPLATES -> TextTemplatesBrowserPanel(
+                  viewModel = viewModel,
+                  onDismiss = { viewModel.setActiveToolbarTab(null) }
+                )
+                TextSubTool.TEXT_TO_AUDIO -> TextToAudioToolPanel(
+                  viewModel = viewModel,
+                  onDismiss = { viewModel.setActiveToolbarTab(null) }
+                )
+                TextSubTool.AUTO_LYRICS -> AutoLyricsToolPanel(
+                  viewModel = viewModel,
+                  onDismiss = { viewModel.setActiveToolbarTab(null) }
+                )
+              }
+            }
             EditorToolbarTab.AUDIO -> AudioToolPanel(viewModel)
             EditorToolbarTab.VOLUME -> VolumeToolPanel(viewModel)
             EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
@@ -268,13 +315,24 @@ fun EditorScreen(
           }
         }
 
-        // Bottom Navigation Tools Bar
-        EditorBottomToolbar(
-          activeTab = activeTab,
-          onTabSelected = { tab ->
-            viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
-          }
-        )
+        // Bottom Navigation Bar: Switch to CapCut-style Sub-Bar when Text Tool is active
+        if (activeTab == EditorToolbarTab.TEXT) {
+          TextToolsSubBar(
+            activeSubTool = activeTextSubTool,
+            onSelectSubTool = { activeTextSubTool = it },
+            onBackToMainMenu = { viewModel.setActiveToolbarTab(null) }
+          )
+        } else {
+          EditorBottomToolbar(
+            activeTab = activeTab,
+            onTabSelected = { tab ->
+              if (tab == EditorToolbarTab.TEXT) {
+                activeTextSubTool = TextSubTool.ADD_TEXT
+              }
+              viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
+            }
+          )
+        }
       }
     }
   ) { padding ->
@@ -342,6 +400,11 @@ fun EditorScreen(
           onUpdateSticker = { viewModel.timelineEngine.updateStickerClip(it) },
           onDeleteClip = { viewModel.timelineEngine.deleteClips(setOf(it)) },
           onDuplicateClip = { viewModel.timelineEngine.duplicateClips(setOf(it)) },
+          onEditText = { clip ->
+            viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(clip.id))
+            activeTextSubTool = TextSubTool.ADD_TEXT
+            viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
+          },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = true },
           onAddMedia = {
@@ -585,6 +648,7 @@ fun EditorScreen(
           viewModel.setActiveToolbarTab(EditorToolbarTab.AUDIO)
         },
         onAddText = {
+          activeTextSubTool = TextSubTool.ADD_TEXT
           viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
         },
         onAddOverlay = {
@@ -768,6 +832,11 @@ fun EditorScreen(
           onUpdateSticker = { viewModel.timelineEngine.updateStickerClip(it) },
           onDeleteClip = { viewModel.timelineEngine.deleteClips(setOf(it)) },
           onDuplicateClip = { viewModel.timelineEngine.duplicateClips(setOf(it)) },
+          onEditText = { clip ->
+            isFullscreenPreview = false
+            viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(clip.id))
+            viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
+          },
           player = viewModel.playbackEngine.player,
           onToggleFullscreen = { isFullscreenPreview = false },
           onAddMedia = {
@@ -1068,6 +1137,7 @@ fun VideoPreviewSurface(
   onUpdateSticker: (StickerClip) -> Unit = {},
   onDeleteClip: (String) -> Unit = {},
   onDuplicateClip: (String) -> Unit = {},
+  onEditText: ((TextClip) -> Unit)? = null,
   player: ExoPlayer? = null,
   onToggleFullscreen: (() -> Unit)? = null,
   onAddMedia: (() -> Unit)? = null,
@@ -1201,19 +1271,64 @@ fun VideoPreviewSurface(
               MediaRelinkManager.isRealPlayableMedia(context, activeClip.uri)
             }
             if (activeClip.isVideo && isRealPlayable && player != null) {
-              AndroidView(
-                factory = { ctx ->
-                  PlayerView(ctx).apply {
-                    this.player = player
-                    useController = false
-                    layoutParams = FrameLayout.LayoutParams(
-                      ViewGroup.LayoutParams.MATCH_PARENT,
-                      ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                  }
-                },
-                modifier = Modifier.fillMaxSize()
-              )
+              val androidMatrix = remember(timeline.adjustments, timeline.filter, activeClip.filter) {
+                com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+                  timeline.adjustments,
+                  timeline.filter,
+                  activeClip.filter
+                )
+              }
+              var fallbackBitmap by remember(activeClip.id, activeClip.uri) {
+                mutableStateOf<Bitmap?>(null)
+              }
+              LaunchedEffect(activeClip.id, activeClip.uri, currentPosMs) {
+                val sourceMs = activeClip.timelineToSourceMs(currentPosMs)
+                VideoThumbnailManager.requestThumbnail(
+                  context = context,
+                  uri = activeClip.uri,
+                  sourceTimeMs = sourceMs,
+                  targetWidth = 360,
+                  targetHeight = 360,
+                  isVideo = true
+                ) { bmp ->
+                  fallbackBitmap = bmp
+                }
+              }
+
+              Box(modifier = Modifier.fillMaxSize()) {
+                val currentBmp = fallbackBitmap
+                if (currentBmp != null && !currentBmp.isRecycled) {
+                  Image(
+                    bitmap = currentBmp.asImageBitmap(),
+                    contentDescription = activeClip.name,
+                    contentScale = ContentScale.Fit,
+                    colorFilter = combinedColorFilter,
+                    modifier = Modifier.fillMaxSize()
+                  )
+                }
+                AndroidView(
+                  factory = { ctx ->
+                    PlayerView(ctx).apply {
+                      this.player = player
+                      useController = false
+                      setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                      setKeepContentOnPlayerReset(true)
+                      layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                    }
+                  },
+                  update = { pv ->
+                    pv.player = player
+                    val filterPaint = android.graphics.Paint().apply {
+                      colorFilter = android.graphics.ColorMatrixColorFilter(androidMatrix)
+                    }
+                    pv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, filterPaint)
+                  },
+                  modifier = Modifier.fillMaxSize()
+                )
+              }
             } else if (!activeClip.isVideo && activeClip.uri.isNotBlank() && !activeClip.uri.startsWith("stock://") && !activeClip.uri.startsWith("sample://")) {
               AsyncImage(
                 model = activeClip.uri,
@@ -1323,6 +1438,7 @@ fun VideoPreviewSurface(
           onUpdateSticker = onUpdateSticker,
           onDeleteClip = onDeleteClip,
           onDuplicateClip = onDuplicateClip,
+          onEditText = onEditText,
           modifier = Modifier.fillMaxSize()
         )
       }
@@ -2213,8 +2329,23 @@ private fun SyntheticClipPreview(
   val relativeClipPosMs = (currentPosMs - clip.timelineStartMs).coerceIn(0L, clip.durationMs)
   val progress = if (clip.durationMs > 0) relativeClipPosMs.toFloat() / clip.durationMs else 0f
 
+  val filterAppliedModifier = if (colorFilter != null) {
+    modifier.drawWithContent {
+      drawIntoCanvas { canvas ->
+        val paint = androidx.compose.ui.graphics.Paint().apply {
+          this.colorFilter = colorFilter
+        }
+        canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), paint)
+        drawContent()
+        canvas.restore()
+      }
+    }
+  } else {
+    modifier
+  }
+
   Box(
-    modifier = modifier
+    modifier = filterAppliedModifier
       .background(Brush.linearGradient(listOf(startColor, endColor)))
       .drawBehind {
         val scanY = size.height * ((progress * 3f) % 1f)

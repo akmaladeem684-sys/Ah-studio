@@ -46,6 +46,7 @@ class VideoPlaybackEngine(
   private var currentTimeline: Timeline = Timeline()
   private var currentPosMs: Long = 0L
   private var loadedClipId: String? = null
+  private var loadedUri: String? = null
   private var isSyncingFromPlayer = false
 
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -274,7 +275,7 @@ class VideoPlaybackEngine(
     _activeClip.value = clip
 
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
-      val needsReload = forceReload || loadedClipId != clip.id
+      val needsReload = forceReload || loadedClipId != clip.id || loadedUri != clip.uri || player.mediaItemCount == 0
       if (needsReload) {
         ensureClipLoaded(clip)
       }
@@ -285,6 +286,10 @@ class VideoPlaybackEngine(
       // Apply clip speed and volume
       player.playbackParameters = PlaybackParameters(clip.speed)
       player.volume = if (clip.isMuted) 0f else clip.volume
+
+      if (player.playbackState == Player.STATE_IDLE) {
+        player.prepare()
+      }
     } else {
       player.pause()
     }
@@ -297,6 +302,7 @@ class VideoPlaybackEngine(
         player.clearMediaItems()
       } catch (ignored: Exception) {}
       loadedClipId = null
+      loadedUri = null
       return
     }
 
@@ -307,6 +313,10 @@ class VideoPlaybackEngine(
         if (path.startsWith("/")) path = path.substring(1)
         if (path.isEmpty()) path = parsedUri.authority ?: ""
         Uri.parse("asset:///$path")
+      } else if (parsedUri.scheme == null || parsedUri.scheme == "file") {
+        val path = parsedUri.path ?: clip.uri
+        val f = java.io.File(path)
+        if (f.exists()) Uri.fromFile(f) else parsedUri
       } else {
         parsedUri
       }
@@ -316,6 +326,7 @@ class VideoPlaybackEngine(
       player.volume = if (clip.isMuted) 0f else clip.volume
       player.prepare()
       loadedClipId = clip.id
+      loadedUri = clip.uri
     } catch (e: Exception) {
       Log.w(tag, "Failed to load clip URI: ${clip.uri}", e)
       try {
@@ -323,6 +334,7 @@ class VideoPlaybackEngine(
         player.clearMediaItems()
       } catch (ignored: Exception) {}
       loadedClipId = null
+      loadedUri = null
     }
   }
 

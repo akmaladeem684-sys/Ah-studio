@@ -127,8 +127,9 @@ fun MultiTrackTimeline(
 ) {
   val horizontalScrollState = rememberScrollState()
   val verticalScrollState = rememberScrollState()
+  val density = LocalDensity.current
 
-  val totalDuration = timeline.totalDurationMs.coerceAtLeast(3000L)
+  val totalDuration = timeline.totalDurationMs.coerceAtLeast(1000L)
   val msPerPixel = remember(zoom) { (20f / zoom).coerceIn(2.5f, 120f) }
   val maxTimelineMs = remember(timeline, totalDuration) {
     maxOf(
@@ -139,7 +140,7 @@ fun MultiTrackTimeline(
       timeline.textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
       timeline.stickerClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L,
       timeline.effectClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-    ).coerceAtLeast(3000L)
+    ).coerceAtLeast(1000L)
   }
   val trackContentWidthDp = (maxTimelineMs / msPerPixel).dp + 180.dp
 
@@ -162,8 +163,8 @@ fun MultiTrackTimeline(
   }
 
   // Keep scroll position strictly synchronized with currentPosMs (moves timeline underneath fixed center CTI)
-  LaunchedEffect(currentPosMs, msPerPixel) {
-    val targetScrollPx = (currentPosMs / msPerPixel).roundToInt()
+  LaunchedEffect(currentPosMs, msPerPixel, density) {
+    val targetScrollPx = with(density) { ((currentPosMs / msPerPixel).dp).roundToPx() }
     if (kotlin.math.abs(horizontalScrollState.value - targetScrollPx) > 1) {
       horizontalScrollState.scrollTo(targetScrollPx)
     }
@@ -224,7 +225,7 @@ fun MultiTrackTimeline(
             Row(modifier = Modifier.fillMaxHeight()) {
               Spacer(modifier = Modifier.width(centerPaddingDp))
               AccurateTimecodeRuler(
-                totalDurationMs = totalDuration,
+                totalDurationMs = maxTimelineMs,
                 currentPosMs = currentPosMs,
                 msPerPixel = msPerPixel,
                 fps = fps,
@@ -232,7 +233,7 @@ fun MultiTrackTimeline(
                 onSeek = onSeek,
                 onDoubleTapSnap = onSeekToNextCut
               )
-              Spacer(modifier = Modifier.width(centerPaddingDp))
+              Spacer(modifier = Modifier.width(centerPaddingDp + 180.dp))
             }
           }
         }
@@ -538,7 +539,7 @@ fun MultiTrackTimeline(
               modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .pointerInput(totalDuration, msPerPixel, isFrameSnapping, fps) {
+                .pointerInput(totalDuration, msPerPixel, isFrameSnapping, fps, density) {
                   detectDragGestures(
                     onDragStart = {
                       isTouchScrubbing = true
@@ -552,7 +553,8 @@ fun MultiTrackTimeline(
                     },
                     onDrag = { change, dragAmount ->
                       change.consume()
-                      val deltaMs = -dragAmount.x * msPerPixel
+                      val dragAmountDp = dragAmount.x / density.density
+                      val deltaMs = -dragAmountDp * msPerPixel
                       scrubAccumulatorMs = (scrubAccumulatorMs + deltaMs).coerceIn(0f, maxTimelineMs.toFloat())
                       val rawMs = scrubAccumulatorMs.toLong()
                       val targetMs = if (isFrameSnapping) {
@@ -581,11 +583,12 @@ fun MultiTrackTimeline(
                     .width(trackContentWidthDp + centerPaddingDp * 2)
                     .fillMaxHeight()
                     .verticalScroll(verticalScrollState)
-                    .pointerInput(maxTimelineMs, msPerPixel) {
+                    .pointerInput(maxTimelineMs, msPerPixel, density) {
                       detectTapGestures { offset ->
-                        val viewportCenterX = size.width / 2f
-                        val deltaPx = offset.x - viewportCenterX
-                        val deltaMs = deltaPx * msPerPixel
+                        val viewportCenterXPx = size.width / 2f
+                        val deltaPx = offset.x - viewportCenterXPx
+                        val deltaDp = deltaPx / density.density
+                        val deltaMs = deltaDp * msPerPixel
                         val clickedMs = (currentPosMs + deltaMs.toLong()).coerceIn(0L, maxTimelineMs)
                         onSeek(clickedMs)
                       }

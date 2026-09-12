@@ -32,6 +32,7 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.data.local.CrashRecoveryEntity
+import com.example.engine.media.MediaPersistenceManager
 import com.example.engine.media.MediaRelinkManager
 
 enum class ProjectSaveStatus {
@@ -316,36 +317,39 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     isVideo: Boolean = true,
     aspectRatio: AspectRatio = AspectRatio.RATIO_9_16
   ) {
-    var runningStart = 0L
-    val appContext = getApplication<Application>().applicationContext
-    val clips = uris.mapIndexed { index, uri ->
-      val meta = com.example.engine.media.MediaMetadataHelper.extractMetadata(appContext, uri)
-      val duration = meta.durationMs
-      val clip = VideoClip(
-        uri = uri,
-        name = if (meta.isVideo) "Video ${index + 1}" else "Photo ${index + 1}",
-        timelineStartMs = runningStart,
-        durationMs = duration,
-        sourceStartMs = 0L,
-        sourceEndMs = duration,
-        isVideo = meta.isVideo,
-        width = meta.width,
-        height = meta.height,
-        naturalRotation = meta.rotationDegrees,
-        frameRate = meta.frameRate,
-        mimeType = meta.mimeType,
-        hasAudio = meta.hasAudio
+    viewModelScope.launch {
+      val appContext = getApplication<Application>().applicationContext
+      val persistentUris = MediaPersistenceManager.persistMediaList(appContext, uris)
+      var runningStart = 0L
+      val clips = persistentUris.mapIndexed { index, uri ->
+        val meta = com.example.engine.media.MediaMetadataHelper.extractMetadata(appContext, uri)
+        val duration = meta.durationMs
+        val clip = VideoClip(
+          uri = uri,
+          name = if (meta.isVideo) "Video ${index + 1}" else "Photo ${index + 1}",
+          timelineStartMs = runningStart,
+          durationMs = duration,
+          sourceStartMs = 0L,
+          sourceEndMs = duration,
+          isVideo = meta.isVideo,
+          width = meta.width,
+          height = meta.height,
+          naturalRotation = meta.rotationDegrees,
+          frameRate = meta.frameRate,
+          mimeType = meta.mimeType,
+          hasAudio = meta.hasAudio
+        )
+        runningStart += duration
+        clip
+      }
+      createNewProject(
+        name = name,
+        aspectRatio = aspectRatio,
+        resolution = Resolution.RES_1080P,
+        fps = FrameRate.FPS_30,
+        initialMediaClips = clips
       )
-      runningStart += duration
-      clip
     }
-    createNewProject(
-      name = name,
-      aspectRatio = aspectRatio,
-      resolution = Resolution.RES_1080P,
-      fps = FrameRate.FPS_30,
-      initialMediaClips = clips
-    )
   }
 
   fun loadProject(project: ProjectEntity) {

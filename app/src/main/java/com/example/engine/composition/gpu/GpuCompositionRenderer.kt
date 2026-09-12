@@ -528,6 +528,34 @@ class GpuCompositionRenderer(private val context: Context) {
         GLES20.glUniform1i(uChromaEnabledHandle, 0)
       }
     }
+
+    // Color Matrix Filter uniforms (Preset Filters: 4K, HDR, Autumn, Cinematic, etc.)
+    val uColorMatrixHandle = GLES20.glGetUniformLocation(program, "uColorMatrix")
+    val uColorOffsetHandle = GLES20.glGetUniformLocation(program, "uColorOffset")
+    val uUseColorMatrixHandle = GLES20.glGetUniformLocation(program, "uUseColorMatrix")
+
+    val filterMatrix = com.example.engine.composition.ColorFilterGenerator.getFilterMatrix(filter.type, filter.intensity)
+    if (filterMatrix != null && uUseColorMatrixHandle >= 0) {
+      val arr = filterMatrix.array
+      // Convert Android 4x5 row-major ColorMatrix array to OpenGL 4x4 column-major matrix + offset
+      val glMat = floatArrayOf(
+        arr[0], arr[5], arr[10], arr[15],  // col 0
+        arr[1], arr[6], arr[11], arr[16],  // col 1
+        arr[2], arr[7], arr[12], arr[17],  // col 2
+        arr[3], arr[8], arr[13], arr[18]   // col 3
+      )
+      val glOffset = floatArrayOf(
+        arr[4] / 255.0f,
+        arr[9] / 255.0f,
+        arr[14] / 255.0f,
+        arr[19] / 255.0f
+      )
+      if (uColorMatrixHandle >= 0) GLES20.glUniformMatrix4fv(uColorMatrixHandle, 1, false, glMat, 0)
+      if (uColorOffsetHandle >= 0) GLES20.glUniform4fv(uColorOffsetHandle, 1, glOffset, 0)
+      GLES20.glUniform1i(uUseColorMatrixHandle, 1)
+    } else if (uUseColorMatrixHandle >= 0) {
+      GLES20.glUniform1i(uUseColorMatrixHandle, 0)
+    }
   }
 
   private fun drawQuad(program: Int) {

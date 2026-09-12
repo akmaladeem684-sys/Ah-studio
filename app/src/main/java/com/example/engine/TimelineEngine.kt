@@ -1442,16 +1442,33 @@ class TimelineEngine {
     }
   }
 
+  private fun isClipAtPlayhead(clipId: String, playhead: Long): Boolean {
+    _timeline.value.videoClips.find { it.id == clipId }?.let { return playhead > it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+    _timeline.value.overlayClips.find { it.id == clipId }?.let { return playhead > it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+    _timeline.value.audioClips.find { it.id == clipId }?.let { return playhead > it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+    _timeline.value.textClips.find { it.id == clipId }?.let { return playhead > it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+    _timeline.value.stickerClips.find { it.id == clipId }?.let { return playhead > it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+    _timeline.value.effectClips.find { it.id == clipId }?.let { return playhead > it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+    return false
+  }
+
   fun splitAtPlayhead(targetClipId: String? = null): Boolean {
     val playhead = _currentPositionMs.value
+    val selectedId = when (val sel = _selectedElement.value) {
+      is SelectedTrackElement.Video -> sel.clipId
+      is SelectedTrackElement.Overlay -> sel.clipId
+      is SelectedTrackElement.Audio -> sel.clipId
+      is SelectedTrackElement.Text -> sel.clipId
+      is SelectedTrackElement.Sticker -> sel.clipId
+      is SelectedTrackElement.Effect -> sel.clipId
+      else -> null
+    }
+
+    val clipUnderPlayhead = findClipUnderPlayhead()
     val clipId = targetClipId
-      ?: (_selectedElement.value as? SelectedTrackElement.Video)?.clipId
-      ?: (_selectedElement.value as? SelectedTrackElement.Overlay)?.clipId
-      ?: (_selectedElement.value as? SelectedTrackElement.Audio)?.clipId
-      ?: (_selectedElement.value as? SelectedTrackElement.Text)?.clipId
-      ?: (_selectedElement.value as? SelectedTrackElement.Sticker)?.clipId
-      ?: (_selectedElement.value as? SelectedTrackElement.Effect)?.clipId
-      ?: findClipUnderPlayhead()
+      ?: (if (selectedId != null && isClipAtPlayhead(selectedId, playhead)) selectedId else null)
+      ?: clipUnderPlayhead
+      ?: selectedId
       ?: return false
 
     val element = findTrackElementForClip(clipId)
@@ -1461,7 +1478,7 @@ class TimelineEngine {
         val index = _timeline.value.videoClips.indexOfFirst { it.id == clipId }
         if (index == -1) return false
         val clip = _timeline.value.videoClips[index]
-        if (playhead <= clip.timelineStartMs + 15L || playhead >= clip.timelineStartMs + clip.durationMs - 15L) return false
+        if (playhead <= clip.timelineStartMs + 1L || playhead >= clip.timelineStartMs + clip.durationMs - 1L) return false
         recordHistory()
         val firstDur = playhead - clip.timelineStartMs
         val secondDur = clip.durationMs - firstDur
@@ -2101,7 +2118,12 @@ class TimelineEngine {
     }
     if (!isTrackLocked(TrackType.TEXT)) {
       _timeline.value.textClips.filter { it.id in targets }.forEach { clip ->
-        val copy = clip.copy(id = UUID.randomUUID().toString(), timelineStartMs = clip.timelineStartMs + clip.durationMs)
+        val copy = clip.copy(
+          id = UUID.randomUUID().toString(),
+          timelineStartMs = clip.timelineStartMs,
+          posX = (clip.posX + 0.05f).coerceIn(-1.5f, 1.5f),
+          posY = (clip.posY + 0.05f).coerceIn(-1.5f, 1.5f)
+        )
         newText.add(copy)
         newSelected.add(copy.id)
       }
@@ -2163,7 +2185,12 @@ class TimelineEngine {
       is SelectedTrackElement.Text -> {
         if (isTrackLocked(TrackType.TEXT)) return false
         val clip = _timeline.value.textClips.find { it.id == selected.clipId } ?: return false
-        val copy = clip.copy(id = UUID.randomUUID().toString(), timelineStartMs = clip.timelineStartMs + clip.durationMs)
+        val copy = clip.copy(
+          id = UUID.randomUUID().toString(),
+          timelineStartMs = clip.timelineStartMs,
+          posX = (clip.posX + 0.05f).coerceIn(-1.5f, 1.5f),
+          posY = (clip.posY + 0.05f).coerceIn(-1.5f, 1.5f)
+        )
         val list = _timeline.value.textClips.toMutableList()
         list.add(copy)
         _timeline.value = _timeline.value.copy(textClips = list)

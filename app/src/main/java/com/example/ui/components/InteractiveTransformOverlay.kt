@@ -13,8 +13,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CropRotate
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -75,6 +77,7 @@ fun InteractiveTransformOverlay(
   onUpdateSticker: (StickerClip) -> Unit,
   onDeleteClip: (String) -> Unit,
   onDuplicateClip: (String) -> Unit,
+  onEditText: ((TextClip) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -83,6 +86,9 @@ fun InteractiveTransformOverlay(
   val currentOnUpdateText by rememberUpdatedState(onUpdateText)
   val currentOnUpdateOverlay by rememberUpdatedState(onUpdateOverlay)
   val currentOnUpdateSticker by rememberUpdatedState(onUpdateSticker)
+  val currentOnEditText by rememberUpdatedState(onEditText)
+  val currentOnDeleteClip by rememberUpdatedState(onDeleteClip)
+  val currentOnDuplicateClip by rememberUpdatedState(onDuplicateClip)
 
   BoxWithConstraints(
     modifier = modifier
@@ -352,10 +358,13 @@ fun InteractiveTransformOverlay(
       val centerXPx = (parentWidthPx / 2f) + (textClip.posX * parentWidthPx / 2f)
       val centerYPx = (parentHeightPx / 2f) + (textClip.posY * parentHeightPx / 2f)
 
-      // Estimate base bounds for handles
-      val approxTextLen = textClip.text.length.coerceAtLeast(3)
-      val baseWidthDp = maxOf(120.dp, (approxTextLen * textClip.fontSizeSp * 0.45f).dp)
-      val baseHeightDp = maxOf(48.dp, (textClip.fontSizeSp * 1.6f).dp)
+      // Estimate base bounds for handles with padding
+      val lines = textClip.text.lines()
+      val maxLineLen = lines.maxOfOrNull { it.length }?.coerceAtLeast(2) ?: 2
+      val lineCount = lines.size.coerceAtLeast(1)
+
+      val baseWidthDp = maxOf(100.dp, (maxLineLen * textClip.fontSizeSp * 0.60f + 32f).dp)
+      val baseHeightDp = maxOf(48.dp, (lineCount * textClip.fontSizeSp * 1.5f + 24f).dp)
 
       val baseWidthPx = with(density) { baseWidthDp.toPx() }
       val baseHeightPx = with(density) { baseHeightDp.toPx() }
@@ -393,12 +402,19 @@ fun InteractiveTransformOverlay(
           .size(currentWidthDp, currentHeightDp)
           .rotate(textClip.rotation)
           .pointerInput(textClip.id) {
-            detectTapGestures {
-              currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
-            }
+            detectTapGestures(
+              onTap = {
+                currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
+              },
+              onDoubleTap = {
+                currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
+                currentOnEditText?.invoke(currentTextClip)
+              }
+            )
           }
           .pointerInput(textClip.id) {
-            detectTransformGestures { _, pan, zoom, rotationChange ->
+            // Multi-touch gestures: two-finger pinch scale, two-finger rotation, single-finger pan
+            detectTransformGestures(panZoomLock = false) { _, pan, zoom, rotationChange ->
               val clip = currentTextClip
               currentOnSelectElement(SelectedTrackElement.Text(clip.id))
               val deltaPosX = (pan.x * 2f) / parentWidthPx
@@ -420,18 +436,29 @@ fun InteractiveTransformOverlay(
           }
       )
 
+      // When text is selected: display Four-Corner Controls around selected text
       if (isSelected) {
-        TransformHandlesBox(
+        TextFourCornerControlsBox(
           centerXPx = centerXPx,
           centerYPx = centerYPx,
           baseWidthPx = baseWidthPx,
           baseHeightPx = baseHeightPx,
           scale = textClip.scale,
           rotation = textClip.rotation,
-          onDelete = { onDeleteClip(textClip.id) },
-          onDuplicate = { onDuplicateClip(textClip.id) },
-          onReset = {
-            onUpdateText(textClip.copy(scale = 1.0f, rotation = 0f))
+          onEdit = {
+            currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
+            currentOnEditText?.invoke(currentTextClip)
+          },
+          onDelete = {
+            currentOnDeleteClip(textClip.id)
+          },
+          onDuplicate = {
+            currentOnDuplicateClip(textClip.id)
+          },
+          onResizeDrag = { deltaScale ->
+            val clip = currentTextClip
+            val newScale = (clip.scale * deltaScale).coerceIn(0.15f, 8.0f)
+            currentOnUpdateText(clip.copy(scale = newScale))
           },
           onTransformHandleDrag = { deltaScale, deltaRotation ->
             val clip = currentTextClip
@@ -439,6 +466,245 @@ fun InteractiveTransformOverlay(
             val newRot = (clip.rotation + deltaRotation) % 360f
             currentOnUpdateText(clip.copy(scale = newScale, rotation = newRot))
           }
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Four-Corner Controls for Selected Text (Matching CapCut & Pro Mobile Editor UX):
+ * - Top-left corner — Edit/Pen 🖊️: Reopens the Text Editing Panel.
+ * - Top-right corner — Delete ✕: Removes the selected text immediately.
+ * - Bottom-left corner — Resize: Drag to scale smaller/larger while maintaining position.
+ * - Bottom-right corner — Copy ❐: Tapping creates one duplicate with preserved properties.
+ * - White rectangular bounding border around the text.
+ */
+@Composable
+private fun TextFourCornerControlsBox(
+  centerXPx: Float,
+  centerYPx: Float,
+  baseWidthPx: Float,
+  baseHeightPx: Float,
+  scale: Float,
+  rotation: Float,
+  onEdit: () -> Unit,
+  onDelete: () -> Unit,
+  onDuplicate: () -> Unit,
+  onResizeDrag: (deltaScale: Float) -> Unit,
+  onTransformHandleDrag: (deltaScale: Float, deltaRotation: Float) -> Unit
+) {
+  val density = LocalDensity.current
+
+  val currentWidthPx = baseWidthPx * scale
+  val currentHeightPx = baseHeightPx * scale
+
+  val currentWidthDp = with(density) { currentWidthPx.toDp() }
+  val currentHeightDp = with(density) { currentHeightPx.toDp() }
+
+  val centerXDp = with(density) { centerXPx.toDp() }
+  val centerYDp = with(density) { centerYPx.toDp() }
+
+  val handleSizeDp = 32.dp
+  val halfHandleDp = handleSizeDp / 2f
+
+  Box(
+    modifier = Modifier.fillMaxSize()
+  ) {
+    // 1. White Crisp Bounding Border Box
+    Box(
+      modifier = Modifier
+        .offset(
+          x = centerXDp - (currentWidthDp / 2f),
+          y = centerYDp - (currentHeightDp / 2f)
+        )
+        .size(currentWidthDp, currentHeightDp)
+        .rotate(rotation)
+        .border(
+          width = 1.5.dp,
+          color = Color.White,
+          shape = RoundedCornerShape(4.dp)
+        )
+    )
+
+    // Corner Positions relative to center with rotation applied
+    val rad = Math.toRadians(rotation.toDouble())
+    val halfW = currentWidthPx / 2f
+    val halfH = currentHeightPx / 2f
+
+    // Top-Left Corner (Edit / Pen 🖊️)
+    val tlX = centerXPx + ((-halfW) * cos(rad) - (-halfH) * sin(rad)).toFloat()
+    val tlY = centerYPx + ((-halfW) * sin(rad) + (-halfH) * cos(rad)).toFloat()
+
+    // Top-Right Corner (Delete ✕)
+    val trX = centerXPx + (halfW * cos(rad) - (-halfH) * sin(rad)).toFloat()
+    val trY = centerYPx + (halfW * sin(rad) + (-halfH) * cos(rad)).toFloat()
+
+    // Bottom-Left Corner (Resize)
+    val blX = centerXPx + ((-halfW) * cos(rad) - (halfH) * sin(rad)).toFloat()
+    val blY = centerYPx + ((-halfW) * sin(rad) + (halfH) * cos(rad)).toFloat()
+
+    // Bottom-Right Corner (Copy / Duplicate ❐)
+    val brX = centerXPx + (halfW * cos(rad) - (halfH) * sin(rad)).toFloat()
+    val brY = centerYPx + (halfW * sin(rad) + (halfH) * cos(rad)).toFloat()
+
+    // Convert corners to DP
+    val tlXDp = with(density) { tlX.toDp() }
+    val tlYDp = with(density) { tlY.toDp() }
+
+    val trXDp = with(density) { trX.toDp() }
+    val trYDp = with(density) { trY.toDp() }
+
+    val blXDp = with(density) { blX.toDp() }
+    val blYDp = with(density) { blY.toDp() }
+
+    val brXDp = with(density) { brX.toDp() }
+    val brYDp = with(density) { brY.toDp() }
+
+    // --- CORNER 1: TOP-LEFT (Edit / Pen 🖊️) ---
+    Surface(
+      onClick = onEdit,
+      shape = CircleShape,
+      color = Color(0xFF1E222D),
+      shadowElevation = 4.dp,
+      border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White),
+      modifier = Modifier
+        .offset(x = tlXDp - halfHandleDp, y = tlYDp - halfHandleDp)
+        .size(handleSizeDp)
+        .testTag("text_handle_edit_button")
+    ) {
+      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+        Icon(
+          imageVector = Icons.Default.Edit,
+          contentDescription = "Edit Text",
+          tint = Color.White,
+          modifier = Modifier.size(16.dp)
+        )
+      }
+    }
+
+    // --- CORNER 2: TOP-RIGHT (Delete ✕) ---
+    Surface(
+      onClick = onDelete,
+      shape = CircleShape,
+      color = Color(0xFF1E222D),
+      shadowElevation = 4.dp,
+      border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White),
+      modifier = Modifier
+        .offset(x = trXDp - halfHandleDp, y = trYDp - halfHandleDp)
+        .size(handleSizeDp)
+        .testTag("text_handle_delete_button")
+    ) {
+      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+        Icon(
+          imageVector = Icons.Default.Close,
+          contentDescription = "Delete Text",
+          tint = Color.White,
+          modifier = Modifier.size(16.dp)
+        )
+      }
+    }
+
+    // --- CORNER 3: BOTTOM-LEFT (Resize) ---
+    var blTouchDist by remember { mutableFloatStateOf(0f) }
+
+    Surface(
+      shape = CircleShape,
+      color = Color(0xFF1E222D),
+      shadowElevation = 4.dp,
+      border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White),
+      modifier = Modifier
+        .offset(x = blXDp - halfHandleDp, y = blYDp - halfHandleDp)
+        .size(handleSizeDp)
+        .pointerInput(Unit) {
+          detectDragGestures(
+            onDragStart = { offset ->
+              val touchXPx = blX + offset.x
+              val touchYPx = blY + offset.y
+              val dx = touchXPx - centerXPx
+              val dy = touchYPx - centerYPx
+              blTouchDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+            },
+            onDrag = { change, _ ->
+              change.consume()
+              val touchXPx = blX + change.position.x
+              val touchYPx = blY + change.position.y
+              val dx = touchXPx - centerXPx
+              val dy = touchYPx - centerYPx
+              val currentDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+
+              if (blTouchDist > 0f) {
+                val deltaScale = currentDist / blTouchDist
+                onResizeDrag(deltaScale)
+              }
+              blTouchDist = currentDist
+            }
+          )
+        }
+        .testTag("text_handle_resize_button")
+    ) {
+      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+        Icon(
+          imageVector = Icons.Default.OpenInFull,
+          contentDescription = "Resize Text",
+          tint = Color.White,
+          modifier = Modifier.size(16.dp)
+        )
+      }
+    }
+
+    // --- CORNER 4: BOTTOM-RIGHT (Copy ❐ & Rotate/Scale) ---
+    var brTouchDist by remember { mutableFloatStateOf(0f) }
+    var brTouchAngle by remember { mutableFloatStateOf(0f) }
+
+    Surface(
+      onClick = onDuplicate,
+      shape = CircleShape,
+      color = Color(0xFF1E222D),
+      shadowElevation = 4.dp,
+      border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White),
+      modifier = Modifier
+        .offset(x = brXDp - halfHandleDp, y = brYDp - halfHandleDp)
+        .size(handleSizeDp)
+        .pointerInput(Unit) {
+          detectDragGestures(
+            onDragStart = { offset ->
+              val touchXPx = brX + offset.x
+              val touchYPx = brY + offset.y
+              val dx = touchXPx - centerXPx
+              val dy = touchYPx - centerYPx
+              brTouchDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              brTouchAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+            },
+            onDrag = { change, _ ->
+              change.consume()
+              val touchXPx = brX + change.position.x
+              val touchYPx = brY + change.position.y
+              val dx = touchXPx - centerXPx
+              val dy = touchYPx - centerYPx
+
+              val currentDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              val currentAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+
+              if (brTouchDist > 0f) {
+                val deltaScale = currentDist / brTouchDist
+                val deltaRotation = currentAngle - brTouchAngle
+                onTransformHandleDrag(deltaScale, deltaRotation)
+              }
+
+              brTouchDist = currentDist
+              brTouchAngle = currentAngle
+            }
+          )
+        }
+        .testTag("text_handle_copy_button")
+    ) {
+      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+        Icon(
+          imageVector = Icons.Default.ContentCopy,
+          contentDescription = "Copy Text",
+          tint = Color.White,
+          modifier = Modifier.size(16.dp)
         )
       }
     }
