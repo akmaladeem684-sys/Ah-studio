@@ -78,8 +78,14 @@ fun TimelineClipView(
   onSelect: () -> Unit,
   onLongClick: () -> Unit,
   onMoveClip: (deltaMs: Long) -> Unit,
+  onMoveClipStart: (() -> Unit)? = null,
+  onMoveClipEnd: (() -> Unit)? = null,
   onTrimLeft: (deltaMs: Long) -> Unit,
+  onTrimLeftStart: (() -> Unit)? = null,
+  onTrimLeftEnd: (() -> Unit)? = null,
   onTrimRight: (deltaMs: Long) -> Unit,
+  onTrimRightStart: (() -> Unit)? = null,
+  onTrimRightEnd: (() -> Unit)? = null,
   clipIndex: Int? = null,
   totalClipsInTrack: Int = 1,
   isVideoClip: Boolean = false,
@@ -184,61 +190,29 @@ fun TimelineClipView(
       )
     }
 
-    // 1. Audio Waveform Layer
-    if (effectiveWaveform.isNotEmpty()) {
-      if (isVideoClip) {
-        // Render audio waveform along the lower section of the video clip
-        Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .height((clipHeight * 0.45f).coerceAtLeast(18.dp))
-            .align(Alignment.BottomCenter)
-            .background(
-              Brush.verticalGradient(
-                listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
-              )
-            )
-        ) {
-          AudioWaveformCanvas(
-            waveformData = effectiveWaveform,
-            peaks = waveformAnalysis?.peaks ?: emptyList(),
-            silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
-            clipDurationMs = durationMs,
-            playheadPosMs = relPlayheadMs,
-            trackColor = AudioTrackColor,
-            peakColor = AmberAccent,
-            crestColor = CyanAccent,
-            style = waveformStyle,
-            showPeakGuides = true,
-            showSilenceHighlights = true,
-            showCenterLine = false,
-            isMuted = isMuted,
-            modifier = Modifier.fillMaxSize()
-          )
-        }
-      } else {
-        // Dedicated Audio Track: full clip height
-        AudioWaveformCanvas(
-          waveformData = effectiveWaveform,
-          peaks = waveformAnalysis?.peaks ?: emptyList(),
-          silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
-          clipDurationMs = durationMs,
-          playheadPosMs = relPlayheadMs,
-          trackColor = trackColor,
-          peakColor = AmberAccent,
-          crestColor = CyanAccent,
-          style = waveformStyle,
-          showPeakGuides = true,
-          showSilenceHighlights = true,
-          showCenterLine = true,
-          isMuted = isMuted,
-          modifier = Modifier.fillMaxSize()
-        )
-      }
+    // 1. Audio Waveform Layer (Only on dedicated audio clips, NEVER on media track video clips)
+    if (effectiveWaveform.isNotEmpty() && !isVideoClip) {
+      // Dedicated Audio Track: full clip height
+      AudioWaveformCanvas(
+        waveformData = effectiveWaveform,
+        peaks = waveformAnalysis?.peaks ?: emptyList(),
+        silenceRegions = waveformAnalysis?.silenceRegions ?: emptyList(),
+        clipDurationMs = durationMs,
+        playheadPosMs = relPlayheadMs,
+        trackColor = trackColor,
+        peakColor = AmberAccent,
+        crestColor = CyanAccent,
+        style = waveformStyle,
+        showPeakGuides = true,
+        showSilenceHighlights = true,
+        showCenterLine = true,
+        isMuted = isMuted,
+        modifier = Modifier.fillMaxSize()
+      )
     }
 
     // 1.5. Volume Envelope Graph Overlay on Audio Clips
-    if (hasAudio && showVolumeEnvelope) {
+    if (hasAudio && showVolumeEnvelope && !isVideoClip) {
       Canvas(
         modifier = Modifier
           .fillMaxSize()
@@ -350,7 +324,16 @@ fun TimelineClipView(
         .pointerInput(clipId, isLocked, msPerDp, density) {
           if (!isLocked) {
             detectDragGestures(
-              onDragStart = { dragAccumulatorX = 0f },
+              onDragStart = {
+                dragAccumulatorX = 0f
+                onMoveClipStart?.invoke()
+              },
+              onDragEnd = {
+                onMoveClipEnd?.invoke()
+              },
+              onDragCancel = {
+                onMoveClipEnd?.invoke()
+              },
               onDrag = { change, dragAmount ->
                 change.consume()
                 val dragAmountDp = dragAmount.x / density.density
@@ -364,13 +347,14 @@ fun TimelineClipView(
             )
           }
         }
-        .padding(horizontal = if (isSelected) 8.dp else 4.dp, vertical = 2.dp)
+        .padding(horizontal = if (!isVideoClip && isSelected) 8.dp else if (!isVideoClip) 4.dp else 0.dp, vertical = if (!isVideoClip) 2.dp else 0.dp)
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-      ) {
+      if (!isVideoClip) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
         // Left info: title + badges with semi-transparent contrast pill
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -728,6 +712,7 @@ fun TimelineClipView(
           }
         }
       }
+      }
     }
 
     // Left Trim Handle (Visible when selected and not locked)
@@ -736,14 +721,23 @@ fun TimelineClipView(
       Box(
         modifier = Modifier
           .align(Alignment.CenterStart)
-          .width(16.dp)
+          .width(if (isVideoClip) 8.dp else 16.dp)
           .fillMaxHeight()
           .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
           .background(CyanAccent)
           .testTag("trim_left_$clipId")
           .pointerInput(clipId, msPerDp, density) {
             detectDragGestures(
-              onDragStart = { leftTrimAccumulator = 0f },
+              onDragStart = {
+                leftTrimAccumulator = 0f
+                onTrimLeftStart?.invoke()
+              },
+              onDragEnd = {
+                onTrimLeftEnd?.invoke()
+              },
+              onDragCancel = {
+                onTrimLeftEnd?.invoke()
+              },
               onDrag = { change, dragAmount ->
                 change.consume()
                 val dragAmountDp = dragAmount.x / density.density
@@ -761,7 +755,7 @@ fun TimelineClipView(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
           Box(
             modifier = Modifier
-              .width(2.5.dp)
+              .width(2.dp)
               .height(14.dp)
               .background(Color.Black.copy(alpha = 0.75f))
           )
@@ -775,14 +769,23 @@ fun TimelineClipView(
       Box(
         modifier = Modifier
           .align(Alignment.CenterEnd)
-          .width(16.dp)
+          .width(if (isVideoClip) 8.dp else 16.dp)
           .fillMaxHeight()
           .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-          .background(AmberAccent)
+          .background(if (isVideoClip) CyanAccent else AmberAccent)
           .testTag("trim_right_$clipId")
           .pointerInput(clipId, msPerDp, density) {
             detectDragGestures(
-              onDragStart = { rightTrimAccumulator = 0f },
+              onDragStart = {
+                rightTrimAccumulator = 0f
+                onTrimRightStart?.invoke()
+              },
+              onDragEnd = {
+                onTrimRightEnd?.invoke()
+              },
+              onDragCancel = {
+                onTrimRightEnd?.invoke()
+              },
               onDrag = { change, dragAmount ->
                 change.consume()
                 val dragAmountDp = dragAmount.x / density.density
@@ -800,7 +803,7 @@ fun TimelineClipView(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
           Box(
             modifier = Modifier
-              .width(2.5.dp)
+              .width(2.dp)
               .height(14.dp)
               .background(Color.Black.copy(alpha = 0.75f))
           )

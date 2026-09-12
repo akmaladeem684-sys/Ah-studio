@@ -55,7 +55,7 @@ object VideoThumbnailManager {
    * Generates a quantized cache key based on URI, timestamp, and target resolution.
    */
   fun makeKey(uri: String, sourceTimeMs: Long, targetWidth: Int, targetHeight: Int): String {
-    val quantizedTime = (sourceTimeMs.coerceAtLeast(0L) / 50L) * 50L
+    val quantizedTime = (sourceTimeMs.coerceAtLeast(0L) / 200L) * 200L
     return "${uri}_${quantizedTime}_${targetWidth}x${targetHeight}"
   }
 
@@ -71,8 +71,28 @@ object VideoThumbnailManager {
   }
 
   /**
+   * Suspend function to retrieve or extract a thumbnail. Cooperates with coroutine cancellation.
+   */
+  suspend fun getThumbnail(
+    context: Context,
+    uri: String,
+    sourceTimeMs: Long,
+    targetWidth: Int = 120,
+    targetHeight: Int = 120,
+    isVideo: Boolean = true
+  ): Bitmap? {
+    val key = makeKey(uri, sourceTimeMs, targetWidth, targetHeight)
+    val cached = memoryCache.get(key)
+    if (cached != null && !cached.isRecycled) {
+      return cached
+    }
+    return getOrExtractThumbnail(context.applicationContext, uri, sourceTimeMs, targetWidth, targetHeight, isVideo)
+  }
+
+  /**
    * Requests a thumbnail asynchronously.
    * Checks Memory Cache -> Checks Disk Cache -> Extracts from Video Decoder -> Persists to Caches.
+   * Returns the Job so it can be cancelled if the caller is disposed.
    */
   fun requestThumbnail(
     context: Context,
@@ -82,15 +102,15 @@ object VideoThumbnailManager {
     targetHeight: Int = 120,
     isVideo: Boolean = true,
     onResult: (Bitmap) -> Unit
-  ) {
+  ): kotlinx.coroutines.Job {
     val key = makeKey(uri, sourceTimeMs, targetWidth, targetHeight)
     val cached = memoryCache.get(key)
     if (cached != null && !cached.isRecycled) {
       onResult(cached)
-      return
+      return kotlinx.coroutines.CompletableDeferred<Unit>().apply { complete(Unit) }
     }
 
-    thumbnailScope.launch {
+    return thumbnailScope.launch {
       val bitmap = getOrExtractThumbnail(context.applicationContext, uri, sourceTimeMs, targetWidth, targetHeight, isVideo)
       if (bitmap != null && !bitmap.isRecycled) {
         withContext(Dispatchers.Main) {
@@ -126,6 +146,8 @@ object VideoThumbnailManager {
       return@withContext diskBitmap
     }
 
+    if (!currentCoroutineContext().isActive) return@withContext null
+
     // 3. Deduplicate in-flight extraction for the exact same key
     val existingDeferred = inFlightTasks[key]
     if (existingDeferred != null) {
@@ -138,6 +160,8 @@ object VideoThumbnailManager {
     // 4. Launch new extraction task
     val newDeferred = async(Dispatchers.IO) {
       decoderSemaphore.withPermit {
+        if (!currentCoroutineContext().isActive) return@withPermit null
+
         // Double-check memory cache after acquiring permit
         val doubleCheckMem = memoryCache.get(key)
         if (doubleCheckMem != null && !doubleCheckMem.isRecycled) {

@@ -115,7 +115,7 @@ fun VideoFilmstripView(
       }
     }
 
-    // 2. Filmstrip Frame Separator Grid Overlay
+    // 2. Filmstrip Frame Separator Grid Overlay (subtle frame boundaries)
     Canvas(modifier = Modifier.fillMaxSize()) {
       val w = size.width
       val h = size.height
@@ -126,75 +126,12 @@ fun VideoFilmstripView(
           val x = i * step
           // Frame separator line
           drawLine(
-            color = Color.Black.copy(alpha = 0.55f),
+            color = Color.Black.copy(alpha = 0.4f),
             start = Offset(x, 0f),
             end = Offset(x, h),
-            strokeWidth = 1.dp.toPx()
+            strokeWidth = 0.8.dp.toPx()
           )
         }
-      }
-    }
-
-    // 3. Filmstrip Perforation Sprockets (Top & Bottom Edge)
-    Canvas(modifier = Modifier.fillMaxSize()) {
-      val sprocketW = 4.5.dp.toPx()
-      val sprocketH = 3.dp.toPx()
-      val step = 11.dp.toPx()
-      var cx = 4.dp.toPx()
-      while (cx + sprocketW < size.width) {
-        // Top sprocket hole
-        drawRoundRect(
-          color = Color.Black.copy(alpha = 0.45f),
-          topLeft = Offset(cx, 1.dp.toPx()),
-          size = Size(sprocketW, sprocketH),
-          cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
-        )
-        // Bottom sprocket hole
-        drawRoundRect(
-          color = Color.Black.copy(alpha = 0.45f),
-          topLeft = Offset(cx, size.height - 1.dp.toPx() - sprocketH),
-          size = Size(sprocketW, sprocketH),
-          cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
-        )
-        cx += step
-      }
-    }
-
-    // 4. Subtle Top/Bottom Edge Gradients for Label Readability
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(18.dp)
-        .align(Alignment.TopCenter)
-        .background(
-          Brush.verticalGradient(
-            listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent)
-          )
-        )
-    )
-
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(20.dp)
-        .align(Alignment.BottomCenter)
-        .background(
-          Brush.verticalGradient(
-            listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f))
-          )
-        )
-    )
-
-    // 5. Playhead Highlight on Active Frame Slice
-    if (playheadProgress != null) {
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        val px = (playheadProgress * size.width).coerceIn(0f, size.width)
-        drawLine(
-          color = CyanAccent.copy(alpha = 0.85f),
-          start = Offset(px, 0f),
-          end = Offset(px, size.height),
-          strokeWidth = 2.dp.toPx()
-        )
       }
     }
   }
@@ -208,21 +145,26 @@ private fun ThumbnailTile(
   isVideo: Boolean,
   modifier: Modifier = Modifier
 ) {
-  var bitmap by remember(uri, sourceTimeMs, isVideo) {
-    val key = VideoThumbnailManager.makeKey(uri, sourceTimeMs, 120, 120)
+  val quantizedTimeMs = remember(sourceTimeMs) {
+    (sourceTimeMs.coerceAtLeast(0L) / 200L) * 200L
+  }
+
+  var bitmap by remember(uri, quantizedTimeMs, isVideo) {
+    val key = VideoThumbnailManager.makeKey(uri, quantizedTimeMs, 120, 120)
     mutableStateOf(VideoThumbnailManager.getCachedThumbnail(key))
   }
 
-  LaunchedEffect(uri, sourceTimeMs, isVideo) {
+  LaunchedEffect(uri, quantizedTimeMs, isVideo) {
     if (bitmap == null) {
-      VideoThumbnailManager.requestThumbnail(
+      val result = VideoThumbnailManager.getThumbnail(
         context = context,
         uri = uri,
-        sourceTimeMs = sourceTimeMs,
+        sourceTimeMs = quantizedTimeMs,
         targetWidth = 120,
         targetHeight = 120,
         isVideo = isVideo
-      ) { result ->
+      )
+      if (result != null && !result.isRecycled) {
         bitmap = result
       }
     }

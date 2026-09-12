@@ -1,6 +1,9 @@
 package com.example.engine
 
 import com.example.domain.model.*
+import com.example.engine.history.TimelineAction
+import com.example.engine.history.TimelineActionManager
+import com.example.engine.history.TimelineActionType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -80,15 +83,15 @@ class TimelineEngine {
     _isTracksSyncEnabled.value = !_isTracksSyncEnabled.value
   }
 
-  // Undo / Redo history
-  private val undoStack = ArrayDeque<Timeline>()
-  private val redoStack = ArrayDeque<Timeline>()
-
-  private val _canUndo = MutableStateFlow(false)
-  val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
-
-  private val _canRedo = MutableStateFlow(false)
-  val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
+  // Undo / Redo history & Timeline Action State Management
+  val actionManager = TimelineActionManager(maxHistorySize = 50)
+  val canUndo: StateFlow<Boolean> = actionManager.canUndo
+  val canRedo: StateFlow<Boolean> = actionManager.canRedo
+  val lastAction: StateFlow<TimelineAction?> = actionManager.lastAction
+  val undoActionTitle: StateFlow<String?> = actionManager.undoActionTitle
+  val redoActionTitle: StateFlow<String?> = actionManager.redoActionTitle
+  val actionHistory: StateFlow<List<TimelineAction>> = actionManager.actionHistory
+  val actionStatusMessage: StateFlow<String?> = actionManager.statusMessage
 
   fun loadTimeline(newTimeline: Timeline) {
     recordHistory()
@@ -445,34 +448,94 @@ class TimelineEngine {
     return calculateSnap(pos, thresholdMs).snappedPosMs
   }
 
-  // --- History (Undo / Redo) ---
+  // --- History (Undo / Redo & Timeline Action Tracking) ---
 
-  private fun recordHistory() {
-    undoStack.addLast(_timeline.value)
-    if (undoStack.size > 30) undoStack.removeFirst()
-    redoStack.clear()
-    updateHistoryFlags()
+  fun recordHistory(
+    type: TimelineActionType = TimelineActionType.GENERIC_EDIT,
+    description: String = type.displayName,
+    clipIds: Set<String> = emptySet()
+  ) {
+    actionManager.recordPreEditHistory(type, description, _timeline.value, clipIds)
   }
 
-  fun undo() {
-    if (undoStack.isNotEmpty()) {
-      redoStack.addLast(_timeline.value)
-      _timeline.value = undoStack.removeLast()
-      updateHistoryFlags()
+  fun beginContinuousAction(
+    type: TimelineActionType,
+    description: String = type.displayName,
+    clipId: String? = null
+  ) {
+    actionManager.beginTransaction(type, description, _timeline.value, clipId)
+  }
+
+  fun endContinuousAction(success: Boolean = true): Boolean {
+    return if (success) {
+      actionManager.commitTransaction(_timeline.value)
+    } else {
+      val reverted = actionManager.cancelTransaction()
+      if (reverted != null) {
+        _timeline.value = reverted
+        true
+      } else false
     }
   }
 
-  fun redo() {
-    if (redoStack.isNotEmpty()) {
-      undoStack.addLast(_timeline.value)
-      _timeline.value = redoStack.removeLast()
-      updateHistoryFlags()
+  fun cancelContinuousAction() {
+    val reverted = actionManager.cancelTransaction()
+    if (reverted != null) {
+      _timeline.value = reverted
     }
   }
 
-  private fun updateHistoryFlags() {
-    _canUndo.value = undoStack.isNotEmpty()
-    _canRedo.value = redoStack.isNotEmpty()
+  fun isContinuousActionActive(): Boolean = actionManager.isTransactionActive
+
+  fun undo(): Boolean {
+    val previousState = actionManager.undo(_timeline.value)
+    return if (previousState != null) {
+      _timeline.value = previousState
+      validateSelectionAfterHistoryChange()
+      true
+    } else false
+  }
+
+  fun redo(): Boolean {
+    val nextState = actionManager.redo(_timeline.value)
+    return if (nextState != null) {
+      _timeline.value = nextState
+      validateSelectionAfterHistoryChange()
+      true
+    } else false
+  }
+
+  fun clearHistory() {
+    actionManager.clear()
+  }
+
+  fun dismissActionStatusMessage() {
+    actionManager.dismissStatusMessage()
+  }
+
+  private fun validateSelectionAfterHistoryChange() {
+    val element = _selectedElement.value
+    if (element != SelectedTrackElement.None) {
+      val clipId = when (element) {
+        is SelectedTrackElement.Video -> element.clipId
+        is SelectedTrackElement.Overlay -> element.clipId
+        is SelectedTrackElement.Audio -> element.clipId
+        is SelectedTrackElement.Text -> element.clipId
+        is SelectedTrackElement.Sticker -> element.clipId
+        is SelectedTrackElement.Effect -> element.clipId
+        SelectedTrackElement.None -> null
+      }
+      if (clipId != null && findTrackElementForClip(clipId) == SelectedTrackElement.None) {
+        _selectedElement.value = SelectedTrackElement.None
+      }
+    }
+    val currentSelectedIds = _selectedClipIds.value
+    if (currentSelectedIds.isNotEmpty()) {
+      val validIds = currentSelectedIds.filter { findTrackElementForClip(it) != SelectedTrackElement.None }.toSet()
+      if (validIds != currentSelectedIds) {
+        _selectedClipIds.value = validIds
+      }
+    }
   }
 
   // --- Video Clip Operations ---
@@ -1003,6 +1066,8 @@ class TimelineEngine {
 
   fun trimClipLeft(clipId: String, newStartMs: Long, snap: Boolean = true) {
     val element = findTrackElementForClip(clipId)
+    if (element == SelectedTrackElement.None) return
+    recordHistory(TimelineActionType.TRIM_LEFT, "Trim Start", setOf(clipId))
     when (element) {
       is SelectedTrackElement.Video -> {
         if (isTrackLocked(TrackType.MAIN_VIDEO)) return
@@ -1013,7 +1078,6 @@ class TimelineEngine {
         val newDur = currentEnd - clampedStart
         val deltaMs = clampedStart - clip.timelineStartMs
         val newSourceStart = (clip.sourceStartMs + (deltaMs * clip.speed).toLong()).coerceIn(0L, clip.sourceEndMs - 200L)
-        recordHistory()
         val list = _timeline.value.videoClips.map {
           if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur, sourceStartMs = newSourceStart)
           else it
@@ -1029,7 +1093,6 @@ class TimelineEngine {
         val newDur = currentEnd - clampedStart
         val deltaMs = clampedStart - clip.timelineStartMs
         val newSourceStart = (clip.sourceStartMs + (deltaMs * clip.speed).toLong()).coerceIn(0L, clip.sourceEndMs - 200L)
-        recordHistory()
         val list = _timeline.value.overlayClips.map {
           if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur, sourceStartMs = newSourceStart)
           else it
@@ -1045,7 +1108,6 @@ class TimelineEngine {
         val newDur = currentEnd - clampedStart
         val deltaMs = clampedStart - clip.timelineStartMs
         val newSourceStart = (clip.sourceStartMs + (deltaMs * clip.speed).toLong()).coerceIn(0L, clip.sourceEndMs - 200L)
-        recordHistory()
         val list = _timeline.value.audioClips.map {
           if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur, sourceStartMs = newSourceStart)
           else it
@@ -1059,7 +1121,6 @@ class TimelineEngine {
         val targetStart = if (snap && _isSnappingEnabled.value) calculateSnap(newStartMs, ignoreClipIds = setOf(clipId)).snappedPosMs else newStartMs
         val clampedStart = targetStart.coerceIn(0L, currentEnd - 200L)
         val newDur = currentEnd - clampedStart
-        recordHistory()
         val list = _timeline.value.textClips.map {
           if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur)
           else it
@@ -1073,7 +1134,6 @@ class TimelineEngine {
         val targetStart = if (snap && _isSnappingEnabled.value) calculateSnap(newStartMs, ignoreClipIds = setOf(clipId)).snappedPosMs else newStartMs
         val clampedStart = targetStart.coerceIn(0L, currentEnd - 200L)
         val newDur = currentEnd - clampedStart
-        recordHistory()
         val list = _timeline.value.stickerClips.map {
           if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur)
           else it
@@ -1087,7 +1147,6 @@ class TimelineEngine {
         val targetStart = if (snap && _isSnappingEnabled.value) calculateSnap(newStartMs, ignoreClipIds = setOf(clipId)).snappedPosMs else newStartMs
         val clampedStart = targetStart.coerceIn(0L, currentEnd - 200L)
         val newDur = currentEnd - clampedStart
-        recordHistory()
         val list = _timeline.value.effectClips.map {
           if (it.id == clipId) it.copy(timelineStartMs = clampedStart, durationMs = newDur)
           else it
@@ -1100,6 +1159,8 @@ class TimelineEngine {
 
   fun trimClipRight(clipId: String, newDurationMs: Long, snap: Boolean = true) {
     val element = findTrackElementForClip(clipId)
+    if (element == SelectedTrackElement.None) return
+    recordHistory(TimelineActionType.TRIM_RIGHT, "Trim End", setOf(clipId))
     when (element) {
       is SelectedTrackElement.Video -> {
         if (isTrackLocked(TrackType.MAIN_VIDEO)) return
@@ -1108,7 +1169,6 @@ class TimelineEngine {
         val snappedEnd = if (snap && _isSnappingEnabled.value) calculateSnap(targetEnd, ignoreClipIds = setOf(clipId)).snappedPosMs else targetEnd
         val dur = (snappedEnd - clip.timelineStartMs).coerceAtLeast(200L)
         val newSourceEnd = (clip.sourceStartMs + (dur * clip.speed).toLong())
-        recordHistory()
         val list = _timeline.value.videoClips.map {
           if (it.id == clipId) it.copy(durationMs = dur, sourceEndMs = newSourceEnd)
           else it
@@ -1122,7 +1182,6 @@ class TimelineEngine {
         val snappedEnd = if (snap && _isSnappingEnabled.value) calculateSnap(targetEnd, ignoreClipIds = setOf(clipId)).snappedPosMs else targetEnd
         val dur = (snappedEnd - clip.timelineStartMs).coerceAtLeast(200L)
         val newSourceEnd = (clip.sourceStartMs + (dur * clip.speed).toLong())
-        recordHistory()
         val list = _timeline.value.overlayClips.map {
           if (it.id == clipId) it.copy(durationMs = dur, sourceEndMs = newSourceEnd)
           else it
@@ -1136,7 +1195,6 @@ class TimelineEngine {
         val snappedEnd = if (snap && _isSnappingEnabled.value) calculateSnap(targetEnd, ignoreClipIds = setOf(clipId)).snappedPosMs else targetEnd
         val dur = (snappedEnd - clip.timelineStartMs).coerceAtLeast(200L)
         val newSourceEnd = (clip.sourceStartMs + (dur * clip.speed).toLong())
-        recordHistory()
         val list = _timeline.value.audioClips.map {
           if (it.id == clipId) it.copy(durationMs = dur, sourceEndMs = newSourceEnd)
           else it
@@ -1149,7 +1207,6 @@ class TimelineEngine {
         val targetEnd = clip.timelineStartMs + newDurationMs
         val snappedEnd = if (snap && _isSnappingEnabled.value) calculateSnap(targetEnd, ignoreClipIds = setOf(clipId)).snappedPosMs else targetEnd
         val dur = (snappedEnd - clip.timelineStartMs).coerceAtLeast(200L)
-        recordHistory()
         val list = _timeline.value.textClips.map {
           if (it.id == clipId) it.copy(durationMs = dur)
           else it
@@ -1162,7 +1219,6 @@ class TimelineEngine {
         val targetEnd = clip.timelineStartMs + newDurationMs
         val snappedEnd = if (snap && _isSnappingEnabled.value) calculateSnap(targetEnd, ignoreClipIds = setOf(clipId)).snappedPosMs else targetEnd
         val dur = (snappedEnd - clip.timelineStartMs).coerceAtLeast(200L)
-        recordHistory()
         val list = _timeline.value.stickerClips.map {
           if (it.id == clipId) it.copy(durationMs = dur)
           else it
@@ -1175,7 +1231,6 @@ class TimelineEngine {
         val targetEnd = clip.timelineStartMs + newDurationMs
         val snappedEnd = if (snap && _isSnappingEnabled.value) calculateSnap(targetEnd, ignoreClipIds = setOf(clipId)).snappedPosMs else targetEnd
         val dur = (snappedEnd - clip.timelineStartMs).coerceAtLeast(200L)
-        recordHistory()
         val list = _timeline.value.effectClips.map {
           if (it.id == clipId) it.copy(durationMs = dur)
           else it
@@ -1285,7 +1340,8 @@ class TimelineEngine {
 
     if (effectiveDelta == 0L) return false
 
-    recordHistory()
+    val moveDesc = if (targets.size > 1) "Move (${targets.size} clips)" else "Move Clip"
+    recordHistory(TimelineActionType.MOVE_CLIP, moveDesc, targets)
     val newVideo = if (!isTrackLocked(TrackType.MAIN_VIDEO)) {
       _timeline.value.videoClips.map {
         if (it.id in targets) it.copy(timelineStartMs = (it.timelineStartMs + effectiveDelta).coerceAtLeast(0L)) else it
@@ -1394,7 +1450,7 @@ class TimelineEngine {
       return
     }
 
-    recordHistory()
+    recordHistory(TimelineActionType.MOVE_CLIP, "Move Clip", setOf(clipId))
     when (element) {
       is SelectedTrackElement.Video -> {
         if (isTrackLocked(TrackType.MAIN_VIDEO)) return
@@ -1900,7 +1956,8 @@ class TimelineEngine {
   fun rippleDelete(clipIds: Set<String> = emptySet()): Boolean {
     val targets = if (clipIds.isNotEmpty()) clipIds else _selectedClipIds.value
     if (targets.isEmpty()) return deleteSelected()
-    recordHistory()
+    val desc = if (targets.size > 1) "Ripple Delete (${targets.size} clips)" else "Ripple Delete Clip"
+    recordHistory(TimelineActionType.RIPPLE_DELETE, desc, targets)
 
     var newVideo = _timeline.value.videoClips
     if (!isTrackLocked(TrackType.MAIN_VIDEO)) {
@@ -2038,7 +2095,8 @@ class TimelineEngine {
       if (singleId == null) return false
       return normalDelete(setOf(singleId))
     }
-    recordHistory()
+    val desc = if (targets.size > 1) "Delete (${targets.size} clips)" else "Delete Clip"
+    recordHistory(TimelineActionType.DELETE_CLIP, desc, targets)
     val newVideo = if (!isTrackLocked(TrackType.MAIN_VIDEO)) _timeline.value.videoClips.filterNot { it.id in targets } else _timeline.value.videoClips
     val newOverlay = if (!isTrackLocked(TrackType.OVERLAY)) _timeline.value.overlayClips.filterNot { it.id in targets } else _timeline.value.overlayClips
     val newAudio = if (!isTrackLocked(TrackType.AUDIO)) _timeline.value.audioClips.filterNot { it.id in targets } else _timeline.value.audioClips

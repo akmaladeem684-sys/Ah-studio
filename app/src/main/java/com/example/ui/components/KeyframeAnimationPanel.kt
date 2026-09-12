@@ -1004,7 +1004,8 @@ private fun KeyframeCurveEditor(
               KeyframeInterpolation.EASE_IN -> "Ease In"
               KeyframeInterpolation.EASE_OUT -> "Ease Out"
               KeyframeInterpolation.EASE_IN_OUT -> "Ease In-Out"
-              KeyframeInterpolation.CUSTOM_CURVE -> "Custom Curve"
+              KeyframeInterpolation.HOLD -> "Hold / Step"
+              KeyframeInterpolation.CUBIC_BEZIER, KeyframeInterpolation.CUSTOM_CURVE -> "Custom Bezier"
             },
             style = MaterialTheme.typography.bodySmall.copy(
               color = if (isSelected) Color.White else TextSecondary,
@@ -1054,7 +1055,8 @@ private fun KeyframeCurveEditor(
             KeyframeInterpolation.EASE_IN -> t * t
             KeyframeInterpolation.EASE_OUT -> t * (2f - t)
             KeyframeInterpolation.EASE_IN_OUT -> if (t < 0.5f) 2f * t * t else -1f + (4f - 2f * t) * t
-            KeyframeInterpolation.CUSTOM_CURVE -> {
+            KeyframeInterpolation.HOLD -> if (t < 1.0f) 0.0f else 1.0f
+            KeyframeInterpolation.CUBIC_BEZIER, KeyframeInterpolation.CUSTOM_CURVE -> {
               com.example.engine.KeyframeInterpolator.solveCubicBezier(t, p1x, p1y, p2x, p2y)
             }
           }
@@ -1070,7 +1072,8 @@ private fun KeyframeCurveEditor(
             KeyframeInterpolation.EASE_IN -> GreenAccent
             KeyframeInterpolation.EASE_OUT -> AmberAccent
             KeyframeInterpolation.EASE_IN_OUT -> PinkAccent
-            KeyframeInterpolation.CUSTOM_CURVE -> PurpleAccent
+            KeyframeInterpolation.HOLD -> AmberAccent
+            KeyframeInterpolation.CUBIC_BEZIER, KeyframeInterpolation.CUSTOM_CURVE -> PurpleAccent
           },
           style = Stroke(width = 3.dp.toPx())
         )

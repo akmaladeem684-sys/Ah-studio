@@ -275,9 +275,11 @@ class VideoPlaybackEngine(
     _activeClip.value = clip
 
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
-      val needsReload = forceReload || loadedClipId != clip.id || loadedUri != clip.uri || player.mediaItemCount == 0
+      val needsReload = forceReload || loadedUri != clip.uri || player.mediaItemCount == 0
       if (needsReload) {
         ensureClipLoaded(clip)
+      } else {
+        loadedClipId = clip.id
       }
       val sourcePosMs = clip.timelineToSourceMs(posMs)
       if (!isSyncingFromPlayer) {

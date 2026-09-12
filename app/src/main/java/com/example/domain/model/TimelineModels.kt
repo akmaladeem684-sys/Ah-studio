@@ -7,6 +7,8 @@ enum class KeyframeInterpolation(val displayName: String) {
   EASE_IN("Ease In"),
   EASE_OUT("Ease Out"),
   EASE_IN_OUT("Ease In-Out"),
+  CUBIC_BEZIER("Cubic Bezier"),
+  HOLD("Hold"),
   CUSTOM_CURVE("Custom Curve");
 
   companion object {
@@ -16,7 +18,9 @@ enum class KeyframeInterpolation(val displayName: String) {
         "ease in", "easein", "ease_in" -> EASE_IN
         "ease out", "easeout", "ease_out" -> EASE_OUT
         "ease in-out", "easeinout", "ease_in_out", "smoothease" -> EASE_IN_OUT
-        "custom curve", "custom", "bezier" -> CUSTOM_CURVE
+        "cubic bezier", "cubic", "bezier" -> CUBIC_BEZIER
+        "hold", "step" -> HOLD
+        "custom curve", "custom" -> CUSTOM_CURVE
         else -> LINEAR
       }
     }

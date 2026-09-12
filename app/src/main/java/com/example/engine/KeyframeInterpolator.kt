@@ -443,6 +443,10 @@ object KeyframeInterpolator {
           (1.0 - Math.pow((-2.0 * clampedT + 2.0), 3.0) / 2.0).toFloat()
         }
       }
+      KeyframeInterpolation.HOLD -> {
+        if (clampedT >= 1f) 1f else 0f
+      }
+      KeyframeInterpolation.CUBIC_BEZIER,
       KeyframeInterpolation.CUSTOM_CURVE -> {
         val pts = if (customCurvePoints != null && customCurvePoints.size >= 4) {
           customCurvePoints

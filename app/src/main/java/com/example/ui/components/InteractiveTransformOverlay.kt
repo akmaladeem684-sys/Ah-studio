@@ -3,9 +3,10 @@ package com.example.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -54,10 +56,124 @@ import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.PurpleAccent
 import com.example.ui.theme.StudioBorder
 import com.example.ui.theme.TextPrimary
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
+
+/**
+ * Direct Manipulation Touch Gesture Detector.
+ *
+ * Strict gesture separation:
+ * - 1-Finger Drag: ONLY updates position (pan). Scale and rotation are strictly unchanged.
+ *   Uses inverse rotation/scale matrix mapping so drag delta is 1:1 with screen pixels.
+ * - 2-Finger Pinch/Twist: ONLY updates scale and rotation with deadband thresholds.
+ * - Single-Tap: selects element.
+ * - Double-Tap: opens editor.
+ *
+ * All drag events are consumed so parent views never scroll or zoom accidentally.
+ */
+suspend fun PointerInputScope.detectElementTouchGestures(
+  rotationDegrees: Float,
+  scale: Float,
+  parentWidthPx: Float,
+  parentHeightPx: Float,
+  onSelect: () -> Unit,
+  onMoveDelta: (deltaNormX: Float, deltaNormY: Float) -> Unit,
+  onTwoFingerTransform: ((scaleFactor: Float, rotationDeltaDeg: Float) -> Unit)? = null,
+  onTap: (() -> Unit)? = null,
+  onDoubleTap: (() -> Unit)? = null
+) {
+  val rad = Math.toRadians(rotationDegrees.toDouble())
+  val cosVal = cos(rad).toFloat()
+  val sinVal = sin(rad).toFloat()
+  val safeScale = if (scale > 0.01f) scale else 1.0f
+
+  var lastTapTime = 0L
+
+  awaitEachGesture {
+    val down = awaitFirstDown(requireUnconsumed = false)
+    onSelect()
+
+    var isDrag = false
+    var totalDragDist = 0f
+    val touchSlop = viewConfiguration.touchSlop
+    var prevDist = 0f
+    var prevAngle = 0f
+    val downTime = System.currentTimeMillis()
+
+    do {
+      val event = awaitPointerEvent()
+      val pressedPointers = event.changes.filter { it.pressed }
+      val pointerCount = pressedPointers.size
+
+      if (pointerCount == 1) {
+        // SINGLE FINGER: MOVE ONLY (Position update only, never scale or rotate)
+        val change = pressedPointers[0]
+        val localDelta = change.position - change.previousPosition
+        val dragDist = hypot(localDelta.x, localDelta.y)
+        totalDragDist += dragDist
+
+        if (totalDragDist > touchSlop) {
+          isDrag = true
+        }
+
+        if (isDrag && (localDelta.x != 0f || localDelta.y != 0f)) {
+          change.consume()
+          // Convert from rotated local space back to parent screen space
+          val screenDx = (localDelta.x * cosVal - localDelta.y * sinVal) * safeScale
+          val screenDy = (localDelta.x * sinVal + localDelta.y * cosVal) * safeScale
+
+          val deltaNormX = (screenDx * 2f) / parentWidthPx
+          val deltaNormY = (screenDy * 2f) / parentHeightPx
+          onMoveDelta(deltaNormX, deltaNormY)
+        }
+        prevDist = 0f
+        prevAngle = 0f
+      } else if (pointerCount >= 2 && onTwoFingerTransform != null) {
+        // TWO FINGERS: SCALE & ROTATE ONLY
+        isDrag = true
+        val p1 = pressedPointers[0]
+        val p2 = pressedPointers[1]
+        val dx = p2.position.x - p1.position.x
+        val dy = p2.position.y - p1.position.y
+        val currentDist = hypot(dx, dy)
+        val currentAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+
+        if (prevDist > 10f) {
+          val scaleFactor = currentDist / prevDist
+          val rotDelta = currentAngle - prevAngle
+
+          val significantZoom = abs(scaleFactor - 1f) > 0.005f
+          val significantRot = abs(rotDelta) > 0.4f
+
+          if (significantZoom || significantRot) {
+            onTwoFingerTransform(scaleFactor, rotDelta)
+          }
+        }
+        prevDist = currentDist
+        prevAngle = currentAngle
+        pressedPointers.forEach { it.consume() }
+      }
+    } while (event.changes.any { it.pressed })
+
+    // Handle Tap vs Drag
+    if (!isDrag && totalDragDist <= touchSlop) {
+      val now = System.currentTimeMillis()
+      if (now - downTime < 400L) {
+        if (onDoubleTap != null && (now - lastTapTime < 350L)) {
+          onDoubleTap()
+          lastTapTime = 0L
+        } else {
+          lastTapTime = now
+          onTap?.invoke()
+        }
+      }
+    }
+  }
+}
 
 /**
  * Touch-Based Interactive Transformation Canvas.
@@ -145,31 +261,59 @@ fun InteractiveTransformOverlay(
             color = if (isSelected) AmberAccent else Color.White.copy(alpha = 0.5f),
             shape = RoundedCornerShape(8.dp)
           )
-          .pointerInput(overlay.id) {
-            detectTapGestures {
-              currentOnSelectElement(SelectedTrackElement.Overlay(currentOverlay.id))
-            }
-          }
-          .pointerInput(overlay.id) {
-            detectTransformGestures { _, pan, zoom, rotationChange ->
-              val clip = currentOverlay
-              currentOnSelectElement(SelectedTrackElement.Overlay(clip.id))
-              val deltaPosX = (pan.x * 2f) / parentWidthPx
-              val deltaPosY = (pan.y * 2f) / parentHeightPx
-              val newX = (clip.cropOffsetX + deltaPosX).coerceIn(-1.5f, 1.5f)
-              val newY = (clip.cropOffsetY + deltaPosY).coerceIn(-1.5f, 1.5f)
-              val newScale = (clip.cropScale * zoom).coerceIn(0.15f, 8.0f)
-              val newRot = ((clip.rotationDegrees + rotationChange) % 360f).toInt()
-
-              currentOnUpdateOverlay(
-                clip.copy(
-                  cropOffsetX = newX,
-                  cropOffsetY = newY,
-                  cropScale = newScale,
-                  rotationDegrees = newRot
-                )
-              )
-            }
+          .pointerInput(overlay.id, kf.rotation, kf.scale) {
+            detectElementTouchGestures(
+              rotationDegrees = kf.rotation,
+              scale = kf.scale,
+              parentWidthPx = parentWidthPx,
+              parentHeightPx = parentHeightPx,
+              onSelect = {
+                currentOnSelectElement(SelectedTrackElement.Overlay(currentOverlay.id))
+              },
+              onMoveDelta = { deltaNormX, deltaNormY ->
+                val clip = currentOverlay
+                val rel = currentPosMs - clip.timelineStartMs
+                val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
+                if (activeKf != null) {
+                  val updatedKeyframes = clip.keyframes.map { kfItem ->
+                    if (kfItem.id == activeKf.id) {
+                      kfItem.copy(
+                        posX = (kfItem.posX + deltaNormX).coerceIn(-1.8f, 1.8f),
+                        posY = (kfItem.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
+                      )
+                    } else kfItem
+                  }
+                  currentOnUpdateOverlay(clip.copy(keyframes = updatedKeyframes))
+                } else {
+                  val newX = (clip.cropOffsetX + deltaNormX).coerceIn(-1.8f, 1.8f)
+                  val newY = (clip.cropOffsetY + deltaNormY).coerceIn(-1.8f, 1.8f)
+                  currentOnUpdateOverlay(clip.copy(cropOffsetX = newX, cropOffsetY = newY))
+                }
+              },
+              onTwoFingerTransform = { scaleFactor, rotDelta ->
+                val clip = currentOverlay
+                val rel = currentPosMs - clip.timelineStartMs
+                val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
+                if (activeKf != null) {
+                  val updatedKeyframes = clip.keyframes.map { kfItem ->
+                    if (kfItem.id == activeKf.id) {
+                      val newScaleX = (kfItem.scaleX * scaleFactor).coerceIn(0.15f, 8.0f)
+                      val newScaleY = (kfItem.scaleY * scaleFactor).coerceIn(0.15f, 8.0f)
+                      val newRot = (kfItem.rotation + rotDelta) % 360f
+                      kfItem.copy(scaleX = newScaleX, scaleY = newScaleY, rotation = newRot)
+                    } else kfItem
+                  }
+                  currentOnUpdateOverlay(clip.copy(keyframes = updatedKeyframes))
+                } else {
+                  val newScale = (clip.cropScale * scaleFactor).coerceIn(0.15f, 8.0f)
+                  val newRot = ((clip.rotationDegrees + rotDelta) % 360f).toInt()
+                  currentOnUpdateOverlay(clip.copy(cropScale = newScale, rotationDegrees = newRot))
+                }
+              },
+              onTap = {
+                currentOnSelectElement(SelectedTrackElement.Overlay(currentOverlay.id))
+              }
+            )
           }
       ) {
         AsyncImage(
@@ -283,31 +427,31 @@ fun InteractiveTransformOverlay(
             color = if (isSelected) AmberAccent else Color.Transparent,
             shape = RoundedCornerShape(12.dp)
           )
-          .pointerInput(sticker.id) {
-            detectTapGestures {
-              currentOnSelectElement(SelectedTrackElement.Sticker(currentSticker.id))
-            }
-          }
-          .pointerInput(sticker.id) {
-            detectTransformGestures { _, pan, zoom, rotationChange ->
-              val clip = currentSticker
-              currentOnSelectElement(SelectedTrackElement.Sticker(clip.id))
-              val deltaPosX = (pan.x * 2f) / parentWidthPx
-              val deltaPosY = (pan.y * 2f) / parentHeightPx
-              val newX = (clip.posX + deltaPosX).coerceIn(-1.5f, 1.5f)
-              val newY = (clip.posY + deltaPosY).coerceIn(-1.5f, 1.5f)
-              val newScale = (clip.scale * zoom).coerceIn(0.15f, 8.0f)
-              val newRot = (clip.rotation + rotationChange) % 360f
-
-              currentOnUpdateSticker(
-                clip.copy(
-                  posX = newX,
-                  posY = newY,
-                  scale = newScale,
-                  rotation = newRot
-                )
-              )
-            }
+          .pointerInput(sticker.id, animState.rotation, animState.scale) {
+            detectElementTouchGestures(
+              rotationDegrees = animState.rotation,
+              scale = animState.scale,
+              parentWidthPx = parentWidthPx,
+              parentHeightPx = parentHeightPx,
+              onSelect = {
+                currentOnSelectElement(SelectedTrackElement.Sticker(currentSticker.id))
+              },
+              onMoveDelta = { deltaNormX, deltaNormY ->
+                val clip = currentSticker
+                val newX = (clip.posX + deltaNormX).coerceIn(-1.8f, 1.8f)
+                val newY = (clip.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
+                currentOnUpdateSticker(clip.copy(posX = newX, posY = newY))
+              },
+              onTwoFingerTransform = { scaleFactor, rotDelta ->
+                val clip = currentSticker
+                val newScale = (clip.scale * scaleFactor).coerceIn(0.15f, 8.0f)
+                val newRot = (clip.rotation + rotDelta) % 360f
+                currentOnUpdateSticker(clip.copy(scale = newScale, rotation = newRot))
+              },
+              onTap = {
+                currentOnSelectElement(SelectedTrackElement.Sticker(currentSticker.id))
+              }
+            )
           },
         contentAlignment = Alignment.Center
       ) {
@@ -401,8 +545,27 @@ fun InteractiveTransformOverlay(
           )
           .size(currentWidthDp, currentHeightDp)
           .rotate(textClip.rotation)
-          .pointerInput(textClip.id) {
-            detectTapGestures(
+          .pointerInput(textClip.id, textClip.rotation, textClip.scale) {
+            detectElementTouchGestures(
+              rotationDegrees = textClip.rotation,
+              scale = textClip.scale,
+              parentWidthPx = parentWidthPx,
+              parentHeightPx = parentHeightPx,
+              onSelect = {
+                currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
+              },
+              onMoveDelta = { deltaNormX, deltaNormY ->
+                val clip = currentTextClip
+                val newX = (clip.posX + deltaNormX).coerceIn(-1.8f, 1.8f)
+                val newY = (clip.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
+                currentOnUpdateText(clip.copy(posX = newX, posY = newY))
+              },
+              onTwoFingerTransform = { scaleFactor, rotDelta ->
+                val clip = currentTextClip
+                val newScale = (clip.scale * scaleFactor).coerceIn(0.15f, 8.0f)
+                val newRot = (clip.rotation + rotDelta) % 360f
+                currentOnUpdateText(clip.copy(scale = newScale, rotation = newRot))
+              },
               onTap = {
                 currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
               },
@@ -411,28 +574,6 @@ fun InteractiveTransformOverlay(
                 currentOnEditText?.invoke(currentTextClip)
               }
             )
-          }
-          .pointerInput(textClip.id) {
-            // Multi-touch gestures: two-finger pinch scale, two-finger rotation, single-finger pan
-            detectTransformGestures(panZoomLock = false) { _, pan, zoom, rotationChange ->
-              val clip = currentTextClip
-              currentOnSelectElement(SelectedTrackElement.Text(clip.id))
-              val deltaPosX = (pan.x * 2f) / parentWidthPx
-              val deltaPosY = (pan.y * 2f) / parentHeightPx
-              val newX = (clip.posX + deltaPosX).coerceIn(-1.5f, 1.5f)
-              val newY = (clip.posY + deltaPosY).coerceIn(-1.5f, 1.5f)
-              val newScale = (clip.scale * zoom).coerceIn(0.15f, 8.0f)
-              val newRot = (clip.rotation + rotationChange) % 360f
-
-              currentOnUpdateText(
-                clip.copy(
-                  posX = newX,
-                  posY = newY,
-                  scale = newScale,
-                  rotation = newRot
-                )
-              )
-            }
           }
       )
 
@@ -606,6 +747,8 @@ private fun TextFourCornerControlsBox(
     }
 
     // --- CORNER 3: BOTTOM-LEFT (Resize) ---
+    var blTouchXPx by remember { mutableFloatStateOf(0f) }
+    var blTouchYPx by remember { mutableFloatStateOf(0f) }
     var blTouchDist by remember { mutableFloatStateOf(0f) }
 
     Surface(
@@ -619,19 +762,19 @@ private fun TextFourCornerControlsBox(
         .pointerInput(Unit) {
           detectDragGestures(
             onDragStart = { offset ->
-              val touchXPx = blX + offset.x
-              val touchYPx = blY + offset.y
-              val dx = touchXPx - centerXPx
-              val dy = touchYPx - centerYPx
-              blTouchDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              blTouchXPx = blX + offset.x
+              blTouchYPx = blY + offset.y
+              val dx = blTouchXPx - centerXPx
+              val dy = blTouchYPx - centerYPx
+              blTouchDist = hypot(dx, dy).coerceAtLeast(10f)
             },
-            onDrag = { change, _ ->
+            onDrag = { change, dragAmount ->
               change.consume()
-              val touchXPx = blX + change.position.x
-              val touchYPx = blY + change.position.y
-              val dx = touchXPx - centerXPx
-              val dy = touchYPx - centerYPx
-              val currentDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              blTouchXPx += dragAmount.x
+              blTouchYPx += dragAmount.y
+              val dx = blTouchXPx - centerXPx
+              val dy = blTouchYPx - centerYPx
+              val currentDist = hypot(dx, dy).coerceAtLeast(10f)
 
               if (blTouchDist > 0f) {
                 val deltaScale = currentDist / blTouchDist
@@ -654,6 +797,8 @@ private fun TextFourCornerControlsBox(
     }
 
     // --- CORNER 4: BOTTOM-RIGHT (Copy ❐ & Rotate/Scale) ---
+    var brTouchXPx by remember { mutableFloatStateOf(0f) }
+    var brTouchYPx by remember { mutableFloatStateOf(0f) }
     var brTouchDist by remember { mutableFloatStateOf(0f) }
     var brTouchAngle by remember { mutableFloatStateOf(0f) }
 
@@ -669,21 +814,21 @@ private fun TextFourCornerControlsBox(
         .pointerInput(Unit) {
           detectDragGestures(
             onDragStart = { offset ->
-              val touchXPx = brX + offset.x
-              val touchYPx = brY + offset.y
-              val dx = touchXPx - centerXPx
-              val dy = touchYPx - centerYPx
-              brTouchDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              brTouchXPx = brX + offset.x
+              brTouchYPx = brY + offset.y
+              val dx = brTouchXPx - centerXPx
+              val dy = brTouchYPx - centerYPx
+              brTouchDist = hypot(dx, dy).coerceAtLeast(10f)
               brTouchAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
             },
-            onDrag = { change, _ ->
+            onDrag = { change, dragAmount ->
               change.consume()
-              val touchXPx = brX + change.position.x
-              val touchYPx = brY + change.position.y
-              val dx = touchXPx - centerXPx
-              val dy = touchYPx - centerYPx
+              brTouchXPx += dragAmount.x
+              brTouchYPx += dragAmount.y
+              val dx = brTouchXPx - centerXPx
+              val dy = brTouchYPx - centerYPx
 
-              val currentDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              val currentDist = hypot(dx, dy).coerceAtLeast(10f)
               val currentAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
 
               if (brTouchDist > 0f) {
@@ -861,6 +1006,8 @@ private fun TransformHandlesBox(
     }
 
     // Bottom-Right: Single-Finger Drag Scale & Rotation Handle
+    var touchPointXPx by remember { mutableFloatStateOf(0f) }
+    var touchPointYPx by remember { mutableFloatStateOf(0f) }
     var lastTouchDist by remember { mutableFloatStateOf(0f) }
     var lastTouchAngle by remember { mutableFloatStateOf(0f) }
 
@@ -874,21 +1021,21 @@ private fun TransformHandlesBox(
         .pointerInput(Unit) {
           detectDragGestures(
             onDragStart = { offset ->
-              val touchXPx = brX + offset.x
-              val touchYPx = brY + offset.y
-              val dx = touchXPx - centerXPx
-              val dy = touchYPx - centerYPx
-              lastTouchDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              touchPointXPx = brX + offset.x
+              touchPointYPx = brY + offset.y
+              val dx = touchPointXPx - centerXPx
+              val dy = touchPointYPx - centerYPx
+              lastTouchDist = hypot(dx, dy).coerceAtLeast(10f)
               lastTouchAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
             },
             onDrag = { change, dragAmount ->
               change.consume()
-              val touchXPx = brX + change.position.x
-              val touchYPx = brY + change.position.y
-              val dx = touchXPx - centerXPx
-              val dy = touchYPx - centerYPx
+              touchPointXPx += dragAmount.x
+              touchPointYPx += dragAmount.y
+              val dx = touchPointXPx - centerXPx
+              val dy = touchPointYPx - centerYPx
 
-              val currentDist = sqrt(dx * dx + dy * dy).coerceAtLeast(10f)
+              val currentDist = hypot(dx, dy).coerceAtLeast(10f)
               val currentAngle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
 
               if (lastTouchDist > 0f) {
@@ -915,3 +1062,4 @@ private fun TransformHandlesBox(
     }
   }
 }
+

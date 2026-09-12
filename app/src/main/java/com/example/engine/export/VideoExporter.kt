@@ -54,10 +54,18 @@ sealed class ExportState {
     val totalFrames: Int,
     val status: String = "Encoding video...",
     val fps: Float = 0f,
-    val estimatedRemainingSec: Int = 0
+    val estimatedRemainingSec: Int = 0,
+    val resolution: Resolution = Resolution.RES_1080P,
+    val renderEngine: String = "Hardware Video Engine (GPU)",
+    val isPaused: Boolean = false
   ) : ExportState()
   data class Success(val file: File, val durationMs: Long, val fileSizeBytes: Long) : ExportState()
-  data class Error(val message: String) : ExportState()
+  data class Error(
+    val message: String,
+    val failedFrame: Int = 0,
+    val failedLayer: String? = null,
+    val canRetry: Boolean = true
+  ) : ExportState()
 }
 
 /**
@@ -260,6 +268,71 @@ class VideoExporter(private val context: Context) {
 
   @Volatile
   private var isCancelled = false
+  @Volatile
+  private var isPaused = false
+
+  fun pauseExport() {
+    isPaused = true
+  }
+
+  fun resumeExport() {
+    isPaused = false
+  }
+
+  fun cancelExport() {
+    isCancelled = true
+    isPaused = false
+  }
+
+  /**
+   * Evaluates if any asset in the project has a native resolution significantly below 1080p
+   * when targeting 2K / 4K UHD rendering.
+   */
+  fun checkLowResolutionAssets(timeline: Timeline, targetRes: Resolution): List<String> {
+    if (targetRes != Resolution.RES_2K &&
+        targetRes != Resolution.RES_4K &&
+        targetRes != Resolution.RES_VERTICAL_2K &&
+        targetRes != Resolution.RES_VERTICAL_4K &&
+        targetRes != Resolution.RES_SQUARE_2K
+    ) {
+      return emptyList()
+    }
+
+    val lowRes = mutableListOf<String>()
+    for (clip in timeline.videoClips + timeline.overlayClips) {
+      if (clip.width > 0 && clip.height > 0) {
+        val minDim = min(clip.width, clip.height)
+        if (minDim < 720) {
+          lowRes.add("${clip.name} (${clip.width}×${clip.height})")
+        }
+      }
+    }
+    return lowRes
+  }
+
+  /**
+   * Validates hardware encoder capability for 4K / 2K HEVC and AVC encoding.
+   */
+  fun check4KSupport(): Boolean {
+    return try {
+      val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+      val hevcMime = MediaFormat.MIMETYPE_VIDEO_HEVC
+      for (info in codecList.codecInfos) {
+        if (info.isEncoder) {
+          try {
+            val caps = info.getCapabilitiesForType(hevcMime)
+            val videoCaps = caps.videoCapabilities
+            if (videoCaps != null && videoCaps.isSizeSupported(3840, 2160)) {
+              return true
+            }
+          } catch (ignored: Exception) {}
+        }
+      }
+      true
+    } catch (e: Exception) {
+      true
+    }
+  }
 
   fun calculateEstimatedSizeBytes(durationMs: Long, config: ExportConfig): Long {
     val durationSec = (durationMs / 1000f).coerceAtLeast(1f)
@@ -270,17 +343,14 @@ class VideoExporter(private val context: Context) {
         Resolution.RES_480P -> 2_500_000L
         Resolution.RES_720P -> 5_000_000L
         Resolution.RES_1080P -> 10_000_000L
-        Resolution.RES_2K -> 18_000_000L
-        Resolution.RES_4K -> 35_000_000L
+        Resolution.RES_2K, Resolution.RES_VERTICAL_2K -> 18_000_000L
+        Resolution.RES_4K, Resolution.RES_VERTICAL_4K -> 35_000_000L
+        Resolution.RES_SQUARE_2K -> 22_000_000L
       }
       val codecMultiplier = if (config.codecProfile == CodecProfile.H265_HEVC) 0.75f else 1.0f
       (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f) * codecMultiplier).toLong()
     }
     return (effectiveBitrate * durationSec / 8).toLong()
-  }
-
-  fun cancelExport() {
-    isCancelled = true
   }
 
   /**
@@ -331,8 +401,9 @@ class VideoExporter(private val context: Context) {
           Resolution.RES_480P -> 2_500_000L
           Resolution.RES_720P -> 5_000_000L
           Resolution.RES_1080P -> 10_000_000L
-          Resolution.RES_2K -> 18_000_000L
-          Resolution.RES_4K -> 35_000_000L
+          Resolution.RES_2K, Resolution.RES_VERTICAL_2K -> 18_000_000L
+          Resolution.RES_4K, Resolution.RES_VERTICAL_4K -> 35_000_000L
+          Resolution.RES_SQUARE_2K -> 22_000_000L
         }
         (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f)).toInt()
       }
@@ -506,13 +577,21 @@ class VideoExporter(private val context: Context) {
     var windowSurface: WindowSurface? = null
     var gpuRenderer: GpuCompositionRenderer? = null
     var encoderInputSurface: Surface? = null
+    var useGpuSurface = false
 
     // Cache retrievers and bitmaps
     val retrievers = mutableMapOf<String, MediaMetadataRetriever>()
     val imageBitmaps = mutableMapOf<String, Bitmap>()
 
     try {
-      _exportState.value = ExportState.Rendering(0.02f, 0, totalFrames, "Preparing audio & video tracks...")
+      _exportState.value = ExportState.Rendering(
+        progressPercent = 0.02f,
+        currentFrame = 0,
+        totalFrames = totalFrames,
+        status = "Preparing audio & video tracks...",
+        resolution = config.resolution,
+        renderEngine = if (useGpuSurface) "Hardware GPU Engine (OpenGL ES)" else "Software Canvas Engine"
+      )
 
       // 1. Process & Mix all Audio Tracks
       val hasAudioSources = audioProcessor.hasActiveAudio(timeline)
@@ -520,7 +599,14 @@ class VideoExporter(private val context: Context) {
       var hasAudio = false
 
       if (hasAudioSources) {
-        _exportState.value = ExportState.Rendering(0.05f, 0, totalFrames, "Mixing multi-track audio...")
+        _exportState.value = ExportState.Rendering(
+          progressPercent = 0.05f,
+          currentFrame = 0,
+          totalFrames = totalFrames,
+          status = "Mixing multi-track audio...",
+          resolution = config.resolution,
+          renderEngine = if (useGpuSurface) "Hardware GPU Engine (OpenGL ES)" else "Software Canvas Engine"
+        )
         try {
           masterPcm = audioProcessor.mixTimelineAudio(timeline, totalDurationMs) { isCancelled }
         } catch (e: Exception) {
@@ -714,6 +800,14 @@ class VideoExporter(private val context: Context) {
 
       // 5. Main Interleaved Video & Audio Encoding Loop
       for (frameIndex in 0 until totalFrames) {
+        while (isPaused && !isCancelled) {
+          _exportState.value = (_exportState.value as? ExportState.Rendering)?.copy(
+            isPaused = true,
+            status = "Render paused at frame $frameIndex"
+          ) ?: _exportState.value
+          Thread.sleep(100)
+        }
+
         if (isCancelled) {
           try { windowSurface?.release() } catch (ignored: Exception) {}
           try { eglCore?.release() } catch (ignored: Exception) {}
@@ -881,14 +975,24 @@ class VideoExporter(private val context: Context) {
           totalFrames = totalFrames,
           status = "Rendering ${config.resolution.label} Frame ${frameIndex + 1}/$totalFrames...",
           fps = currentThroughputFps,
-          estimatedRemainingSec = estRemainingSec
+          estimatedRemainingSec = estRemainingSec,
+          resolution = config.resolution,
+          renderEngine = if (useGpuSurface) "Hardware GPU Engine (OpenGL ES)" else "Software Canvas Engine",
+          isPaused = false
         )
       }
 
       bitmapPool.release(frameBitmap)
 
       // 6. Signal End of Stream & Drain Final Buffers
-      _exportState.value = ExportState.Rendering(0.95f, totalFrames, totalFrames, "Finalizing MP4 container...")
+      _exportState.value = ExportState.Rendering(
+        progressPercent = 0.95f,
+        currentFrame = totalFrames,
+        totalFrames = totalFrames,
+        status = "Finalizing MP4 container...",
+        resolution = config.resolution,
+        renderEngine = if (useGpuSurface) "Hardware GPU Engine (OpenGL ES)" else "Software Canvas Engine"
+      )
       if (useGpuSurface) {
         videoEncoder.signalEndOfInputStream()
       } else {
@@ -1226,16 +1330,22 @@ class VideoExporter(private val context: Context) {
   }
 
   fun getDimensionsForResolution(res: Resolution, aspect: AspectRatio): Pair<Int, Int> {
-    val shortSide = res.width
-    val longSide = res.height
-
-    val (w, h) = when (aspect) {
-      AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
-      AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
-      AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
-      AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
-      AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
-      AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
+    val (w, h) = when (res) {
+      Resolution.RES_SQUARE_2K -> Pair(2048, 2048)
+      Resolution.RES_VERTICAL_2K -> Pair(1440, 2560)
+      Resolution.RES_VERTICAL_4K -> Pair(2160, 3840)
+      else -> {
+        val shortSide = res.width
+        val longSide = res.height
+        when (aspect) {
+          AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
+          AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
+          AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
+          AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
+          AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
+          AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
+        }
+      }
     }
 
     // Align dimensions to 16-pixel macroblock boundaries for standard hardware encoder compatibility

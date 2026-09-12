@@ -354,6 +354,44 @@ fun ExportScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
               ) {
+                // Engine & Resolution Badges
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = SkyBlueContainer
+                  ) {
+                    Text(
+                      text = state.renderEngine,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = CyanAccentDark,
+                        fontSize = 10.sp
+                      )
+                    )
+                  }
+
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (state.resolution == Resolution.RES_4K || state.resolution == Resolution.RES_2K) GoldAccent.copy(alpha = 0.2f) else StudioSurfaceVariant,
+                    border = BorderStroke(1.dp, if (state.resolution == Resolution.RES_4K || state.resolution == Resolution.RES_2K) GoldAccent else StudioBorder)
+                  ) {
+                    Text(
+                      text = state.resolution.label,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.resolution == Resolution.RES_4K || state.resolution == Resolution.RES_2K) GoldAccent else TextPrimary,
+                        fontSize = 10.sp
+                      )
+                    )
+                  }
+                }
+
                 Box(
                   modifier = Modifier
                     .size(130.dp)
@@ -364,7 +402,7 @@ fun ExportScreen(
                   CircularProgressIndicator(
                     progress = { state.progressPercent },
                     modifier = Modifier.fillMaxSize(),
-                    color = CyanAccent,
+                    color = if (state.isPaused) GoldAccent else CyanAccent,
                     strokeWidth = 9.dp,
                     trackColor = StudioBorder
                   )
@@ -373,10 +411,15 @@ fun ExportScreen(
                       text = "${(state.progressPercent * 100).toInt()}%",
                       style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
                     )
-                    if (state.fps > 0f) {
+                    if (state.fps > 0f && !state.isPaused) {
                       Text(
                         text = "${state.fps.toInt()} FPS",
                         style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
+                      )
+                    } else if (state.isPaused) {
+                      Text(
+                        text = "PAUSED",
+                        style = MaterialTheme.typography.labelSmall.copy(color = GoldAccent, fontWeight = FontWeight.Bold)
                       )
                     }
                   }
@@ -415,7 +458,7 @@ fun ExportScreen(
                       horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                       Text("Estimated Time", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
-                      val etaText = if (state.estimatedRemainingSec > 0) "${state.estimatedRemainingSec}s" else "Finishing..."
+                      val etaText = if (state.isPaused) "Paused" else if (state.estimatedRemainingSec > 0) "${state.estimatedRemainingSec}s" else "Finishing..."
                       Text(etaText, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = GoldAccent))
                     }
                   }
@@ -423,15 +466,43 @@ fun ExportScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Button(
-                  onClick = { viewModel.videoExporter.cancelExport() },
-                  colors = ButtonDefaults.buttonColors(containerColor = StudioSurfaceVariant, contentColor = RedAccent),
-                  shape = RoundedCornerShape(10.dp),
-                  modifier = Modifier.fillMaxWidth(0.7f)
+                // Control Actions: Pause/Resume and Cancel
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                  Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text("Cancel Render", fontWeight = FontWeight.SemiBold)
+                  OutlinedButton(
+                    onClick = {
+                      if (state.isPaused) {
+                        viewModel.videoExporter.resumeExport()
+                      } else {
+                        viewModel.videoExporter.pauseExport()
+                      }
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                    border = BorderStroke(1.dp, StudioBorder),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Icon(
+                      imageVector = if (state.isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                      contentDescription = null,
+                      modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (state.isPaused) "Resume" else "Pause", fontWeight = FontWeight.SemiBold)
+                  }
+
+                  Button(
+                    onClick = { viewModel.videoExporter.cancelExport() },
+                    colors = ButtonDefaults.buttonColors(containerColor = RedAccent.copy(alpha = 0.15f), contentColor = RedAccent),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                  ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cancel", fontWeight = FontWeight.SemiBold)
+                  }
                 }
               }
             }

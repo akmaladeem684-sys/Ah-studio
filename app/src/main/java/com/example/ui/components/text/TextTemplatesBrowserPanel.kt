@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -225,143 +226,283 @@ fun TextTemplatesBrowserPanel(
       }
     }
 
-    // Grid of Template Cards
+    // Grid/Row of Template Cards
     if (displayedTemplates.isEmpty()) {
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(130.dp),
+          .height(140.dp),
         contentAlignment = Alignment.Center
       ) {
         Text("No templates found in this category", color = TextSecondary, fontSize = 12.sp)
       }
     } else {
       LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
-        items(displayedTemplates) { tpl ->
+        items(displayedTemplates, key = { it.id }) { tpl ->
           val isFavorite = tpl.id in favoriteTemplateIds
 
-          Card(
-            modifier = Modifier
-              .width(175.dp)
-              .height(120.dp)
-              .clip(RoundedCornerShape(12.dp))
-              .clickable {
-                // Apply directly to active text without duplicate layer
-                if (selectedTextClip != null) {
-                  viewModel.timelineEngine.updateTextClip(
-                    selectedTextClip.copy(
-                      fontFamily = tpl.fontFamily,
-                      fontSizeSp = tpl.fontSizeSp,
-                      fontWeight = tpl.fontWeight,
-                      textColor = tpl.textColor,
-                      hasGradient = tpl.hasGradient,
-                      gradientColorStart = tpl.gradientColorStart,
-                      gradientColorEnd = tpl.gradientColorEnd,
-                      gradientDirection = tpl.gradientDirection,
-                      strokeWidth = tpl.strokeWidth,
-                      strokeColor = tpl.strokeColor,
-                      hasShadow = tpl.hasShadow,
-                      shadowColor = tpl.shadowColor,
-                      hasBackground = tpl.hasBackground,
-                      backgroundColor = tpl.backgroundColor,
-                      cornerRadius = tpl.cornerRadius,
-                      bgPadding = tpl.bgPadding,
-                      animationType = tpl.animationType
-                    )
-                  )
-                } else {
-                  // Create single new text layer with template
-                  val currentPos = viewModel.timelineEngine.currentPositionMs.value
-                  val newClip = TextClip(
-                    id = UUID.randomUUID().toString(),
-                    text = tpl.sampleText,
-                    timelineStartMs = currentPos,
-                    durationMs = 3000L,
-                    fontFamily = tpl.fontFamily,
-                    fontSizeSp = tpl.fontSizeSp,
-                    fontWeight = tpl.fontWeight,
-                    textColor = tpl.textColor,
-                    hasGradient = tpl.hasGradient,
-                    gradientColorStart = tpl.gradientColorStart,
-                    gradientColorEnd = tpl.gradientColorEnd,
-                    gradientDirection = tpl.gradientDirection,
-                    strokeWidth = tpl.strokeWidth,
-                    strokeColor = tpl.strokeColor,
-                    hasShadow = tpl.hasShadow,
-                    shadowColor = tpl.shadowColor,
-                    hasBackground = tpl.hasBackground,
-                    backgroundColor = tpl.backgroundColor,
-                    cornerRadius = tpl.cornerRadius,
-                    bgPadding = tpl.bgPadding,
-                    animationType = tpl.animationType
-                  )
-                  viewModel.timelineEngine.addTextClipObject(newClip)
-                  viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
-                }
-              },
-            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-            border = BorderStroke(1.dp, StudioBorder)
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-              verticalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                  Text(tpl.badgeEmoji, fontSize = 14.sp)
-                  Text(tpl.category, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = AmberAccent)
-                }
-                IconButton(
-                  onClick = {
-                    if (isFavorite) favoriteTemplateIds.remove(tpl.id)
-                    else favoriteTemplateIds.add(tpl.id)
-                  },
-                  modifier = Modifier.size(24.dp)
-                ) {
-                  Icon(
-                    if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = "Favorite",
-                    tint = if (isFavorite) AmberAccent else TextSecondary,
-                    modifier = Modifier.size(16.dp)
-                  )
-                }
-              }
+          val applyTemplateAction = {
+            if (selectedTextClip != null) {
+              val textToKeep = if (selectedTextClip.text.isBlank() || selectedTextClip.text == "Tap to edit" || selectedTextClip.text == "Your Text Here") {
+                tpl.sampleText
+              } else selectedTextClip.text
 
-              Text(
-                text = tpl.name,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-              )
-
-              // Visual preview banner
-              Box(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(Color(tpl.backgroundColor.toInt()))
-                  .padding(4.dp),
-                contentAlignment = Alignment.Center
-              ) {
-                Text(
-                  text = tpl.sampleText,
-                  color = Color(tpl.textColor.toInt()),
-                  fontSize = 10.sp,
-                  fontWeight = FontWeight.Bold,
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
+              viewModel.timelineEngine.updateTextClip(
+                selectedTextClip.copy(
+                  text = textToKeep,
+                  fontFamily = tpl.fontFamily,
+                  fontSizeSp = tpl.fontSizeSp,
+                  fontWeight = tpl.fontWeight,
+                  isItalic = tpl.isItalic,
+                  isUnderline = tpl.isUnderline,
+                  isAllCaps = tpl.isAllCaps,
+                  alignment = tpl.alignment,
+                  letterSpacing = tpl.letterSpacing,
+                  lineSpacing = tpl.lineSpacing,
+                  textColor = tpl.textColor,
+                  hasGradient = tpl.hasGradient,
+                  gradientColorStart = tpl.gradientColorStart,
+                  gradientColorEnd = tpl.gradientColorEnd,
+                  gradientDirection = tpl.gradientDirection,
+                  strokeWidth = tpl.strokeWidth,
+                  strokeColor = tpl.strokeColor,
+                  hasShadow = tpl.hasShadow,
+                  shadowColor = tpl.shadowColor,
+                  shadowBlur = tpl.shadowBlur,
+                  shadowOffsetX = tpl.shadowOffsetX,
+                  shadowOffsetY = tpl.shadowOffsetY,
+                  hasBackground = tpl.hasBackground,
+                  backgroundColor = tpl.backgroundColor,
+                  cornerRadius = tpl.cornerRadius,
+                  bgPadding = tpl.bgPadding,
+                  opacity = tpl.opacity,
+                  animationType = tpl.animationType,
+                  animDurationMs = tpl.animDurationMs
                 )
-              }
+              )
+            } else {
+              val currentPos = viewModel.timelineEngine.currentPositionMs.value
+              val newClip = TextClip(
+                id = UUID.randomUUID().toString(),
+                text = tpl.sampleText,
+                timelineStartMs = currentPos,
+                durationMs = 3000L,
+                fontFamily = tpl.fontFamily,
+                fontSizeSp = tpl.fontSizeSp,
+                fontWeight = tpl.fontWeight,
+                isItalic = tpl.isItalic,
+                isUnderline = tpl.isUnderline,
+                isAllCaps = tpl.isAllCaps,
+                alignment = tpl.alignment,
+                letterSpacing = tpl.letterSpacing,
+                lineSpacing = tpl.lineSpacing,
+                textColor = tpl.textColor,
+                hasGradient = tpl.hasGradient,
+                gradientColorStart = tpl.gradientColorStart,
+                gradientColorEnd = tpl.gradientColorEnd,
+                gradientDirection = tpl.gradientDirection,
+                strokeWidth = tpl.strokeWidth,
+                strokeColor = tpl.strokeColor,
+                hasShadow = tpl.hasShadow,
+                shadowColor = tpl.shadowColor,
+                shadowBlur = tpl.shadowBlur,
+                shadowOffsetX = tpl.shadowOffsetX,
+                shadowOffsetY = tpl.shadowOffsetY,
+                hasBackground = tpl.hasBackground,
+                backgroundColor = tpl.backgroundColor,
+                cornerRadius = tpl.cornerRadius,
+                bgPadding = tpl.bgPadding,
+                opacity = tpl.opacity,
+                animationType = tpl.animationType,
+                animDurationMs = tpl.animDurationMs
+              )
+              viewModel.timelineEngine.addTextClipObject(newClip)
+              viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
             }
+          }
+
+          TrendingTemplateCardItem(
+            tpl = tpl,
+            isFavorite = isFavorite,
+            onToggleFavorite = {
+              if (isFavorite) favoriteTemplateIds.remove(tpl.id)
+              else favoriteTemplateIds.add(tpl.id)
+            },
+            onUseTemplate = applyTemplateAction
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun TrendingTemplateCardItem(
+  tpl: TextTemplateItem,
+  isFavorite: Boolean,
+  onToggleFavorite: () -> Unit,
+  onUseTemplate: () -> Unit
+) {
+  // Live animated preview loop for template card
+  val infiniteTransition = rememberInfiniteTransition(label = "template_preview_anim")
+  val animProgress by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 2000, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart
+    ),
+    label = "progress"
+  )
+
+  // Compute live visual transform according to animation type
+  val scale = remember(tpl.animationType, animProgress) {
+    when (tpl.animationType.lowercase()) {
+      "pop", "pop in" -> if (animProgress < 0.4f) (animProgress / 0.4f) * 1.15f else if (animProgress < 0.6f) 1.15f - (animProgress - 0.4f) / 0.2f * 0.15f else 1f
+      "bounce" -> if (animProgress < 0.5f) (1f + kotlin.math.sin(animProgress * kotlin.math.PI.toFloat() * 4f) * 0.2f * (1f - animProgress * 2f)) else 1f
+      "zoom", "zoom in" -> 0.7f + 0.3f * (animProgress.coerceAtMost(0.4f) / 0.4f)
+      "scale", "scale in" -> 1.3f - 0.3f * (animProgress.coerceAtMost(0.4f) / 0.4f)
+      "glow", "glow pulse" -> 1f + kotlin.math.sin(animProgress * kotlin.math.PI.toFloat() * 2f) * 0.05f
+      else -> 1f
+    }
+  }
+
+  val alpha = remember(tpl.animationType, animProgress) {
+    when (tpl.animationType.lowercase()) {
+      "fade", "cinematic reveal", "blur" -> (animProgress * 2.5f).coerceIn(0.4f, 1f)
+      "neon", "neon flicker" -> if (animProgress < 0.3f && ((animProgress * 20).toInt() % 2 == 0)) 0.4f else 1f
+      "glitch" -> if (animProgress < 0.4f && ((animProgress * 20).toInt() % 3 == 0)) 0.7f else 1f
+      else -> 1f
+    }
+  }
+
+  val displayText = remember(tpl.sampleText, tpl.animationType, animProgress) {
+    if (tpl.animationType.equals("Typewriter", ignoreCase = true)) {
+      val len = tpl.sampleText.length
+      val count = (len * (animProgress * 1.6f).coerceIn(0f, 1f)).toInt().coerceIn(0, len)
+      tpl.sampleText.substring(0, count) + if (count < len) "▌" else ""
+    } else {
+      tpl.sampleText
+    }
+  }
+
+  Card(
+    modifier = Modifier
+      .width(180.dp)
+      .height(135.dp)
+      .clip(RoundedCornerShape(12.dp))
+      .clickable { onUseTemplate() },
+    colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+    border = BorderStroke(1.dp, if (tpl.isPremium) AmberAccent.copy(alpha = 0.5f) else StudioBorder)
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(8.dp),
+      verticalArrangement = Arrangement.SpaceBetween
+    ) {
+      // Header: Badge + Category + Diamond Indicator + Favorite
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(tpl.badgeEmoji, fontSize = 13.sp)
+          Text(
+            text = tpl.category,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (tpl.isPremium) AmberAccent else PurpleAccent
+          )
+          if (tpl.isPremium) {
+            Surface(
+              color = AmberAccent.copy(alpha = 0.2f),
+              shape = RoundedCornerShape(4.dp),
+              border = BorderStroke(0.5.dp, AmberAccent)
+            ) {
+              Text(
+                text = "💎 VIP",
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
+                color = AmberAccent,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+              )
+            }
+          }
+        }
+        IconButton(
+          onClick = onToggleFavorite,
+          modifier = Modifier.size(20.dp)
+        ) {
+          Icon(
+            if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+            contentDescription = "Favorite",
+            tint = if (isFavorite) AmberAccent else TextSecondary,
+            modifier = Modifier.size(15.dp)
+          )
+        }
+      }
+
+      // Live Animated Preview Box
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(42.dp)
+          .clip(RoundedCornerShape(6.dp))
+          .background(if (tpl.hasBackground) Color(tpl.backgroundColor.toInt()) else Color(0x33000000))
+          .padding(horizontal = 4.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(
+          text = displayText,
+          color = Color(tpl.textColor.toInt()).copy(alpha = alpha),
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier
+            .scale(scale)
+        )
+      }
+
+      // Footer: Template Name & "Use" button
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 4.dp)) {
+          Text(
+            text = tpl.name,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 10.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+          Text(
+            text = tpl.animationType,
+            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 8.sp),
+            maxLines = 1
+          )
+        }
+
+        Button(
+          onClick = onUseTemplate,
+          shape = RoundedCornerShape(6.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (tpl.isPremium) AmberAccent else PurpleAccent,
+            contentColor = Color.Black
+          ),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+          modifier = Modifier.height(24.dp)
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+            Text("Use", fontSize = 10.sp, fontWeight = FontWeight.Bold)
           }
         }
       }

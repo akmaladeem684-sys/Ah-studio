@@ -18,6 +18,7 @@ import com.example.domain.UserSettings
 import com.example.domain.model.*
 import com.example.engine.SelectedTrackElement
 import com.example.engine.TimelineEngine
+import com.example.engine.history.TimelineActionType
 import com.example.engine.audio.AudioEngine
 import com.example.engine.export.ExportConfig
 import com.example.engine.export.ExportState
@@ -559,6 +560,30 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
   fun exitTrimPreview() {
     playbackEngine.exitTrimPreview()
+  }
+
+  fun beginMoveClip(clipId: String) {
+    timelineEngine.beginContinuousAction(TimelineActionType.MOVE_CLIP, "Move Clip", clipId)
+  }
+
+  fun endMoveClip() {
+    timelineEngine.endContinuousAction()
+  }
+
+  fun beginTrimClipLeft(clipId: String) {
+    timelineEngine.beginContinuousAction(TimelineActionType.TRIM_LEFT, "Trim Start", clipId)
+  }
+
+  fun endTrimClipLeft() {
+    timelineEngine.endContinuousAction()
+  }
+
+  fun beginTrimClipRight(clipId: String) {
+    timelineEngine.beginContinuousAction(TimelineActionType.TRIM_RIGHT, "Trim End", clipId)
+  }
+
+  fun endTrimClipRight() {
+    timelineEngine.endContinuousAction()
   }
 
   fun moveClipByDelta(clipId: String, deltaMs: Long, snap: Boolean = true) {

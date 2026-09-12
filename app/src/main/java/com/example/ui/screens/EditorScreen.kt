@@ -418,158 +418,6 @@ fun EditorScreen(
         )
       }
 
-      // 2. CONTROLS BAR BELOW THE VIDEO (Underneath video, not over video)
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .background(StudioDarkBg)
-          .border(BorderStroke(1.dp, StudioBorder))
-          .padding(horizontal = 12.dp, vertical = 6.dp),
-        color = StudioDarkBg
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          // Left: Frame step back (-1F) & Timecode display
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-          ) {
-            IconButton(
-              onClick = {
-                viewModel.timelineEngine.stepFrames(-1)
-                viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-              },
-              modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(StudioSurface)
-                .testTag("control_step_prev")
-            ) {
-              Icon(
-                Icons.Default.SkipPrevious,
-                contentDescription = "-1 Frame",
-                tint = TextSecondary,
-                modifier = Modifier.size(18.dp)
-              )
-            }
-
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = StudioSurfaceVariant,
-              border = BorderStroke(1.dp, StudioBorder)
-            ) {
-              Text(
-                text = "${formatDuration(currentPosMs)} / ${formatDurationShort(timeline.totalDurationMs)}",
-                style = MaterialTheme.typography.labelMedium.copy(
-                  color = CyanAccent,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 12.sp
-                ),
-                modifier = Modifier
-                  .padding(horizontal = 10.dp, vertical = 5.dp)
-                  .testTag("preview_timecode_text")
-              )
-            }
-
-            IconButton(
-              onClick = {
-                viewModel.timelineEngine.stepFrames(1)
-                viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-              },
-              modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(StudioSurface)
-                .testTag("control_step_next")
-            ) {
-              Icon(
-                Icons.Default.SkipNext,
-                contentDescription = "+1 Frame",
-                tint = TextSecondary,
-                modifier = Modifier.size(18.dp)
-              )
-            }
-          }
-
-          // Center: Main Play / Pause ⏯️ Button below video
-          Surface(
-            onClick = { viewModel.timelineEngine.togglePlayPause() },
-            shape = CircleShape,
-            color = if (isPlaying) RedAccent else CyanAccent,
-            modifier = Modifier
-              .size(46.dp)
-              .testTag("below_video_play_button")
-          ) {
-            Box(contentAlignment = Alignment.Center) {
-              Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                tint = Color.Black,
-                modifier = Modifier.size(28.dp)
-              )
-            }
-          }
-
-          // Right: Filters Panel Toggle & Fullscreen
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            IconButton(
-              onClick = {
-                viewModel.setActiveToolbarTab(
-                  if (activeTab == EditorToolbarTab.FILTERS) null else EditorToolbarTab.FILTERS
-                )
-              },
-              modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(if (activeTab == EditorToolbarTab.FILTERS) PurpleAccent else StudioSurface)
-                .testTag("below_video_filters_button")
-            ) {
-              Icon(
-                Icons.Default.FilterBAndW,
-                contentDescription = "Filters Panel",
-                tint = if (activeTab == EditorToolbarTab.FILTERS) Color.White else TextSecondary,
-                modifier = Modifier.size(18.dp)
-              )
-            }
-
-            IconButton(
-              onClick = { isFullscreenPreview = true },
-              modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(StudioSurface)
-                .testTag("below_video_fullscreen_button")
-            ) {
-              Icon(
-                Icons.Default.Fullscreen,
-                contentDescription = "Fullscreen",
-                tint = TextSecondary,
-                modifier = Modifier.size(18.dp)
-              )
-            }
-          }
-        }
-      }
-
-      // Inline Filters Panel directly below video preview controls
-      if (activeTab == EditorToolbarTab.FILTERS) {
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .testTag("filters_panel_below_video"),
-          color = StudioSurface,
-          border = BorderStroke(1.dp, StudioBorder)
-        ) {
-          FiltersToolPanel(viewModel = viewModel)
-        }
-      }
-
       var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
 
       if (draggedTransitionType != null) {
@@ -610,6 +458,8 @@ fun EditorScreen(
       MultiTrackTimeline(
         timeline = timeline,
         currentPosMs = currentPosMs,
+        isPlaying = isPlaying,
+        onTogglePlayPause = { viewModel.timelineEngine.togglePlayPause() },
         zoom = multiTrackZoom,
         selectedElement = selectedElement,
         selectedClipIds = selectedClipIds,
@@ -704,8 +554,14 @@ fun EditorScreen(
         onFpsChange = { viewModel.timelineEngine.setTimelineFps(it) },
         onToggleFrameSnapping = { viewModel.timelineEngine.toggleFrameSnapping() },
         onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
+        onMoveClipStart = { clipId -> viewModel.beginMoveClip(clipId) },
+        onMoveClipEnd = { _ -> viewModel.endMoveClip() },
         onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
+        onTrimClipLeftStart = { clipId -> viewModel.beginTrimClipLeft(clipId) },
+        onTrimClipLeftEnd = { _ -> viewModel.endTrimClipLeft() },
         onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
+        onTrimClipRightStart = { clipId -> viewModel.beginTrimClipRight(clipId) },
+        onTrimClipRightEnd = { _ -> viewModel.endTrimClipRight() },
         onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
         onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
         onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
@@ -1053,9 +909,12 @@ private fun EditorTopBar(
         modifier = Modifier.background(StudioSurface)
       ) {
         listOf(
-          Resolution.RES_4K to "AI UHD (4K 2160p)",
-          Resolution.RES_2K to "2K QHD (1440p)",
-          Resolution.RES_1080P to "1080p FHD",
+          Resolution.RES_4K to "4K UHD (3840×2160)",
+          Resolution.RES_2K to "2K QHD (2560×1440)",
+          Resolution.RES_1080P to "Full HD (1920×1080)",
+          Resolution.RES_VERTICAL_4K to "Vertical 4K (2160×3840)",
+          Resolution.RES_VERTICAL_2K to "Vertical 2K (1440×2560)",
+          Resolution.RES_SQUARE_2K to "Square 2K (2048×2048)",
           Resolution.RES_720P to "720p HD",
           Resolution.RES_480P to "480p SD"
         ).forEach { (res, label) ->
@@ -1196,6 +1055,9 @@ fun VideoPreviewSurface(
   // Pinch-to-zoom & pan inspection state
   var previewZoomScale by remember { mutableFloatStateOf(1.0f) }
   var previewPanOffset by remember { mutableStateOf(Offset.Zero) }
+  var showSafeAreas by remember { mutableStateOf(false) }
+  var showGrid by remember { mutableStateOf(false) }
+  var showCenterGuides by remember { mutableStateOf(false) }
 
   Card(
     modifier = modifier
@@ -1220,9 +1082,10 @@ fun VideoPreviewSurface(
             }
           )
         }
-        .pointerInput(Unit) {
+        .pointerInput(selectedElement) {
           detectTransformGestures { _, pan, zoom, _ ->
-            if (zoom != 1.0f || previewZoomScale > 1.05f) {
+            // Only allow preview frame zooming/panning when no overlay element is selected
+            if (selectedElement == SelectedTrackElement.None && (zoom != 1.0f || previewZoomScale > 1.05f)) {
               val oldScale = previewZoomScale
               val newScale = (oldScale * zoom).coerceIn(1.0f, 5.0f)
               previewZoomScale = newScale
@@ -1441,6 +1304,108 @@ fun VideoPreviewSurface(
           onEditText = onEditText,
           modifier = Modifier.fillMaxSize()
         )
+
+        // Safe Areas, Rule-of-Thirds Grid, and Center Crosshair Guidelines (Editor Only)
+        if (showSafeAreas || showGrid || showCenterGuides) {
+          androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+
+            // 1. Rule of Thirds Grid (3x3)
+            if (showGrid) {
+              val lineAlpha = 0.35f
+              drawLine(Color.White.copy(alpha = lineAlpha), Offset(w / 3f, 0f), Offset(w / 3f, h), strokeWidth = 1.dp.toPx())
+              drawLine(Color.White.copy(alpha = lineAlpha), Offset(2f * w / 3f, 0f), Offset(2f * w / 3f, h), strokeWidth = 1.dp.toPx())
+              drawLine(Color.White.copy(alpha = lineAlpha), Offset(0f, h / 3f), Offset(w, h / 3f), strokeWidth = 1.dp.toPx())
+              drawLine(Color.White.copy(alpha = lineAlpha), Offset(0f, 2f * h / 3f), Offset(w, 2f * h / 3f), strokeWidth = 1.dp.toPx())
+            }
+
+            // 2. Center Crosshair Guides
+            if (showCenterGuides) {
+              drawLine(CyanAccent.copy(alpha = 0.6f), Offset(w / 2f, 0f), Offset(w / 2f, h), strokeWidth = 1.5.dp.toPx())
+              drawLine(CyanAccent.copy(alpha = 0.6f), Offset(0f, h / 2f), Offset(w, h / 2f), strokeWidth = 1.5.dp.toPx())
+              drawCircle(CyanAccent, radius = 3.dp.toPx(), center = Offset(w / 2f, h / 2f))
+            }
+
+            // 3. Title Safe Area (90% boundary: 5% inset) and Action Safe Area (80% boundary: 10% inset)
+            if (showSafeAreas) {
+              // Action Safe (80%) - Amber/Gold
+              drawRect(
+                color = GoldAccent.copy(alpha = 0.5f),
+                topLeft = Offset(w * 0.10f, h * 0.10f),
+                size = androidx.compose.ui.geometry.Size(w * 0.80f, h * 0.80f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+              )
+              // Title Safe (90%) - Cyan
+              drawRect(
+                color = CyanAccent.copy(alpha = 0.5f),
+                topLeft = Offset(w * 0.05f, h * 0.05f),
+                size = androidx.compose.ui.geometry.Size(w * 0.90f, h * 0.90f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+              )
+            }
+          }
+        }
+      }
+
+      // Floating Toolbar for Guides (Top-End of preview)
+      Row(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Grid Toggle
+        Surface(
+          onClick = { showGrid = !showGrid },
+          shape = CircleShape,
+          color = if (showGrid) CyanAccent else Color.Black.copy(alpha = 0.6f),
+          modifier = Modifier.size(28.dp).testTag("toggle_grid_guide_btn")
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              Icons.Default.GridOn,
+              contentDescription = "Grid",
+              tint = if (showGrid) Color.Black else Color.White,
+              modifier = Modifier.size(14.dp)
+            )
+          }
+        }
+
+        // Center Crosshair Toggle
+        Surface(
+          onClick = { showCenterGuides = !showCenterGuides },
+          shape = CircleShape,
+          color = if (showCenterGuides) CyanAccent else Color.Black.copy(alpha = 0.6f),
+          modifier = Modifier.size(28.dp).testTag("toggle_center_guide_btn")
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              Icons.Default.ControlCamera,
+              contentDescription = "Center Guides",
+              tint = if (showCenterGuides) Color.Black else Color.White,
+              modifier = Modifier.size(14.dp)
+            )
+          }
+        }
+
+        // Safe Area Toggle
+        Surface(
+          onClick = { showSafeAreas = !showSafeAreas },
+          shape = CircleShape,
+          color = if (showSafeAreas) GoldAccent else Color.Black.copy(alpha = 0.6f),
+          modifier = Modifier.size(28.dp).testTag("toggle_safe_area_btn")
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              Icons.Default.CropFree,
+              contentDescription = "Safe Areas",
+              tint = if (showSafeAreas) Color.Black else Color.White,
+              modifier = Modifier.size(14.dp)
+            )
+          }
+        }
       }
 
       // Floating Zoom Scale Reset Badge (Top-Left overlay when zoomed in)
@@ -1476,6 +1441,27 @@ fun VideoPreviewSurface(
               )
             )
           }
+        }
+      }
+
+      // Fullscreen button overlay in video preview corner
+      if (onToggleFullscreen != null) {
+        IconButton(
+          onClick = onToggleFullscreen,
+          modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(8.dp)
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.6f))
+            .testTag("preview_fullscreen_overlay_btn")
+        ) {
+          Icon(
+            Icons.Default.Fullscreen,
+            contentDescription = "Fullscreen",
+            tint = Color.White,
+            modifier = Modifier.size(18.dp)
+          )
         }
       }
     }

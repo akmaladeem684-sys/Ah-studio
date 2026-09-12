@@ -367,6 +367,12 @@ private fun TemplatesSection(
                   fontFamily = tpl.fontFamily,
                   fontSizeSp = tpl.fontSizeSp,
                   fontWeight = tpl.fontWeight,
+                  isItalic = tpl.isItalic,
+                  isUnderline = tpl.isUnderline,
+                  isAllCaps = tpl.isAllCaps,
+                  alignment = tpl.alignment,
+                  letterSpacing = tpl.letterSpacing,
+                  lineSpacing = tpl.lineSpacing,
                   textColor = tpl.textColor,
                   hasGradient = tpl.hasGradient,
                   gradientColorStart = tpl.gradientColorStart,
@@ -376,11 +382,16 @@ private fun TemplatesSection(
                   strokeColor = tpl.strokeColor,
                   hasShadow = tpl.hasShadow,
                   shadowColor = tpl.shadowColor,
+                  shadowBlur = tpl.shadowBlur,
+                  shadowOffsetX = tpl.shadowOffsetX,
+                  shadowOffsetY = tpl.shadowOffsetY,
                   hasBackground = tpl.hasBackground,
                   backgroundColor = tpl.backgroundColor,
                   cornerRadius = tpl.cornerRadius,
                   bgPadding = tpl.bgPadding,
-                  animationType = tpl.animationType
+                  opacity = tpl.opacity,
+                  animationType = tpl.animationType,
+                  animDurationMs = tpl.animDurationMs
                 )
               )
             },

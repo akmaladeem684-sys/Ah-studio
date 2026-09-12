@@ -65,8 +65,14 @@ fun MultiTrackTimeline(
   onToggleClipSelection: (String) -> Unit,
   onZoomChange: (Float) -> Unit,
   onMoveClip: (clipId: String, deltaMs: Long) -> Unit,
+  onMoveClipStart: ((clipId: String) -> Unit)? = null,
+  onMoveClipEnd: ((clipId: String) -> Unit)? = null,
   onTrimClipLeft: (clipId: String, deltaMs: Long) -> Unit,
+  onTrimClipLeftStart: ((clipId: String) -> Unit)? = null,
+  onTrimClipLeftEnd: ((clipId: String) -> Unit)? = null,
   onTrimClipRight: (clipId: String, deltaMs: Long) -> Unit,
+  onTrimClipRightStart: ((clipId: String) -> Unit)? = null,
+  onTrimClipRightEnd: ((clipId: String) -> Unit)? = null,
   onToggleTrackLock: (TrackType) -> Unit,
   onToggleTrackHide: (TrackType) -> Unit,
   onToggleTrackMute: (TrackType) -> Unit,
@@ -81,6 +87,8 @@ fun MultiTrackTimeline(
   draggedTransitionType: TransitionType? = null,
   onDropTransition: ((cutIndex: Int, type: TransitionType) -> Unit)? = null,
   onSplitClip: (() -> Unit)? = null,
+  isPlaying: Boolean = false,
+  onTogglePlayPause: (() -> Unit)? = null,
   onTrimLeftToPlayhead: (() -> Unit)? = null,
   onTrimRightToPlayhead: (() -> Unit)? = null,
   onDeleteClip: (() -> Unit)? = null,
@@ -164,7 +172,8 @@ fun MultiTrackTimeline(
 
   // Keep scroll position strictly synchronized with currentPosMs (moves timeline underneath fixed center CTI)
   LaunchedEffect(currentPosMs, msPerPixel, density) {
-    val targetScrollPx = with(density) { ((currentPosMs / msPerPixel).dp).roundToPx() }
+    val safePosMs = currentPosMs.coerceAtLeast(0L)
+    val targetScrollPx = with(density) { ((safePosMs / msPerPixel).dp).roundToPx() }.coerceAtLeast(0)
     if (kotlin.math.abs(horizontalScrollState.value - targetScrollPx) > 1) {
       horizontalScrollState.scrollTo(targetScrollPx)
     }
@@ -188,351 +197,44 @@ fun MultiTrackTimeline(
     Box(modifier = Modifier.fillMaxSize()) {
       Column(modifier = Modifier.fillMaxSize()) {
         // 1. Timecode & Ruler Bar (Left: "00:00 / 00:03", Right: dots timeline ruler)
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(30.dp)
-            .background(Color.Black),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          // Timecode display
-          Box(
-            modifier = Modifier
-              .width(if (hasAnyTrack) 88.dp else 72.dp)
-              .fillMaxHeight()
-              .padding(start = 12.dp),
-            contentAlignment = Alignment.CenterStart
-          ) {
-            Text(
-              text = if (hasAnyTrack) "${formatDurationShort(currentPosMs)} / ${formatDurationShort(timeline.totalDurationMs)}" else "00:00 / 00:00",
-              style = MaterialTheme.typography.bodySmall.copy(
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
-              ),
-              maxLines = 1,
-              modifier = Modifier.testTag("timeline_timecode_text")
-            )
-          }
-
-          // Timeline Ruler with Time Markers & Dots (Scrolls smoothly under fixed center CTI)
-          Box(
-            modifier = Modifier
-              .weight(1f)
-              .fillMaxHeight()
-              .horizontalScroll(horizontalScrollState)
-          ) {
-            Row(modifier = Modifier.fillMaxHeight()) {
-              Spacer(modifier = Modifier.width(centerPaddingDp))
-              AccurateTimecodeRuler(
-                totalDurationMs = maxTimelineMs,
-                currentPosMs = currentPosMs,
-                msPerPixel = msPerPixel,
-                fps = fps,
-                isFrameSnapping = isFrameSnapping,
-                onSeek = onSeek,
-                onDoubleTapSnap = onSeekToNextCut
-              )
-              Spacer(modifier = Modifier.width(centerPaddingDp + 180.dp))
-            }
-          }
-        }
-
-        // Contextual Timeline Action Toolbar (Split, Trim, Align CTI, Sync Tracks, etc.)
-        val canEditAtPlayhead = timeline.videoClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
-          timeline.overlayClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
-          timeline.audioClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
-          timeline.textClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
-          timeline.stickerClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs } ||
-          timeline.effectClips.any { currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs }
-
-        AnimatedVisibility(
-          visible = hasAnyTrack && (selectedElement !is SelectedTrackElement.None || timeline.totalDurationMs > 0L),
-          enter = slideInVertically { -it } + fadeIn(),
-          exit = slideOutVertically { -it } + fadeOut()
-        ) {
-          TimelineActionToolbar(
-            hasSelection = selectedElement !is SelectedTrackElement.None,
-            isMultiSelectMode = isMultiSelectMode,
-            selectedCount = if (selectedClipIds.isNotEmpty()) selectedClipIds.size else 1,
-            canPaste = false,
-            isMagnetic = false,
-            isTracksSyncEnabled = isTracksSyncEnabled,
-            onToggleTracksSync = onToggleTracksSync,
-            onMoveToPlayhead = onMoveToPlayhead,
-            canEditAtPlayhead = canEditAtPlayhead,
-            onSplitAllTracks = onSplitAllTracks,
-            onSplit = { onSplitClip?.invoke() },
-            onTrimLeft = { onTrimLeftToPlayhead?.invoke() },
-            onTrimRight = { onTrimRightToPlayhead?.invoke() },
-            onRippleDelete = {
-              if (onRippleDelete != null) onRippleDelete.invoke()
-              else onDeleteClip?.invoke()
-            },
-            onNormalDelete = {
-              if (onNormalDelete != null) onNormalDelete.invoke()
-              else onDeleteClip?.invoke()
-            },
-            onDuplicate = { onDuplicateClip?.invoke() },
-            onCopy = { onCopyClip?.invoke() },
-            onPaste = { onPasteClip?.invoke() },
-            onSpeedClick = { /* speed */ },
-            onReverse = { /* reverse */ },
-            onFreezeFrame = { /* freeze */ },
-            onReplaceMedia = { /* replace */ },
-            onToggleMultiSelect = { onToggleMultiSelect?.invoke() },
-            onToggleMagnetic = { /* magnetic */ },
-            onOpenTrimTool = onOpenTrimTool,
-            onOpenKeyframeTool = onOpenKeyframeTool,
-            onOpenTransitionsTool = onOpenTransitionsTool,
-            onNextPeak = onNextPeak,
-            onPrevPeak = onPrevPeak,
-            onNextSilence = onNextSilence,
-            onPrevSilence = onPrevSilence,
-            onRemoveSilence = onRemoveSilence,
-            onToggleWaveformStyle = onToggleWaveformStyle,
-            modifier = Modifier.fillMaxWidth()
-          )
-        }
+        TimelineRulerHeader(
+          hasAnyTrack = hasAnyTrack,
+          isPlaying = isPlaying,
+          currentPosMs = currentPosMs,
+          totalDurationMs = timeline.totalDurationMs,
+          maxTimelineMs = maxTimelineMs,
+          msPerPixel = msPerPixel,
+          fps = fps,
+          isFrameSnapping = isFrameSnapping,
+          centerPaddingDp = centerPaddingDp,
+          horizontalScrollState = horizontalScrollState,
+          onTogglePlayPause = onTogglePlayPause,
+          onSeek = onSeek,
+          onSeekToNextCut = onSeekToNextCut
+        )
 
         if (!hasAnyTrack) {
           // Clean empty timeline view when project has no tracks yet
-          Box(
-            modifier = Modifier
-              .weight(1f)
-              .fillMaxWidth()
-              .background(Color(0xFF0D0F14)),
-            contentAlignment = Alignment.Center
-          ) {
-            Column(
-              horizontalAlignment = Alignment.CenterHorizontally,
-              verticalArrangement = Arrangement.spacedBy(12.dp),
-              modifier = Modifier.padding(24.dp)
-            ) {
-              Surface(
-                shape = CircleShape,
-                color = CyanAccent.copy(alpha = 0.15f),
-                border = BorderStroke(1.5.dp, CyanAccent),
-                modifier = Modifier
-                  .size(56.dp)
-                  .clickable { onAddMedia?.invoke() }
-                  .testTag("empty_timeline_add_media_btn")
-              ) {
-                Box(contentAlignment = Alignment.Center) {
-                  Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Media",
-                    tint = CyanAccent,
-                    modifier = Modifier.size(30.dp)
-                  )
-                }
-              }
-              Text(
-                text = "Tap + to add your first video or photo",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                  color = Color.White.copy(alpha = 0.75f),
-                  fontSize = 13.5.sp,
-                  fontWeight = FontWeight.Medium
-                )
-              )
-            }
-          }
+          TimelineEmptyView(
+            onAddMedia = onAddMedia,
+            modifier = Modifier.weight(1f).fillMaxWidth()
+          )
         } else {
           // 2. Main Timeline Tracks View (Fixed Left Utility Column + Scrollable Multi-Track Lanes)
           Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             Row(modifier = Modifier.fillMaxSize()) {
               // Left Static Column (Track Icons & Controls aligned vertically with track lanes)
-              Column(
-                modifier = Modifier
-                  .width(88.dp)
-                  .fillMaxHeight()
-                  .background(Color.Black)
-                  .padding(start = 6.dp, end = 6.dp)
-                  .verticalScroll(verticalScrollState),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-              ) {
-                // Row 1: Video Track Left Utility (Mute clip + Cover Card) (64.dp)
-                if (timeline.videoClips.isNotEmpty()) {
-                  Row(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .height(64.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                  ) {
-                    // Mute Clip Button
-                    Column(
-                      modifier = Modifier
-                        .width(36.dp)
-                        .clickable {
-                          isMutedAll = !isMutedAll
-                          onToggleTrackMute(TrackType.MAIN_VIDEO)
-                          onToggleMuteAllVideo?.invoke()
-                        }
-                        .testTag("mute_clip_btn"),
-                      horizontalAlignment = Alignment.CenterHorizontally,
-                      verticalArrangement = Arrangement.Center
-                    ) {
-                      Icon(
-                        imageVector = if (isMutedAll) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                        contentDescription = "Mute clip",
-                        tint = if (isMutedAll) RedAccent else Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.size(20.dp)
-                      )
-                      Spacer(modifier = Modifier.height(2.dp))
-                      Text(
-                        text = "Mute\nclip",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                          fontSize = 9.sp,
-                          color = Color.White.copy(alpha = 0.75f),
-                          textAlign = TextAlign.Center,
-                          lineHeight = 11.sp
-                        )
-                      )
-                    }
-
-                    // Cover Thumbnail Card
-                    Surface(
-                      shape = RoundedCornerShape(6.dp),
-                      color = Color(0xFF222630),
-                      border = BorderStroke(1.dp, Color(0xFF333A4A)),
-                      modifier = Modifier
-                        .width(36.dp)
-                        .height(52.dp)
-                        .clickable { onEditCover?.invoke() }
-                        .testTag("cover_thumbnail_btn")
-                    ) {
-                      Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                          imageVector = Icons.Default.Image,
-                          contentDescription = null,
-                          tint = Color.White.copy(alpha = 0.4f),
-                          modifier = Modifier.size(18.dp)
-                        )
-                        Column(
-                          modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.35f)),
-                          verticalArrangement = Arrangement.Center,
-                          horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                          Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                          )
-                          Text(
-                            text = "Cover",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                              fontSize = 8.5.sp,
-                              fontWeight = FontWeight.Bold,
-                              color = Color.White
-                            )
-                          )
-                        }
-                      }
-                    }
-                  }
-                }
-
-                // Row 2: Overlay / PIP Track Icon (44.dp)
-                if (timeline.overlayClips.isNotEmpty()) {
-                  Box(
-                    modifier = Modifier
-                      .size(36.dp)
-                      .clip(RoundedCornerShape(6.dp))
-                      .background(Color(0xFF1B1F2A))
-                      .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.Layers,
-                      contentDescription = "Overlay Track",
-                      tint = OverlayTrackColor,
-                      modifier = Modifier.size(18.dp)
-                    )
-                  }
-                }
-
-                // Row 3: Audio Track Icon (36.dp)
-                if (timeline.audioClips.isNotEmpty()) {
-                  Box(
-                    modifier = Modifier
-                      .size(36.dp)
-                      .clip(RoundedCornerShape(6.dp))
-                      .background(Color(0xFF1B1F2A))
-                      .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.MusicNote,
-                      contentDescription = "Audio Track",
-                      tint = AudioTrackColor,
-                      modifier = Modifier.size(18.dp)
-                    )
-                  }
-                }
-
-                // Row 4: Text Track Icon (36.dp)
-                if (timeline.textClips.isNotEmpty()) {
-                  Box(
-                    modifier = Modifier
-                      .size(36.dp)
-                      .clip(RoundedCornerShape(6.dp))
-                      .background(Color(0xFF1B1F2A))
-                      .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Text(
-                      text = "T",
-                      style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextTrackColor
-                      )
-                    )
-                  }
-                }
-
-                // Row 5: Sticker Track Icon (36.dp)
-                if (timeline.stickerClips.isNotEmpty()) {
-                  Box(
-                    modifier = Modifier
-                      .size(36.dp)
-                      .clip(RoundedCornerShape(6.dp))
-                      .background(Color(0xFF1B1F2A))
-                      .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.EmojiEmotions,
-                      contentDescription = "Sticker Track",
-                      tint = StickerTrackColor,
-                      modifier = Modifier.size(18.dp)
-                    )
-                  }
-                }
-
-                // Row 6: Effect Track Icon (36.dp)
-                if (timeline.effectClips.isNotEmpty()) {
-                  Box(
-                    modifier = Modifier
-                      .size(36.dp)
-                      .clip(RoundedCornerShape(6.dp))
-                      .background(Color(0xFF1B1F2A))
-                      .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.AutoAwesome,
-                      contentDescription = "Effect Track",
-                      tint = EffectTrackColor,
-                      modifier = Modifier.size(18.dp)
-                    )
-                  }
-                }
-              }
+              TimelineLeftUtilityColumn(
+                timeline = timeline,
+                isMutedAll = isMutedAll,
+                verticalScrollState = verticalScrollState,
+                onToggleMuteAll = {
+                  isMutedAll = !isMutedAll
+                  onToggleTrackMute(TrackType.MAIN_VIDEO)
+                  onToggleMuteAllVideo?.invoke()
+                },
+                onEditCover = onEditCover
+              )
 
             // Right Horizontally Scrollable Tracks Area with Touch Scrubbing
             Box(
@@ -654,43 +356,48 @@ fun MultiTrackTimeline(
                           },
                           onLongClick = { onToggleClipSelection(clip.id) },
                           onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                          onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                          onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
                           onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                          onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                          onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                          onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                          onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                          onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                          onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
                         )
                       }
 
-                      // Transition Cut Badges between adjacent video clips
+                      // Applied Transition Badges between adjacent video clips (only when a transition is configured)
                       if (timeline.videoClips.size > 1) {
                         for (i in 0 until timeline.videoClips.size - 1) {
                           val clipA = timeline.videoClips[i]
                           val cutPosMs = clipA.timelineStartMs + clipA.durationMs
-                          val cutX = (cutPosMs / msPerPixel).dp - 9.dp
+                          val cutX = (cutPosMs / msPerPixel).dp - 8.dp
                           val existingTransition = timeline.transitions.find { it.clipIndexBefore == i }
                           val isSelectedCut = i == selectedTransitionCutIndex
 
-                          Box(
-                            modifier = Modifier
-                              .offset(x = cutX, y = (videoTrackHeight - 18.dp) / 2)
-                              .size(18.dp)
-                              .rotate(45f)
-                              .background(
-                                if (existingTransition != null) PurpleAccent else Color(0xFF222836),
-                                RoundedCornerShape(2.dp)
+                          if (existingTransition != null) {
+                            Box(
+                              modifier = Modifier
+                                .offset(x = cutX, y = (videoTrackHeight - 16.dp) / 2)
+                                .size(16.dp)
+                                .rotate(45f)
+                                .background(PurpleAccent, RoundedCornerShape(2.dp))
+                                .border(1.dp, if (isSelectedCut) CyanAccent else Color.White.copy(alpha = 0.8f), RoundedCornerShape(2.dp))
+                                .clickable {
+                                  onSelectTransitionCut?.invoke(i)
+                                  onOpenTransitionsTool?.invoke()
+                                }
+                                .testTag("transition_badge_$i"),
+                              contentAlignment = Alignment.Center
+                            ) {
+                              Icon(
+                                imageVector = Icons.Default.Transform,
+                                contentDescription = "Transition",
+                                tint = Color.White,
+                                modifier = Modifier.size(9.dp).rotate(-45f)
                               )
-                              .border(1.dp, if (isSelectedCut) CyanAccent else Color.White.copy(alpha = 0.8f), RoundedCornerShape(2.dp))
-                              .clickable {
-                                onSelectTransitionCut?.invoke(i)
-                                onOpenTransitionsTool?.invoke()
-                              }
-                              .testTag("transition_badge_$i"),
-                            contentAlignment = Alignment.Center
-                          ) {
-                            Icon(
-                              imageVector = if (existingTransition != null) Icons.Default.Transform else Icons.Default.Add,
-                              contentDescription = "Transition",
-                              tint = Color.White,
-                              modifier = Modifier.size(10.dp).rotate(-45f)
-                            )
+                            }
                           }
                         }
                       }
@@ -821,8 +528,14 @@ fun MultiTrackTimeline(
                             },
                             onLongClick = { onToggleClipSelection(clip.id) },
                             onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
                             onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
                           )
                         }
 
@@ -914,8 +627,14 @@ fun MultiTrackTimeline(
                             },
                             onLongClick = { onToggleClipSelection(clip.id) },
                             onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
                             onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
                           )
                         }
 
@@ -988,8 +707,14 @@ fun MultiTrackTimeline(
                             },
                             onLongClick = { onToggleClipSelection(clip.id) },
                             onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
                             onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
                           )
                         }
 
@@ -1062,8 +787,14 @@ fun MultiTrackTimeline(
                             },
                             onLongClick = { onToggleClipSelection(clip.id) },
                             onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
                             onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
                           )
                         }
 
@@ -1136,8 +867,14 @@ fun MultiTrackTimeline(
                             },
                             onLongClick = { onToggleClipSelection(clip.id) },
                             onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
                             onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) }
+                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
                           )
                         }
 
@@ -1400,3 +1137,329 @@ fun VideoClipSequencerStrip(
     }
   }
 }
+
+@Composable
+private fun TimelineRulerHeader(
+  hasAnyTrack: Boolean,
+  isPlaying: Boolean,
+  currentPosMs: Long,
+  totalDurationMs: Long,
+  maxTimelineMs: Long,
+  msPerPixel: Float,
+  fps: Int,
+  isFrameSnapping: Boolean,
+  centerPaddingDp: androidx.compose.ui.unit.Dp,
+  horizontalScrollState: androidx.compose.foundation.ScrollState,
+  onTogglePlayPause: (() -> Unit)?,
+  onSeek: (Long) -> Unit,
+  onSeekToNextCut: (() -> Unit)?,
+  modifier: Modifier = Modifier
+) {
+  Row(
+    modifier = modifier
+      .fillMaxWidth()
+      .height(30.dp)
+      .background(Color.Black),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    // Timecode display & Ruler Play/Pause
+    Row(
+      modifier = Modifier
+        .width(if (hasAnyTrack) 88.dp else 72.dp)
+        .fillMaxHeight()
+        .padding(horizontal = 4.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+      IconButton(
+        onClick = { onTogglePlayPause?.invoke() },
+        modifier = Modifier
+          .size(24.dp)
+          .testTag("timeline_ruler_play_pause")
+      ) {
+        Icon(
+          imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+          contentDescription = if (isPlaying) "Pause" else "Play",
+          tint = Color.White,
+          modifier = Modifier.size(15.dp)
+        )
+      }
+      Text(
+        text = if (hasAnyTrack) "${formatDurationShort(currentPosMs)} / ${formatDurationShort(totalDurationMs)}" else "00:00 / 00:00",
+        style = MaterialTheme.typography.bodySmall.copy(
+          color = Color.White.copy(alpha = 0.9f),
+          fontSize = 9.5.sp,
+          fontWeight = FontWeight.Medium
+        ),
+        maxLines = 1,
+        modifier = Modifier.testTag("timeline_timecode_text")
+      )
+    }
+
+    // Timeline Ruler with Time Markers & Dots (Scrolls smoothly under fixed center CTI)
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .fillMaxHeight()
+        .horizontalScroll(horizontalScrollState)
+    ) {
+      Row(modifier = Modifier.fillMaxHeight()) {
+        Spacer(modifier = Modifier.width(centerPaddingDp))
+        AccurateTimecodeRuler(
+          totalDurationMs = maxTimelineMs,
+          currentPosMs = currentPosMs,
+          msPerPixel = msPerPixel,
+          fps = fps,
+          isFrameSnapping = isFrameSnapping,
+          onSeek = onSeek,
+          onDoubleTapSnap = onSeekToNextCut
+        )
+        Spacer(modifier = Modifier.width(centerPaddingDp + 180.dp))
+      }
+    }
+  }
+}
+
+@Composable
+private fun TimelineEmptyView(
+  onAddMedia: (() -> Unit)?,
+  modifier: Modifier = Modifier
+) {
+  Box(
+    modifier = modifier
+      .background(Color(0xFF0D0F14)),
+    contentAlignment = Alignment.Center
+  ) {
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+      modifier = Modifier.padding(24.dp)
+    ) {
+      Surface(
+        shape = CircleShape,
+        color = CyanAccent.copy(alpha = 0.15f),
+        border = BorderStroke(1.5.dp, CyanAccent),
+        modifier = Modifier
+          .size(56.dp)
+          .clickable { onAddMedia?.invoke() }
+          .testTag("empty_timeline_add_media_btn")
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = "Add Media",
+            tint = CyanAccent,
+            modifier = Modifier.size(30.dp)
+          )
+        }
+      }
+      Text(
+        text = "Tap + to add your first video or photo",
+        style = MaterialTheme.typography.bodyMedium.copy(
+          color = Color.White.copy(alpha = 0.75f),
+          fontSize = 13.5.sp,
+          fontWeight = FontWeight.Medium
+        )
+      )
+    }
+  }
+}
+
+@Composable
+private fun TimelineLeftUtilityColumn(
+  timeline: com.example.domain.model.Timeline,
+  isMutedAll: Boolean,
+  verticalScrollState: androidx.compose.foundation.ScrollState,
+  onToggleMuteAll: () -> Unit,
+  onEditCover: (() -> Unit)?,
+  modifier: Modifier = Modifier
+) {
+  Column(
+    modifier = modifier
+      .width(88.dp)
+      .fillMaxHeight()
+      .background(Color.Black)
+      .padding(start = 6.dp, end = 6.dp)
+      .verticalScroll(verticalScrollState),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    // Row 1: Video Track Left Utility (Mute clip + Cover Card) (64.dp)
+    if (timeline.videoClips.isNotEmpty()) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(64.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        // Mute Clip Button
+        Column(
+          modifier = Modifier
+            .width(36.dp)
+            .clickable { onToggleMuteAll() }
+            .testTag("mute_clip_btn"),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Icon(
+            imageVector = if (isMutedAll) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+            contentDescription = "Mute clip",
+            tint = if (isMutedAll) RedAccent else Color.White.copy(alpha = 0.85f),
+            modifier = Modifier.size(20.dp)
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = "Mute\nclip",
+            style = MaterialTheme.typography.labelSmall.copy(
+              fontSize = 9.sp,
+              color = Color.White.copy(alpha = 0.75f),
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+              lineHeight = 11.sp
+            )
+          )
+        }
+
+        // Cover Thumbnail Card
+        Surface(
+          shape = RoundedCornerShape(6.dp),
+          color = Color(0xFF222630),
+          border = BorderStroke(1.dp, Color(0xFF333A4A)),
+          modifier = Modifier
+            .width(36.dp)
+            .height(52.dp)
+            .clickable { onEditCover?.invoke() }
+            .testTag("cover_thumbnail_btn")
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = Icons.Default.Image,
+              contentDescription = null,
+              tint = Color.White.copy(alpha = 0.4f),
+              modifier = Modifier.size(18.dp)
+            )
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f)),
+              verticalArrangement = Arrangement.Center,
+              horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+              Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(12.dp)
+              )
+              Text(
+                text = "Cover",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 8.5.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White
+                )
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // Row 2: Overlay / PIP Track Icon (44.dp)
+    if (timeline.overlayClips.isNotEmpty()) {
+      Box(
+        modifier = Modifier
+          .size(36.dp)
+          .clip(RoundedCornerShape(6.dp))
+          .background(Color(0xFF1B1F2A))
+          .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(
+          imageVector = Icons.Default.Layers,
+          contentDescription = "Overlay Track",
+          tint = OverlayTrackColor,
+          modifier = Modifier.size(18.dp)
+        )
+      }
+    }
+
+    // Row 3: Audio Track Icon (36.dp)
+    if (timeline.audioClips.isNotEmpty()) {
+      Box(
+        modifier = Modifier
+          .size(36.dp)
+          .clip(RoundedCornerShape(6.dp))
+          .background(Color(0xFF1B1F2A))
+          .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(
+          imageVector = Icons.Default.MusicNote,
+          contentDescription = "Audio Track",
+          tint = AudioTrackColor,
+          modifier = Modifier.size(18.dp)
+        )
+      }
+    }
+
+    // Row 4: Text Track Icon (36.dp)
+    if (timeline.textClips.isNotEmpty()) {
+      Box(
+        modifier = Modifier
+          .size(36.dp)
+          .clip(RoundedCornerShape(6.dp))
+          .background(Color(0xFF1B1F2A))
+          .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(
+          text = "T",
+          style = MaterialTheme.typography.titleMedium.copy(
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextTrackColor
+          )
+        )
+      }
+    }
+
+    // Row 5: Sticker Track Icon (36.dp)
+    if (timeline.stickerClips.isNotEmpty()) {
+      Box(
+        modifier = Modifier
+          .size(36.dp)
+          .clip(RoundedCornerShape(6.dp))
+          .background(Color(0xFF1B1F2A))
+          .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(
+          imageVector = Icons.Default.EmojiEmotions,
+          contentDescription = "Sticker Track",
+          tint = StickerTrackColor,
+          modifier = Modifier.size(18.dp)
+        )
+      }
+    }
+
+    // Row 6: Effect Track Icon (36.dp)
+    if (timeline.effectClips.isNotEmpty()) {
+      Box(
+        modifier = Modifier
+          .size(36.dp)
+          .clip(RoundedCornerShape(6.dp))
+          .background(Color(0xFF1B1F2A))
+          .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(
+          imageVector = Icons.Default.AutoAwesome,
+          contentDescription = "Effect Track",
+          tint = EffectTrackColor,
+          modifier = Modifier.size(18.dp)
+        )
+      }
+    }
+  }
+}
+

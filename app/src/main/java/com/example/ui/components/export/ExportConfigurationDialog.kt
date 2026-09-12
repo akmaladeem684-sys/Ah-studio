@@ -101,8 +101,9 @@ fun ExportConfigurationDialog(
         Resolution.RES_480P -> 2.5f
         Resolution.RES_720P -> 5.0f
         Resolution.RES_1080P -> 10.0f
-        Resolution.RES_2K -> 18.0f
-        Resolution.RES_4K -> 35.0f
+        Resolution.RES_2K, Resolution.RES_VERTICAL_2K -> 18.0f
+        Resolution.RES_4K, Resolution.RES_VERTICAL_4K -> 35.0f
+        Resolution.RES_SQUARE_2K -> 22.0f
       }
       val codecMultiplier = if (selectedCodec == CodecProfile.H265_HEVC) 0.75f else 1.0f
       base * selectedQuality.bitrateMultiplier * (selectedFps.fps / 30f) * codecMultiplier
@@ -552,9 +553,11 @@ fun ExportConfigurationDialog(
                   Box(contentAlignment = Alignment.Center) {
                     Text(
                       text = when (quality) {
+                        ExportQuality.DRAFT -> "Draft"
                         ExportQuality.LOW -> "Low"
-                        ExportQuality.MEDIUM -> "Med"
+                        ExportQuality.STANDARD, ExportQuality.MEDIUM -> "Standard"
                         ExportQuality.HIGH -> "High"
+                        ExportQuality.ULTRA -> "Ultra"
                         ExportQuality.CUSTOM -> "Custom"
                       },
                       style = MaterialTheme.typography.labelSmall.copy(
@@ -791,16 +794,22 @@ fun ExportConfigurationDialog(
  * Calculates export pixel dimensions honoring project aspect ratio and target resolution.
  */
 internal fun calculateExportDimensions(res: Resolution, aspect: AspectRatio): Pair<Int, Int> {
-  val shortSide = res.width
-  val longSide = res.height
-
-  val (w, h) = when (aspect) {
-    AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
-    AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
-    AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
-    AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
-    AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
-    AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
+  val (w, h) = when (res) {
+    Resolution.RES_SQUARE_2K -> Pair(2048, 2048)
+    Resolution.RES_VERTICAL_2K -> Pair(1440, 2560)
+    Resolution.RES_VERTICAL_4K -> Pair(2160, 3840)
+    else -> {
+      val shortSide = res.width
+      val longSide = res.height
+      when (aspect) {
+        AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
+        AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
+        AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
+        AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
+        AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
+        AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
+      }
+    }
   }
   val alignedW = ((w + 15) / 16) * 16
   val alignedH = ((h + 15) / 16) * 16
@@ -819,8 +828,9 @@ internal fun calculateEstimatedSize(durationMs: Long, config: ExportConfig): Lon
       Resolution.RES_480P -> 2_500_000L
       Resolution.RES_720P -> 5_000_000L
       Resolution.RES_1080P -> 10_000_000L
-      Resolution.RES_2K -> 18_000_000L
-      Resolution.RES_4K -> 35_000_000L
+      Resolution.RES_2K, Resolution.RES_VERTICAL_2K -> 18_000_000L
+      Resolution.RES_4K, Resolution.RES_VERTICAL_4K -> 35_000_000L
+      Resolution.RES_SQUARE_2K -> 22_000_000L
     }
     val codecMultiplier = if (config.codecProfile == CodecProfile.H265_HEVC) 0.75f else 1.0f
     (baseBitrate * config.quality.bitrateMultiplier * (config.frameRate.fps / 30f) * codecMultiplier).toLong()

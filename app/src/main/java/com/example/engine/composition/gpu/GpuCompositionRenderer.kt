@@ -251,8 +251,8 @@ class GpuCompositionRenderer(private val context: Context) {
       val scaleX = baseScaleX * (if (clip.flipHorizontal) -clip.cropScale else clip.cropScale) * kf.scaleX
       val scaleY = baseScaleY * (if (clip.flipVertical) -clip.cropScale else clip.cropScale) * kf.scaleY
 
-      Matrix.translateM(mvpMatrix, 0, clip.cropOffsetX + kf.posX, clip.cropOffsetY + kf.posY, 0f)
-      Matrix.rotateM(mvpMatrix, 0, (clip.rotationDegrees.toFloat() + kf.rotation) % 360f, 0f, 0f, 1f)
+      Matrix.translateM(mvpMatrix, 0, clip.cropOffsetX + kf.posX, -(clip.cropOffsetY + kf.posY), 0f)
+      Matrix.rotateM(mvpMatrix, 0, -((clip.rotationDegrees.toFloat() + kf.rotation) % 360f), 0f, 0f, 1f)
       Matrix.scaleM(mvpMatrix, 0, scaleX, scaleY, 1f)
 
       finalOpacity *= kf.opacity
@@ -329,9 +329,9 @@ class GpuCompositionRenderer(private val context: Context) {
     val baseScaleX = baseScaleY * (ovAspect / vpAspect)
 
     Matrix.setIdentityM(mvpMatrix, 0)
-    // Map overlay position (-1..1), scaleX & scaleY, and rotation
-    Matrix.translateM(mvpMatrix, 0, overlay.posX, overlay.posY, 0f)
-    Matrix.rotateM(mvpMatrix, 0, overlay.rotation, 0f, 0f, 1f)
+    // Map overlay position (-1..1), scaleX & scaleY, and rotation (inverted Y and negative rotation for OpenGL NDC)
+    Matrix.translateM(mvpMatrix, 0, overlay.posX, -overlay.posY, 0f)
+    Matrix.rotateM(mvpMatrix, 0, -overlay.rotation, 0f, 0f, 1f)
     Matrix.scaleM(mvpMatrix, 0, baseScaleX, baseScaleY, 1f)
 
     Matrix.setIdentityM(texMatrix, 0)
