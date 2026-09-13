@@ -21,8 +21,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Gradle
+      # Gradle 8.7 use karein jo Android Gradle Plugin ke sath 100% compatible hai
+      - name: Setup Gradle 8.7
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
 
       - name: Configure Android NDK
         run: |
@@ -39,13 +42,10 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          # Agar settings file subfolder me ho to wahan switch karein
           SETTINGS_FILE=$(find . -maxdepth 3 -name "settings.gradle.kts" | head -n 1)
           if [ -n "$SETTINGS_FILE" ]; then
             cd $(dirname "$SETTINGS_FILE")
           fi
-          
-          # Direct system gradle se assemble karein
           gradle assembleDebug --stacktrace --no-daemon
 
       - name: Upload Debug APK Artifact
