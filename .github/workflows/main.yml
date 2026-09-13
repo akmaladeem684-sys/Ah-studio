@@ -21,24 +21,17 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # AGP ki demand ke mutabiq Gradle 8.9 setup karein
-      - name: Setup Gradle 8.9
+      # AGP 8.3.1 ke liye exact compatible Gradle 8.4
+      - name: Setup Gradle 8.4
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.4'
 
-      - name: Configure Android NDK
+      - name: Setup Android NDK 26.1
         run: |
-          if [ -d "$ANDROID_SDK_ROOT/ndk/26.1.10909125" ]; then
-            echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
-            echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
-          else
-            LATEST_NDK=$(ls -1 $ANDROID_SDK_ROOT/ndk 2>/dev/null | tail -n 1)
-            if [ -n "$LATEST_NDK" ]; then
-              echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$LATEST_NDK" >> $GITHUB_ENV
-              echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$LATEST_NDK" >> $GITHUB_ENV
-            fi
-          fi
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
 
       - name: Build Debug APK
         run: |
@@ -46,7 +39,7 @@ jobs:
           if [ -n "$SETTINGS_FILE" ]; then
             cd $(dirname "$SETTINGS_FILE")
           fi
-          gradle assembleDebug --stacktrace --no-daemon
+          gradle assembleDebug --no-daemon
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
