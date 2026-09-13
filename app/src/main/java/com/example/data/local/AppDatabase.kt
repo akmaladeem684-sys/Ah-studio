@@ -8,14 +8,22 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-  entities = [ProjectEntity::class, ExportedVideoEntity::class, CrashRecoveryEntity::class],
-  version = 2,
+  entities = [
+    ProjectEntity::class,
+    ExportedVideoEntity::class,
+    CrashRecoveryEntity::class,
+    UserAccountEntity::class,
+    OAuthConnectionEntity::class
+  ],
+  version = 3,
   exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
   abstract fun projectDao(): ProjectDao
   abstract fun exportedVideoDao(): ExportedVideoDao
   abstract fun crashRecoveryDao(): CrashRecoveryDao
+  abstract fun accountDao(): AccountDao
+  abstract fun oauthConnectionDao(): OAuthConnectionDao
 
   companion object {
     @Volatile
@@ -44,6 +52,42 @@ abstract class AppDatabase : RoomDatabase() {
       }
     }
 
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+          CREATE TABLE IF NOT EXISTS user_accounts (
+            uid TEXT NOT NULL PRIMARY KEY,
+            email TEXT NOT NULL,
+            displayName TEXT NOT NULL,
+            photoUrl TEXT,
+            providerId TEXT NOT NULL,
+            bio TEXT NOT NULL DEFAULT '',
+            customHandle TEXT NOT NULL DEFAULT '',
+            lastActiveTimestamp INTEGER NOT NULL,
+            isCurrent INTEGER NOT NULL DEFAULT 0,
+            idToken TEXT,
+            refreshToken TEXT,
+            avatarColor INTEGER NOT NULL DEFAULT -16725249
+          )
+        """.trimIndent())
+        db.execSQL("""
+          CREATE TABLE IF NOT EXISTS oauth_connections (
+            platformId TEXT NOT NULL PRIMARY KEY,
+            platformName TEXT NOT NULL,
+            platformIcon TEXT NOT NULL,
+            accountHandle TEXT NOT NULL DEFAULT '',
+            accountId TEXT NOT NULL DEFAULT '',
+            accessToken TEXT NOT NULL DEFAULT '',
+            refreshToken TEXT,
+            expiresAtTimestamp INTEGER NOT NULL DEFAULT 0,
+            grantedScopes TEXT NOT NULL DEFAULT '',
+            connectedAtTimestamp INTEGER NOT NULL DEFAULT 0,
+            isConnected INTEGER NOT NULL DEFAULT 0
+          )
+        """.trimIndent())
+      }
+    }
+
     fun getDatabase(context: Context): AppDatabase {
       return INSTANCE ?: synchronized(this) {
         val instance = Room.databaseBuilder(
@@ -51,7 +95,7 @@ abstract class AppDatabase : RoomDatabase() {
           AppDatabase::class.java,
           "ah_video_studio.db"
         )
-        .addMigrations(MIGRATION_1_2)
+        .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
         .fallbackToDestructiveMigration()
         .build()
         INSTANCE = instance

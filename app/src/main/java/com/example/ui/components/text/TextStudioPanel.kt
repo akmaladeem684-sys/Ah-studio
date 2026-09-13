@@ -9,7 +9,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -17,6 +16,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -24,16 +26,26 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,32 +55,19 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.domain.model.TextClip
 import com.example.engine.SelectedTrackElement
-import com.example.engine.text.TextLayerRenderer
 import com.example.ui.StudioViewModel
 import com.example.ui.theme.*
 import com.example.util.FontManager
 import com.example.util.FontOption
 import java.util.UUID
 
-enum class TextEditorSecondaryTab(val label: String, val icon: ImageVector) {
-  TEMPLATES("Templates", Icons.Default.GridView),
-  FONTS("Fonts", Icons.Default.Title),
-  STYLES("Styles", Icons.Default.Palette),
-  EFFECTS("Effects", Icons.Default.AutoAwesome),
-  ANIMATIONS("Animations", Icons.Default.PlayCircle)
-}
-
-enum class FormattingControlTab(val label: String, val icon: ImageVector) {
-  FONT("Aa Font", Icons.Default.Title),
-  SIZE("Size", Icons.Default.FormatSize),
-  COLOR("Color", Icons.Default.Palette),
-  ALIGN("Align", Icons.Default.FormatAlignLeft),
-  ANIMATION("Animation", Icons.Default.PlayCircle),
-  EFFECTS("Effects", Icons.Default.AutoAwesome),
-  SPACING("Spacing", Icons.Default.FormatLineSpacing),
-  STYLE("Style", Icons.Default.FormatBold),
-  SHADOW("Shadow", Icons.Default.Tonality),
-  STROKE("Stroke", Icons.Default.BorderColor)
+enum class TextEditorSecondaryTab(val label: String) {
+  TEMPLATES("Templates"),
+  FONTS("Fonts"),
+  STYLES("Styles"),
+  EFFECTS("Effects"),
+  ANIMATIONS("Animations"),
+  BUBBLES("Bubbles")
 }
 
 /**
@@ -92,6 +91,203 @@ fun isRtlScript(text: String): Boolean {
   }
 }
 
+/**
+ * Visual Template Card Preset Definition
+ */
+data class VisualTemplatePreset(
+  val id: String,
+  val name: String,
+  val category: String,
+  val sampleText: String,
+  val fontFamily: String = "Impact",
+  val textColor: Long = 0xFFFFFFFF,
+  val hasGradient: Boolean = false,
+  val gradientColorStart: Long = 0xFF00E5FF,
+  val gradientColorEnd: Long = 0xFF8B5CF6,
+  val strokeWidth: Float = 0f,
+  val strokeColor: Long = 0xFF000000,
+  val hasShadow: Boolean = false,
+  val shadowColor: Long = 0x88000000,
+  val hasGlow: Boolean = false,
+  val glowColor: Long = 0xFF00E5FF,
+  val hasBackground: Boolean = false,
+  val backgroundColor: Long = 0xFF000000,
+  val backgroundShape: String = "Rounded",
+  val animationType: String = "Pop",
+  val isPro: Boolean = false,
+  val visualBadgeType: VisualCardType = VisualCardType.DEFAULT
+)
+
+enum class VisualCardType {
+  DEFAULT,
+  SUBSCRIBE_CURSOR,
+  THANKS_WATCHING_FRAME,
+  EXPLORE_TAPE,
+  CLOUD_GLOW,
+  TRUE_3D,
+  GEOMETRIC_BARS,
+  NOOK_BOLD,
+  TRENDY_RING_PRO,
+  SUBSCRIBE_ARROW_PRO,
+  YOUR_TITLE_BRUSH_PRO,
+  HIGHLIGHT_NEON,
+  W_EPISODE_TAG,
+  UNLOCKED_BAR,
+  NEW_POST_SCRIPT,
+  THANKS_UNDERLINE,
+  BEST_HIGHLIGHT,
+  SUBSCRIBE_PLAY,
+  SHOW_3D_YELLOW,
+  YOUTUBE_BELL,
+  KATSEYE_GLAM,
+  WHIMSICAL_FAIRY,
+  CYBERPUNK_GLITCH,
+  VLOG_MINIMAL,
+  CINEMATIC_GOLD,
+  BREAKING_NEWS,
+  URDU_CALLIGRAPHY,
+  FIRE_FLAME,
+  HOLOGRAM_CYAN,
+  GLITCH_MATRIX,
+  LUXURY_DIAMOND,
+  RETRO_80S
+}
+
+/**
+ * Built-in Visual Template Cards (Matching CapCut and Screenshot image previews)
+ */
+val VISUAL_CARD_PRESETS = listOf(
+  VisualTemplatePreset("default", "Default", "Trending", "Default", fontFamily = "Sans-Serif", visualBadgeType = VisualCardType.DEFAULT),
+  VisualTemplatePreset("subscribe_cursor", "Subscribe", "Trending", "Subscribe", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFE50914, visualBadgeType = VisualCardType.SUBSCRIBE_CURSOR),
+  VisualTemplatePreset("thanks_watching", "Thanks", "Trending", "THANKS FOR WATCHING", textColor = 0xFFFFFFFF, strokeWidth = 2f, strokeColor = 0xFFEF4444, visualBadgeType = VisualCardType.THANKS_WATCHING_FRAME),
+  VisualTemplatePreset("explore_tape", "Explore", "Trending", "EXPLORE", textColor = 0xFF000000, hasBackground = true, backgroundColor = 0xFFFACC15, visualBadgeType = VisualCardType.EXPLORE_TAPE),
+  VisualTemplatePreset("cloud_glow", "Cloud", "Trending", "CLOUD", textColor = 0xFFFFFFFF, hasGlow = true, glowColor = 0xFFFFFFFF, visualBadgeType = VisualCardType.CLOUD_GLOW),
+  VisualTemplatePreset("true_3d", "True", "Trending", "TRUE", textColor = 0xFFFACC15, strokeWidth = 3f, strokeColor = 0xFF000000, hasShadow = true, shadowColor = 0xFFFF8800, visualBadgeType = VisualCardType.TRUE_3D),
+  VisualTemplatePreset("geo_bars", "Minimal", "Whimsical", "||", textColor = 0xFFFFFFFF, visualBadgeType = VisualCardType.GEOMETRIC_BARS),
+  VisualTemplatePreset("nook_bold", "Nook", "Whimsical", "NOOK", fontFamily = "Impact", textColor = 0xFFFFFFFF, visualBadgeType = VisualCardType.NOOK_BOLD),
+  VisualTemplatePreset("trendy_ring", "Trendy", "KATSEYE", "TRENDY", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFDC2626, isPro = true, visualBadgeType = VisualCardType.TRENDY_RING_PRO),
+  VisualTemplatePreset("subscribe_arrow", "Subscribe", "Promo", "SUBSCRIBE", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFDC2626, isPro = true, visualBadgeType = VisualCardType.SUBSCRIBE_ARROW_PRO),
+  VisualTemplatePreset("your_title_brush", "Your Title", "Titles", "YOUR TITLE", textColor = 0xFF000000, hasBackground = true, backgroundColor = 0xFFEAB308, isPro = true, visualBadgeType = VisualCardType.YOUR_TITLE_BRUSH_PRO),
+  VisualTemplatePreset("highlight_neon", "Highlight", "Promo", "Highlight", textColor = 0xFFFFFFFF, hasGlow = true, glowColor = 0xFF00E5FF, hasBackground = true, backgroundColor = 0xFF1E1B4B, visualBadgeType = VisualCardType.HIGHLIGHT_NEON),
+  VisualTemplatePreset("w_episode", "W Episode", "Promo", "W EPISODE", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFDC2626, visualBadgeType = VisualCardType.W_EPISODE_TAG),
+  VisualTemplatePreset("unlocked_bar", "Unlocked", "Promo", "UNLOCKED", textColor = 0xFF000000, hasBackground = true, backgroundColor = 0xFFE2E8F0, visualBadgeType = VisualCardType.UNLOCKED_BAR),
+  VisualTemplatePreset("new_post", "New Post", "Social", "New Post", fontFamily = "Pacifico", textColor = 0xFFFFFFFF, strokeWidth = 2f, strokeColor = 0xFF000000, visualBadgeType = VisualCardType.NEW_POST_SCRIPT),
+  VisualTemplatePreset("thanks_underline", "Thanks", "Social", "THANKS FOR WATCHING", textColor = 0xFFFFFFFF, strokeWidth = 1f, visualBadgeType = VisualCardType.THANKS_UNDERLINE),
+  VisualTemplatePreset("best_highlight", "Highlight", "Social", "Best Highlight", textColor = 0xFFFFFFFF, visualBadgeType = VisualCardType.BEST_HIGHLIGHT),
+  VisualTemplatePreset("subscribe_play", "Subscribe", "Social", "Subscribe", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFEF4444, visualBadgeType = VisualCardType.SUBSCRIBE_PLAY),
+  VisualTemplatePreset("show_3d", "Show", "3D & Neon", "SHOW", textColor = 0xFFFDE047, strokeWidth = 3f, strokeColor = 0xFF991B1B, visualBadgeType = VisualCardType.SHOW_3D_YELLOW),
+  VisualTemplatePreset("youtube_bell", "Subscribe", "Social", "SUBSCRIBE", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFDC2626, visualBadgeType = VisualCardType.YOUTUBE_BELL),
+  VisualTemplatePreset("katseye_glam", "KATSEYE", "KATSEYE", "KATSEYE", textColor = 0xFFF43F5E, hasGlow = true, glowColor = 0xFFFB7185, isPro = true, visualBadgeType = VisualCardType.KATSEYE_GLAM),
+  VisualTemplatePreset("whimsical_fairy", "Whimsical", "Whimsical", "WHIMSICAL", textColor = 0xFFA78BFA, hasGlow = true, glowColor = 0xFFC084FC, visualBadgeType = VisualCardType.WHIMSICAL_FAIRY),
+  VisualTemplatePreset("cyberpunk_glitch", "Cyberpunk", "3D & Neon", "CYBERPUNK", textColor = 0xFF00E5FF, strokeWidth = 2f, strokeColor = 0xFFFF007A, visualBadgeType = VisualCardType.CYBERPUNK_GLITCH),
+  VisualTemplatePreset("vlog_minimal", "Vlog", "Vlog", "VLOG DAILY", fontFamily = "Playfair", textColor = 0xFFFFFFFF, visualBadgeType = VisualCardType.VLOG_MINIMAL),
+  VisualTemplatePreset("cinematic_gold", "Cinematic", "Titles", "CINEMATIC", textColor = 0xFFFCD34D, hasGradient = true, gradientColorStart = 0xFFFCD34D, gradientColorEnd = 0xFFB45309, visualBadgeType = VisualCardType.CINEMATIC_GOLD),
+  VisualTemplatePreset("breaking_news", "News", "Titles", "BREAKING NEWS", textColor = 0xFFFFFFFF, hasBackground = true, backgroundColor = 0xFFB91C1C, visualBadgeType = VisualCardType.BREAKING_NEWS),
+  VisualTemplatePreset("urdu_calligraphy", "Urdu", "Urdu", "خوش آمدید", fontFamily = "jameel_nastaliq", textColor = 0xFF38BDF8, hasShadow = true, visualBadgeType = VisualCardType.URDU_CALLIGRAPHY),
+  VisualTemplatePreset("fire_flame", "Fire", "3D & Neon", "FIRE HOT", textColor = 0xFFF97316, hasGlow = true, glowColor = 0xFFEF4444, visualBadgeType = VisualCardType.FIRE_FLAME),
+  VisualTemplatePreset("hologram_cyan", "Hologram", "3D & Neon", "HOLOGRAM", textColor = 0xFF22D3EE, hasGlow = true, glowColor = 0xFF06B6D4, visualBadgeType = VisualCardType.HOLOGRAM_CYAN),
+  VisualTemplatePreset("glitch_matrix", "Matrix", "3D & Neon", "MATRIX", textColor = 0xFF22C55E, fontFamily = "Monospace", visualBadgeType = VisualCardType.GLITCH_MATRIX),
+  VisualTemplatePreset("luxury_diamond", "Luxury", "Promo", "LUXURY", textColor = 0xFFE2E8F0, hasShadow = true, isPro = true, visualBadgeType = VisualCardType.LUXURY_DIAMOND),
+  VisualTemplatePreset("retro_80s", "Retro 80s", "3D & Neon", "RETRO WAVE", textColor = 0xFFEC4899, hasGradient = true, gradientColorStart = 0xFFEC4899, gradientColorEnd = 0xFF8B5CF6, visualBadgeType = VisualCardType.RETRO_80S)
+)
+
+/**
+ * Built-in Visual Font Presets
+ */
+val VISUAL_FONT_PRESETS = listOf(
+  FontOption("Impact", "Impact", "Trending", "IMPACT"),
+  FontOption("Montserrat", "Montserrat", "Trending", "Montserrat"),
+  FontOption("Bebas", "Bebas Neue", "Trending", "BEBAS"),
+  FontOption("Sans-Serif", "Sans Clean", "Classic", "Modern Sans"),
+  FontOption("Playfair", "Playfair Serif", "Classic", "Playfair"),
+  FontOption("Pacifico", "Pacifico Script", "Whimsical", "Pacifico"),
+  FontOption("jameel_nastaliq", "Jameel Urdu", "Urdu", "نستعلیق"),
+  FontOption("nastaleeq", "Alvi Nastaleeq", "Urdu", "خطاطی"),
+  FontOption("Monospace", "Console Code", "New", "MONO_01"),
+  FontOption("Serif", "Editorial Serif", "Classic", "Editorial"),
+  FontOption("Bangers", "Bangers Comic", "Whimsical", "BANG!"),
+  FontOption("Orbitron", "Orbitron SciFi", "New", "ORBITRON")
+)
+
+/**
+ * Built-in Visual Styles Presets
+ */
+data class VisualStylePreset(val id: String, val name: String, val textColor: Long, val gradientStart: Long? = null, val gradientEnd: Long? = null, val strokeColor: Long? = null, val glowColor: Long? = null)
+
+val VISUAL_STYLE_PRESETS = listOf(
+  VisualStylePreset("white", "Clean White", 0xFFFFFFFF),
+  VisualStylePreset("cyan_neon", "Cyber Cyan", 0xFF00E5FF, glowColor = 0xFF00E5FF),
+  VisualStylePreset("gold_foil", "Gold Foil", 0xFFFCD34D, gradientStart = 0xFFFCD34D, gradientEnd = 0xFFB45309),
+  VisualStylePreset("fire_red", "Fire Red", 0xFFEF4444, gradientStart = 0xFFF97316, gradientEnd = 0xFFEF4444),
+  VisualStylePreset("pink_candy", "Pink Candy", 0xFFF43F5E, glowColor = 0xFFFB7185),
+  VisualStylePreset("purple_glow", "Purple Glow", 0xFFA855F7, glowColor = 0xFFC084FC),
+  VisualStylePreset("green_matrix", "Matrix Green", 0xFF22C55E, glowColor = 0xFF16A34A),
+  VisualStylePreset("sunset_amber", "Sunset Amber", 0xFFF59E0B, gradientStart = 0xFFF59E0B, gradientEnd = 0xFFEA580C),
+  VisualStylePreset("silver_chrome", "Silver Chrome", 0xFFE2E8F0, strokeColor = 0xFF000000),
+  VisualStylePreset("yellow_black", "Yellow Black", 0xFFFACC15, strokeColor = 0xFF000000),
+  VisualStylePreset("blue_electric", "Electric Blue", 0xFF3B82F6, glowColor = 0xFF60A5FA),
+  VisualStylePreset("rainbow_pop", "Rainbow Pop", 0xFFEC4899, gradientStart = 0xFFEC4899, gradientEnd = 0xFF38BDF8)
+)
+
+/**
+ * Built-in Visual Effects Presets
+ */
+data class VisualEffectPreset(val id: String, val name: String, val shadow: Boolean = false, val glow: Boolean = false, val stroke: Boolean = false, val is3d: Boolean = false)
+
+val VISUAL_EFFECT_PRESETS = listOf(
+  VisualEffectPreset("none", "None"),
+  VisualEffectPreset("drop_shadow", "Soft Shadow", shadow = true),
+  VisualEffectPreset("neon_glow", "Neon Glow", glow = true),
+  VisualEffectPreset("thick_stroke", "Thick Stroke", stroke = true),
+  VisualEffectPreset("3d_depth", "3D Extrude", is3d = true, shadow = true),
+  VisualEffectPreset("glow_stroke", "Glow + Stroke", glow = true, stroke = true),
+  VisualEffectPreset("cyber_shadow", "Cyber Shadow", shadow = true, glow = true),
+  VisualEffectPreset("metal_outline", "Metal Outline", stroke = true, is3d = true)
+)
+
+/**
+ * Built-in Visual Animations Presets
+ */
+data class VisualAnimPreset(val id: String, val name: String, val type: String, val iconEmoji: String)
+
+val VISUAL_ANIMATION_PRESETS = listOf(
+  VisualAnimPreset("none", "None", "None", "⏹️"),
+  VisualAnimPreset("pop", "Pop In", "Pop", "💥"),
+  VisualAnimPreset("fade", "Fade In", "Fade", "🌫️"),
+  VisualAnimPreset("slide_up", "Slide Up", "Slide", "⬆️"),
+  VisualAnimPreset("typewriter", "Typewriter", "Typewriter", "⌨️"),
+  VisualAnimPreset("bounce", "Bounce", "Bounce", "🏀"),
+  VisualAnimPreset("wave", "Wave", "Wave", "🌊"),
+  VisualAnimPreset("flip_3d", "3D Flip", "Flip", "🔄"),
+  VisualAnimPreset("zoom_in", "Zoom In", "Zoom", "🔍"),
+  VisualAnimPreset("glitch", "Glitch", "Glitch", "⚡"),
+  VisualAnimPreset("spin", "Spin In", "Spin", "💫"),
+  VisualAnimPreset("pulse", "Pulse", "Pulse", "💓")
+)
+
+/**
+ * Built-in Visual Bubbles Presets
+ */
+data class VisualBubblePreset(val id: String, val name: String, val shape: String, val bgColor: Long)
+
+val VISUAL_BUBBLE_PRESETS = listOf(
+  VisualBubblePreset("none", "None", "None", 0x00000000),
+  VisualBubblePreset("cloud", "Cloud Bubble", "Cloud", 0xFF1E293B),
+  VisualBubblePreset("speech_oval", "Speech Oval", "Speech", 0xFF0F172A),
+  VisualBubblePreset("comic_shout", "Comic Shout", "Comic", 0xFFDC2626),
+  VisualBubblePreset("rounded_box", "Rounded Box", "Rounded", 0xCC000000),
+  VisualBubblePreset("tape_yellow", "Tape Banner", "Tape", 0xFFFACC15),
+  VisualBubblePreset("cyber_hex", "Cyber Hex", "Cyber", 0xFF0D9488),
+  VisualBubblePreset("red_tag", "Red Tag", "Tag", 0xFFB91C1C),
+  VisualBubblePreset("ribbon_gold", "Ribbon Gold", "Ribbon", 0xFFCA8A04),
+  VisualBubblePreset("pill_neon", "Pill Neon", "Pill", 0xFF4338CA),
+  VisualBubblePreset("glass_dark", "Glass Dark", "Glass", 0x881E293B),
+  VisualBubblePreset("gradient_bubble", "Gradient", "Gradient", 0xFF7C3AED)
+)
+
+/**
+ * Lightweight, Clean Text Studio Panel (Matching Screenshot IMG_20260913_154408.jpg)
+ */
 @Composable
 fun TextStudioPanel(
   viewModel: StudioViewModel,
@@ -100,27 +296,29 @@ fun TextStudioPanel(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  val installedPlugins by viewModel.installedPlugins.collectAsState()
+  val focusManager = LocalFocusManager.current
 
-  // Manage draft clip state
-  val draftClip = remember(selectedTextClip) {
+  // Manage active text clip state
+  val initialClip = remember(selectedTextClip) {
     selectedTextClip ?: TextClip(
       id = UUID.randomUUID().toString(),
-      text = "CREATE AMAZING VIDEOS",
+      text = "Enter text",
       fontFamily = "Impact",
-      fontSizeSp = 36f,
-      fontWeight = 900,
-      textColor = 0xFF00E5FF,
+      fontSizeSp = 32f,
+      fontWeight = 800,
+      textColor = 0xFFFFFFFF,
       hasShadow = true,
       shadowColor = 0xFF000000,
-      shadowBlur = 8f,
+      shadowBlur = 6f,
       animationType = "Pop",
-      animDurationMs = 600L
+      animDurationMs = 500L
     )
   }
 
-  var activeClip by remember(draftClip) { mutableStateOf(draftClip) }
-  val onUpdateActiveClip: (TextClip) -> Unit = { updated ->
+  var activeClip by remember(initialClip) { mutableStateOf(initialClip) }
+  var textInput by remember(activeClip.text) { mutableStateOf(activeClip.text) }
+
+  val onUpdateClip: (TextClip) -> Unit = { updated ->
     activeClip = updated
     if (selectedTextClip != null) {
       viewModel.timelineEngine.updateTextClip(updated)
@@ -128,20 +326,12 @@ fun TextStudioPanel(
   }
 
   var activeTab by remember { mutableStateOf(TextEditorSecondaryTab.TEMPLATES) }
-  var activeFormattingTab by remember { mutableStateOf(FormattingControlTab.FONT) }
+  var selectedCategoryChip by remember { mutableStateOf("Trending") }
+  var showSearchField by remember { mutableStateOf(false) }
+  var searchQuery by remember { mutableStateOf("") }
+  var showExpandedDialog by remember { mutableStateOf(false) }
+
   var fontOptionsList by remember { mutableStateOf(FontManager.getAvailableFonts(context)) }
-
-  // Hero Live Animation State
-  var isHeroPlaying by remember { mutableStateOf(true) }
-  var heroSpeedMultiplier by remember { mutableStateOf(1.0f) }
-  var heroReplayTrigger by remember { mutableIntStateOf(0) }
-  var showFullscreenPreview by remember { mutableStateOf(false) }
-
-  val isRtl = remember(activeClip.text) { isRtlScript(activeClip.text) }
-
-  LaunchedEffect(installedPlugins) {
-    fontOptionsList = FontManager.getAvailableFonts(context)
-  }
 
   val fontPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocument()
@@ -150,7 +340,7 @@ fun TextStudioPanel(
       val imported = FontManager.importFont(context, uri)
       if (imported != null) {
         fontOptionsList = FontManager.getAvailableFonts(context)
-        onUpdateActiveClip(
+        onUpdateClip(
           activeClip.copy(fontFamily = imported.id, customFontPath = imported.filePath)
         )
         Toast.makeText(context, "Imported font: ${imported.name}", Toast.LENGTH_SHORT).show()
@@ -160,1948 +350,1135 @@ fun TextStudioPanel(
     }
   }
 
+  // Auto-apply text change handler
+  val applyAndConfirm: () -> Unit = {
+    val finalText = if (textInput.isBlank()) "Your Text" else textInput
+    val finalClip = activeClip.copy(text = finalText)
+    if (selectedTextClip != null) {
+      viewModel.timelineEngine.updateTextClip(finalClip)
+    } else {
+      val currentPos = viewModel.timelineEngine.currentPositionMs.value
+      val totalDuration = viewModel.timelineEngine.timeline.value.totalDurationMs.coerceAtLeast(1000L)
+      val calculatedDuration = 3000L.coerceAtMost(maxOf(1000L, totalDuration - currentPos))
+      val newClip = finalClip.copy(
+        id = UUID.randomUUID().toString(),
+        timelineStartMs = currentPos,
+        durationMs = calculatedDuration
+      )
+      viewModel.timelineEngine.addTextClipObject(newClip)
+      viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
+    }
+    focusManager.clearFocus()
+    if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
+  }
+
   Column(
     modifier = modifier
       .fillMaxWidth()
-      .background(Color(0xFF070B14))
-      .padding(horizontal = 12.dp, vertical = 10.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
+      .background(Color(0xFF0F1118))
+      .padding(horizontal = 10.dp, vertical = 6.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
   ) {
-    // 1. Header with Title, RTL Badge & Actions
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(
-          modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFF1E68F6), Color(0xFF00C2FF)))),
-          contentAlignment = Alignment.Center
-        ) {
-          Text(
-            text = "Tt",
-            fontWeight = FontWeight.Black,
-            fontSize = 17.sp,
-            color = Color.White
-          )
-        }
-        Column {
-          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-              text = if (selectedTextClip != null) "Edit Text Layer" else "Text Editing",
-              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-            )
-
-            if (isRtl) {
-              Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color(0xFF059669).copy(alpha = 0.25f),
-                border = BorderStroke(1.dp, Color(0xFF10B981))
-              ) {
-                Text(
-                  text = "RTL Urdu/Arabic 🇵🇰🇸🇦",
-                  fontSize = 9.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = Color(0xFF34D399),
-                  modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                )
-              }
-            }
-          }
-          Text(
-            text = "130+ Live Animated Templates • Fonts • Styles • Effects • Animations",
-            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp)
-          )
-        }
-      }
-
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Fullscreen Inspect Button
-        IconButton(
-          onClick = { showFullscreenPreview = true },
-          modifier = Modifier
-            .size(32.dp)
-            .background(Color(0xFF1E293B), CircleShape)
-        ) {
-          Icon(Icons.Default.Fullscreen, contentDescription = "Fullscreen Preview", tint = CyanAccent, modifier = Modifier.size(18.dp))
-        }
-
-        if (selectedTextClip != null) {
-          Button(
-            onClick = {
-              viewModel.timelineEngine.updateTextClip(activeClip)
-              if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
-            },
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E68F6), contentColor = Color.White),
-            shape = RoundedCornerShape(10.dp)
-          ) {
-            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Done", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          }
-        } else {
-          Button(
-            onClick = {
-              val currentPos = viewModel.timelineEngine.currentPositionMs.value
-              val totalDuration = viewModel.timelineEngine.timeline.value.totalDurationMs.coerceAtLeast(1000L)
-              val calculatedDuration = 3000L.coerceAtMost(maxOf(1000L, totalDuration - currentPos))
-              val newClip = activeClip.copy(
-                id = UUID.randomUUID().toString(),
-                timelineStartMs = currentPos,
-                durationMs = calculatedDuration
-              )
-              viewModel.timelineEngine.addTextClipObject(newClip)
-              viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
-              if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
-            },
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E68F6), contentColor = Color.White),
-            shape = RoundedCornerShape(10.dp)
-          ) {
-            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Apply", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          }
-        }
-
-        IconButton(
-          onClick = {
-            if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
-          },
-          modifier = Modifier.size(32.dp)
-        ) {
-          Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-        }
-      }
-    }
-
-    // 2. HERO LIVE VIEW (PREVIEW CARD)
+    // 1. TOP DRAG HANDLE
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .height(145.dp)
-        .clip(RoundedCornerShape(14.dp))
-        .background(Brush.verticalGradient(listOf(Color(0xFF0D1424), Color(0xFF030712))))
-        .border(BorderStroke(1.dp, Color(0xFF1E293B)), RoundedCornerShape(14.dp))
-    ) {
-      val infiniteTransition = rememberInfiniteTransition(label = "hero_anim_${activeClip.text.hashCode()}_$heroReplayTrigger")
-      val animLoopMs by if (isHeroPlaying) {
-        infiniteTransition.animateFloat(
-          initialValue = 0f,
-          targetValue = 2400f,
-          animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-          ),
-          label = "hero_loop_ms"
-        )
-      } else {
-        remember { mutableFloatStateOf(1200f) }
-      }
-
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        val nativeCanvas = drawContext.canvas.nativeCanvas
-        val w = size.width.toInt()
-        val h = size.height.toInt()
-        if (w > 0 && h > 0) {
-          TextLayerRenderer.drawTemplatePreview(
-            canvas = nativeCanvas,
-            clip = activeClip,
-            previewLoopMs = animLoopMs.toLong(),
-            width = w,
-            height = h,
-            context = context,
-            speedMultiplier = heroSpeedMultiplier
-          )
-        }
-      }
-
-      // Live View Top Left Badge: LIVE VIEW 60FPS HD
-      Row(
-        modifier = Modifier
-          .padding(8.dp)
-          .align(Alignment.TopStart),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = Color.Black.copy(alpha = 0.65f)
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(if (isHeroPlaying) Color(0xFF00E5FF) else Color(0xFFEF4444))
-            )
-            Text(
-              text = if (isHeroPlaying) "LIVE VIEW" else "PAUSED",
-              fontSize = 9.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color.White
-            )
-            Text(
-              text = "60FPS",
-              fontSize = 9.sp,
-              fontWeight = FontWeight.Bold,
-              color = CyanAccent
-            )
-          }
-        }
-
-        Surface(
-          shape = RoundedCornerShape(4.dp),
-          color = Color(0xFF1E68F6).copy(alpha = 0.3f),
-          border = BorderStroke(1.dp, Color(0xFF1E68F6))
-        ) {
-          Text(
-            text = "HD",
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Black,
-            color = Color.White,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-          )
-        }
-      }
-
-      // Live Overlay Controls Bottom Right Bar (Replay, Play/Pause, Fullscreen)
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(8.dp)
-          .align(Alignment.BottomEnd),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Text(
-          text = "${activeClip.animationType} • ${activeClip.fontFamily}",
-          fontSize = 10.sp,
-          color = TextSecondary,
-          modifier = Modifier.padding(start = 4.dp)
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-          IconButton(
-            onClick = { heroReplayTrigger++ },
-            modifier = Modifier
-              .size(28.dp)
-              .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-          ) {
-            Icon(Icons.Default.Replay, contentDescription = "Replay", tint = Color.White, modifier = Modifier.size(15.dp))
-          }
-
-          IconButton(
-            onClick = { isHeroPlaying = !isHeroPlaying },
-            modifier = Modifier
-              .size(28.dp)
-              .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-          ) {
-            Icon(
-              if (isHeroPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-              contentDescription = "Toggle Play",
-              tint = Color.White,
-              modifier = Modifier.size(15.dp)
-            )
-          }
-
-          IconButton(
-            onClick = { showFullscreenPreview = true },
-            modifier = Modifier
-              .size(28.dp)
-              .background(Color(0xFF1E68F6), CircleShape)
-          ) {
-            Icon(Icons.Default.Fullscreen, contentDescription = "Fullscreen", tint = Color.White, modifier = Modifier.size(15.dp))
-          }
-        }
-      }
-    }
-
-    // 3. LARGE "ADD TEXT" BUTTON DIRECTLY BELOW LIVE VIEW
-    Surface(
-      onClick = {
-        val currentPos = viewModel.timelineEngine.currentPositionMs.value
-        val totalDuration = viewModel.timelineEngine.timeline.value.totalDurationMs.coerceAtLeast(1000L)
-        val calculatedDuration = 3000L.coerceAtMost(maxOf(1000L, totalDuration - currentPos))
-        val newClip = activeClip.copy(
-          id = UUID.randomUUID().toString(),
-          timelineStartMs = currentPos,
-          durationMs = calculatedDuration
-        )
-        viewModel.timelineEngine.addTextClipObject(newClip)
-        viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
-        Toast.makeText(context, "Added new text layer!", Toast.LENGTH_SHORT).show()
-      },
-      shape = RoundedCornerShape(14.dp),
-      color = Color.Transparent,
-      modifier = Modifier.fillMaxWidth()
+        .padding(top = 2.dp),
+      contentAlignment = Alignment.Center
     ) {
       Box(
         modifier = Modifier
-          .fillMaxWidth()
-          .height(52.dp)
-          .background(Brush.horizontalGradient(listOf(Color(0xFF1E68F6), Color(0xFF00A3FF))))
-          .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.Center
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          // Left: + T Icon inside subtle rounded badge
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-          ) {
-            Box(
-              modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.2f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                  imageVector = Icons.Default.Add,
-                  contentDescription = null,
-                  tint = Color.White,
-                  modifier = Modifier.size(14.dp)
-                )
-                Text(
-                  text = "T",
-                  fontWeight = FontWeight.Black,
-                  fontSize = 12.sp,
-                  color = Color.White
-                )
-              }
-            }
-
-            Text(
-              text = "Add Text",
-              fontWeight = FontWeight.Bold,
-              fontSize = 16.sp,
-              color = Color.White
-            )
-          }
-
-          Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(22.dp)
-          )
-        }
-      }
-    }
-
-    // 4. PRIMARY SUB-NAVIGATION BUTTONS: TEMPLATES | FONTS | STYLES | EFFECTS | ANIMATIONS
-    LazyRow(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      contentPadding = PaddingValues(vertical = 2.dp)
-    ) {
-      items(TextEditorSecondaryTab.values()) { tab ->
-        val isSelected = activeTab == tab
-        val bgBrush = if (isSelected) {
-          Brush.horizontalGradient(listOf(Color(0xFF1E68F6), Color(0xFF00A3FF)))
-        } else {
-          SolidColor(Color(0xFF0F172A))
-        }
-
-        Surface(
-          onClick = { activeTab = tab },
-          shape = RoundedCornerShape(12.dp),
-          color = Color.Transparent,
-          border = if (isSelected) null else BorderStroke(1.dp, Color(0xFF1E293B))
-        ) {
-          Box(
-            modifier = Modifier
-              .background(bgBrush)
-              .padding(horizontal = 14.dp, vertical = 9.dp),
-            contentAlignment = Alignment.Center
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              Icon(
-                imageVector = tab.icon,
-                contentDescription = tab.label,
-                tint = Color.White,
-                modifier = Modifier.size(16.dp)
-              )
-              Text(
-                text = tab.label,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = Color.White,
-                fontSize = 12.sp
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // 5. DEDICATED TEXT INPUT & FORMATTING CONTROLS PANEL
-    Card(
-      modifier = Modifier.fillMaxWidth(),
-      shape = RoundedCornerShape(14.dp),
-      colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1424)),
-      border = BorderStroke(1.dp, Color(0xFF1E293B))
-    ) {
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        // PROMINENT TEXT INPUT FIELD
-        OutlinedTextField(
-          value = activeClip.text,
-          onValueChange = { newText ->
-            onUpdateActiveClip(activeClip.copy(text = newText))
-          },
-          placeholder = { Text("Type your text…", color = TextSecondary, fontSize = 13.sp) },
-          leadingIcon = {
-            Icon(
-              imageVector = Icons.Default.TextFields,
-              contentDescription = null,
-              tint = Color(0xFF00C2FF),
-              modifier = Modifier.size(18.dp)
-            )
-          },
-          trailingIcon = {
-            if (activeClip.text.isNotEmpty()) {
-              IconButton(
-                onClick = { onUpdateActiveClip(activeClip.copy(text = "")) },
-                modifier = Modifier.size(20.dp)
-              ) {
-                Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary)
-              }
-            }
-          },
-          modifier = Modifier.fillMaxWidth(),
-          maxLines = 2,
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF00A3FF),
-            unfocusedBorderColor = Color(0xFF1E293B),
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            focusedContainerColor = Color(0xFF070B14),
-            unfocusedContainerColor = Color(0xFF070B14)
-          ),
-          shape = RoundedCornerShape(12.dp)
-        )
-
-        // Quick Preset Script Suggestion Pills
-        LazyRow(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          contentPadding = PaddingValues(vertical = 1.dp)
-        ) {
-          val samples = listOf(
-            "🇵🇰 اردو: خوبصورت اردو متن",
-            "🇸🇦 Arabic: الخط العربي الجميل",
-            "⚡ Kinetic: MAKE IT HAPPEN",
-            "📹 Vlog: DAILY VLOG #42",
-            "🔥 Sale: 50% OFF TODAY",
-            "🎬 Intro: WELCOME TO MY CHANNEL"
-          )
-          items(samples) { sample ->
-            val cleanText = sample.substringAfter(": ").trim()
-            Surface(
-              onClick = { onUpdateActiveClip(activeClip.copy(text = cleanText)) },
-              shape = RoundedCornerShape(12.dp),
-              color = Color(0xFF162032),
-              border = BorderStroke(1.dp, Color(0xFF26354F))
-            ) {
-              Text(
-                text = sample,
-                fontSize = 10.sp,
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-              )
-            }
-          }
-        }
-
-        HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.5.dp)
-
-        // FORMATTING CONTROLS SELECTOR BAR: FONT | SIZE | COLOR | ALIGN | ANIMATION | EFFECTS | SPACING | STYLE | SHADOW | STROKE
-        Text(
-          text = "FORMATTING CONTROLS",
-          style = MaterialTheme.typography.labelSmall.copy(
-            color = Color(0xFF00C2FF),
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.sp,
-            letterSpacing = 1.sp
-          )
-        )
-
-        LazyRow(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          contentPadding = PaddingValues(vertical = 1.dp)
-        ) {
-          items(FormattingControlTab.values()) { fTab ->
-            val isSelected = activeFormattingTab == fTab
-            Surface(
-              onClick = { activeFormattingTab = fTab },
-              shape = RoundedCornerShape(10.dp),
-              color = if (isSelected) Color(0xFF1E68F6) else Color(0xFF162032),
-              border = BorderStroke(1.dp, if (isSelected) Color(0xFF00C2FF) else Color(0xFF26354F))
-            ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-              ) {
-                Icon(
-                  imageVector = fTab.icon,
-                  contentDescription = fTab.label,
-                  tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
-                  modifier = Modifier.size(14.dp)
-                )
-                Text(
-                  text = fTab.label,
-                  fontSize = 11.sp,
-                  fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                  color = if (isSelected) Color.White else Color.White.copy(alpha = 0.8f)
-                )
-              }
-            }
-          }
-        }
-
-        // DYNAMIC SUB-PANEL FOR SELECTED FORMATTING CONTROL
-        Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF070B14))
-            .border(1.dp, Color(0xFF162032), RoundedCornerShape(12.dp))
-            .padding(10.dp)
-        ) {
-          when (activeFormattingTab) {
-            FormattingControlTab.FONT -> LiveFontsTabSection(
-              clip = activeClip,
-              availableFonts = fontOptionsList,
-              onSelectFont = { fontId, path ->
-                onUpdateActiveClip(activeClip.copy(fontFamily = fontId, customFontPath = path))
-              },
-              onImportFont = { fontPickerLauncher.launch(arrayOf("*/*")) }
-            )
-            FormattingControlTab.SIZE -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "Font Size: ${activeClip.fontSizeSp.toInt()} sp",
-                  style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                  listOf("Small" to 18f, "Med" to 28f, "Large" to 42f, "Title" to 60f, "Hero" to 80f).forEach { (presetName, sizeVal) ->
-                    Surface(
-                      onClick = { onUpdateActiveClip(activeClip.copy(fontSizeSp = sizeVal)) },
-                      shape = RoundedCornerShape(6.dp),
-                      color = if (activeClip.fontSizeSp == sizeVal) Color(0xFF1E68F6) else Color(0xFF162032)
-                    ) {
-                      Text(
-                        text = presetName,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                      )
-                    }
-                  }
-                }
-              }
-
-              Slider(
-                value = activeClip.fontSizeSp,
-                onValueChange = { onUpdateActiveClip(activeClip.copy(fontSizeSp = it)) },
-                valueRange = 12f..120f,
-                colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-              )
-            }
-            FormattingControlTab.COLOR -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Text(
-                text = "Color Palette",
-                style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
-              )
-              val palette = listOf(
-                0xFFFFFFFF, 0xFF00E5FF, 0xFF1E68F6, 0xFFFF007F, 0xFFFFD700, 0xFF10B981,
-                0xFF8B5CF6, 0xFFF59E0B, 0xFFEF4444, 0xFFFFEA00, 0xFFEC4899, 0xFF000000
-              )
-              LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(palette) { colorHex ->
-                  val isSelected = activeClip.textColor == colorHex
-                  Box(
-                    modifier = Modifier
-                      .size(30.dp)
-                      .clip(CircleShape)
-                      .background(Color(colorHex))
-                      .border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) Color(0xFF00C2FF) else Color.White.copy(alpha = 0.4f), CircleShape)
-                      .clickable { onUpdateActiveClip(activeClip.copy(textColor = colorHex)) }
-                  )
-                }
-              }
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "Opacity: ${(activeClip.opacity * 100).toInt()}%",
-                  style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
-                )
-                Slider(
-                  value = activeClip.opacity,
-                  onValueChange = { onUpdateActiveClip(activeClip.copy(opacity = it)) },
-                  valueRange = 0.1f..1.0f,
-                  modifier = Modifier.weight(1f).padding(start = 12.dp),
-                  colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-                )
-              }
-            }
-            FormattingControlTab.ALIGN -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Text(
-                text = "Text Alignment & Transform",
-                style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
-              )
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  listOf("Left", "Center", "Right").forEach { align ->
-                    val isSel = activeClip.alignment.equals(align, true)
-                    Surface(
-                      onClick = { onUpdateActiveClip(activeClip.copy(alignment = align)) },
-                      shape = RoundedCornerShape(8.dp),
-                      color = if (isSel) Color(0xFF1E68F6) else Color(0xFF162032),
-                      border = BorderStroke(1.dp, if (isSel) Color(0xFF00C2FF) else Color(0xFF26354F))
-                    ) {
-                      Text(
-                        text = align,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                      )
-                    }
-                  }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  Surface(
-                    onClick = { onUpdateActiveClip(activeClip.copy(isAllCaps = !activeClip.isAllCaps)) },
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (activeClip.isAllCaps) Color(0xFF1E68F6) else Color(0xFF162032),
-                    border = BorderStroke(1.dp, if (activeClip.isAllCaps) Color(0xFF00C2FF) else Color(0xFF26354F))
-                  ) {
-                    Text(
-                      text = "UPPERCASE",
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color.White,
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                    )
-                  }
-                }
-              }
-            }
-            FormattingControlTab.ANIMATION -> LiveAnimationsTabSection(
-              clip = activeClip,
-              onUpdate = { updated -> onUpdateActiveClip(updated) }
-            )
-            FormattingControlTab.EFFECTS -> LiveEffectsTabSection(
-              clip = activeClip,
-              onUpdate = { updated -> onUpdateActiveClip(updated) }
-            )
-            FormattingControlTab.SPACING -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Text(
-                text = "Letter & Line Spacing",
-                style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
-              )
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-              ) {
-                Column(modifier = Modifier.weight(1f)) {
-                  Text("Letter Spacing: ${activeClip.letterSpacing.toInt()}px", fontSize = 10.sp, color = TextSecondary)
-                  Slider(
-                    value = activeClip.letterSpacing,
-                    onValueChange = { onUpdateActiveClip(activeClip.copy(letterSpacing = it)) },
-                    valueRange = 0f..30f,
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-                  )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                  Text("Line Spacing: ${String.format("%.1f", activeClip.lineSpacing)}x", fontSize = 10.sp, color = TextSecondary)
-                  Slider(
-                    value = activeClip.lineSpacing,
-                    onValueChange = { onUpdateActiveClip(activeClip.copy(lineSpacing = it)) },
-                    valueRange = 0.8f..2.5f,
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-                  )
-                }
-              }
-            }
-            FormattingControlTab.STYLE -> LiveStylesTabSection(
-              clip = activeClip,
-              onUpdate = { updated -> onUpdateActiveClip(updated) }
-            )
-            FormattingControlTab.SHADOW -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "Drop Shadow Effect",
-                  style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
-                )
-                Switch(
-                  checked = activeClip.hasShadow,
-                  onCheckedChange = { onUpdateActiveClip(activeClip.copy(hasShadow = it)) },
-                  colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00C2FF), checkedTrackColor = Color(0xFF1E68F6))
-                )
-              }
-
-              if (activeClip.hasShadow) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                  Column(modifier = Modifier.weight(1f)) {
-                    Text("Blur: ${activeClip.shadowBlur.toInt()}px", fontSize = 10.sp, color = TextSecondary)
-                    Slider(
-                      value = activeClip.shadowBlur,
-                      onValueChange = { onUpdateActiveClip(activeClip.copy(shadowBlur = it)) },
-                      valueRange = 1f..30f,
-                      colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-                    )
-                  }
-                  Column(modifier = Modifier.weight(1f)) {
-                    Text("Offset: ${activeClip.shadowOffsetX.toInt()}px", fontSize = 10.sp, color = TextSecondary)
-                    Slider(
-                      value = activeClip.shadowOffsetX,
-                      onValueChange = { onUpdateActiveClip(activeClip.copy(shadowOffsetX = it, shadowOffsetY = it)) },
-                      valueRange = 0f..20f,
-                      colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-                    )
-                  }
-                }
-              }
-            }
-            FormattingControlTab.STROKE -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "Text Outline / Stroke",
-                  style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold)
-                )
-                Text(
-                  text = "${activeClip.strokeWidth.toInt()} px",
-                  fontSize = 10.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = Color(0xFF00C2FF)
-                )
-              }
-
-              Slider(
-                value = activeClip.strokeWidth,
-                onValueChange = { onUpdateActiveClip(activeClip.copy(strokeWidth = it)) },
-                valueRange = 0f..20f,
-                colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // 6. MAIN SECONDARY TAB VIEW CONTENT (When Templates tab is active)
-    if (activeTab == TextEditorSecondaryTab.TEMPLATES) {
-      LiveTemplatesTabSection(
-        clip = activeClip,
-        userTextOverride = activeClip.text,
-        onApplyTemplate = { updatedClip -> onUpdateActiveClip(updatedClip) },
-        onOpenFullscreenInspect = { showFullscreenPreview = true }
+          .width(36.dp)
+          .height(4.dp)
+          .clip(RoundedCornerShape(2.dp))
+          .background(Color.White.copy(alpha = 0.25f))
       )
     }
-  }
 
-  // Fullscreen Live Preview Modal
-  if (showFullscreenPreview) {
-    TextStudioFullscreenPreviewModal(
-      clip = activeClip,
-      onDismiss = { showFullscreenPreview = false },
-      onApplyToTimeline = {
-        val currentPos = viewModel.timelineEngine.currentPositionMs.value
-        val totalDuration = viewModel.timelineEngine.timeline.value.totalDurationMs.coerceAtLeast(1000L)
-        val calculatedDuration = 3000L.coerceAtMost(maxOf(1000L, totalDuration - currentPos))
-        val newClip = activeClip.copy(
-          id = UUID.randomUUID().toString(),
-          timelineStartMs = currentPos,
-          durationMs = calculatedDuration
-        )
-        viewModel.timelineEngine.addTextClipObject(newClip)
-        viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
-        showFullscreenPreview = false
-        if (onDismiss != null) onDismiss() else viewModel.setActiveToolbarTab(null)
-      }
-    )
-  }
-}
-
-// -------------------------------------------------------------
-// TAB 1: LIVE TEMPLATES SECTION (130+ REAL Animated Graphic Templates)
-// -------------------------------------------------------------
-@Composable
-private fun LiveTemplatesTabSection(
-  clip: TextClip,
-  userTextOverride: String,
-  onApplyTemplate: (TextClip) -> Unit,
-  onOpenFullscreenInspect: () -> Unit
-) {
-  var selectedCategory by remember { mutableStateOf("Trending") }
-  var favoriteTemplateIds by remember { mutableStateOf(setOf("kinetic_burst", "neon_glow_master", "urdu_nastaliq_royal")) }
-  var viewColumns by remember { mutableStateOf(2) }
-
-  val displayedTemplates = remember(selectedCategory, favoriteTemplateIds) {
-    when (selectedCategory) {
-      "All" -> ALL_TEXT_TEMPLATES
-      "Favorites" -> ALL_TEXT_TEMPLATES.filter { it.id in favoriteTemplateIds }
-      "Trending" -> ALL_TEXT_TEMPLATES.filter {
-        it.category.equals("Trending", ignoreCase = true) || it.isTrending || it.tags.contains("Trending", ignoreCase = true)
-      }
-      else -> ALL_TEXT_TEMPLATES.filter { it.category.equals(selectedCategory, ignoreCase = true) }
-    }
-  }
-
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    // 28 Category Filter Pills
-    val categoryPills = listOf(
-      "Trending" to "Trending 🔥",
-      "Favorites" to "Favorites ❤️",
-      "Kinetic" to "Kinetic ⚡",
-      "Minimal" to "Minimal ✨",
-      "Neon" to "Neon 💡",
-      "3D" to "3D 🧊",
-      "Cinematic" to "Cinematic 🎬",
-      "Glow" to "Glow 🌟",
-      "Typewriter" to "Typewriter ⌨️",
-      "Social Media" to "Social 📱",
-      "Vlog" to "Vlog 📹",
-      "Urdu" to "Urdu 🇵🇰",
-      "Arabic" to "Arabic 🇸🇦",
-      "Business" to "Business 💼",
-      "Travel" to "Travel ✈️",
-      "Motivation" to "Motivation 🏆",
-      "Sports" to "Sports ⚽",
-      "Gaming" to "Gaming 🎮",
-      "Luxury" to "Luxury 💎",
-      "Fashion" to "Fashion 👗",
-      "Music" to "Music 🎵",
-      "News" to "News 📰",
-      "Sale" to "Sale 🏷️",
-      "Intro" to "Intro 👋",
-      "Outro" to "Outro 🎬",
-      "Creative" to "Creative 🎨",
-      "All" to "All 130+"
-    )
-
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      contentPadding = PaddingValues(vertical = 2.dp)
-    ) {
-      items(categoryPills) { (catKey, catLabel) ->
-        val isSelected = selectedCategory == catKey
-        val bgBrush = if (isSelected) {
-          Brush.horizontalGradient(listOf(Color(0xFF1E68F6), Color(0xFF00A3FF)))
-        } else {
-          SolidColor(Color(0xFF0F172A))
-        }
-
-        Surface(
-          onClick = { selectedCategory = catKey },
-          shape = RoundedCornerShape(20.dp),
-          color = Color.Transparent,
-          border = if (isSelected) null else BorderStroke(1.dp, Color(0xFF1E293B))
-        ) {
-          Box(
-            modifier = Modifier
-              .background(bgBrush)
-              .padding(horizontal = 14.dp, vertical = 7.dp)
-          ) {
-            Text(
-              text = catLabel,
-              fontSize = 12.sp,
-              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-              color = Color.White
-            )
-          }
-        }
-      }
-    }
-
-    // Section Title & Grid Toggle
+    // 2. TEXT INPUT ROW: [ Enter text           ⤢ ]   [ ✓ ]
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      Text(
-        text = "🎨 $selectedCategory (${displayedTemplates.size} Templates)",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-      )
-
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-          text = "Tap to apply",
-          style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
-        )
-
-        IconButton(
-          onClick = { viewColumns = if (viewColumns == 2) 1 else 2 },
-          modifier = Modifier
-            .size(32.dp)
-            .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
-            .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
-        ) {
-          Icon(
-            if (viewColumns == 2) Icons.Default.ViewAgenda else Icons.Default.GridView,
-            contentDescription = "Toggle Grid/List View",
-            tint = CyanAccent,
-            modifier = Modifier.size(16.dp)
-          )
-        }
-      }
-    }
-
-    // Live Template Cards Vertical Grid Layout
-    if (displayedTemplates.isEmpty()) {
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(120.dp),
-        contentAlignment = Alignment.Center
+      // Input Container with expand icon inside
+      Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFF1B1F2B),
+        border = BorderStroke(1.dp, Color(0xFF2B3245)),
+        modifier = Modifier.weight(1f).height(44.dp)
       ) {
-        Text("No templates found in $selectedCategory", color = TextSecondary, fontSize = 12.sp)
-      }
-    } else {
-      Box(modifier = Modifier.fillMaxWidth().height(340.dp)) {
-        LazyVerticalGrid(
-          columns = GridCells.Fixed(viewColumns),
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-          contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-          modifier = Modifier.fillMaxSize()
-        ) {
-          items(displayedTemplates, key = { it.id }) { tpl ->
-            val isSelected = clip.fontFamily.equals(tpl.fontFamily, true) && clip.textColor == tpl.textColor
-            val isFav = tpl.id in favoriteTemplateIds
-
-            LiveAnimatedTemplateCard(
-              template = tpl,
-              userTextOverride = userTextOverride,
-              isSelected = isSelected,
-              isFavorite = isFav,
-              onToggleFavorite = {
-                favoriteTemplateIds = if (isFav) favoriteTemplateIds - tpl.id else favoriteTemplateIds + tpl.id
-              },
-              onClick = {
-                val textToKeep = if (clip.text.isBlank() || clip.text == "Tap to edit" || clip.text == "Your Text Here") {
-                  tpl.sampleText
-                } else clip.text
-
-                onApplyTemplate(
-                  clip.copy(
-                    text = textToKeep,
-                    fontFamily = tpl.fontFamily,
-                    fontSizeSp = tpl.fontSizeSp,
-                    fontWeight = tpl.fontWeight,
-                    isItalic = tpl.isItalic,
-                    isUnderline = tpl.isUnderline,
-                    isAllCaps = tpl.isAllCaps,
-                    alignment = tpl.alignment,
-                    letterSpacing = tpl.letterSpacing,
-                    lineSpacing = tpl.lineSpacing,
-                    textColor = tpl.textColor,
-                    hasGradient = tpl.hasGradient,
-                    gradientColorStart = tpl.gradientColorStart,
-                    gradientColorEnd = tpl.gradientColorEnd,
-                    gradientDirection = tpl.gradientDirection,
-                    strokeWidth = tpl.strokeWidth,
-                    strokeColor = tpl.strokeColor,
-                    hasShadow = tpl.hasShadow,
-                    shadowColor = tpl.shadowColor,
-                    shadowBlur = tpl.shadowBlur,
-                    shadowOffsetX = tpl.shadowOffsetX,
-                    shadowOffsetY = tpl.shadowOffsetY,
-                    hasBackground = tpl.hasBackground,
-                    backgroundColor = tpl.backgroundColor,
-                    cornerRadius = tpl.cornerRadius,
-                    bgPadding = tpl.bgPadding,
-                    opacity = tpl.opacity,
-                    animationType = tpl.animationType,
-                    animDurationMs = tpl.animDurationMs
-                  )
-                )
-              },
-              modifier = Modifier.fillMaxWidth()
-            )
-          }
-        }
-      }
-    }
-  }
-}
-
-// -------------------------------------------------------------
-// LIVE ANIMATED TEMPLATE CARD COMPONENT
-// -------------------------------------------------------------
-@Composable
-private fun LiveAnimatedTemplateCard(
-  template: TextTemplateItem,
-  userTextOverride: String,
-  isSelected: Boolean,
-  isFavorite: Boolean,
-  onToggleFavorite: () -> Unit,
-  onClick: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  val context = LocalContext.current
-  val shape = RoundedCornerShape(14.dp)
-
-  val displayText = if (userTextOverride.isNotBlank() && userTextOverride != "Tap to edit" && userTextOverride != "Your Text Here") {
-    userTextOverride
-  } else {
-    template.sampleText
-  }
-
-  val primaryConfig = remember(template, displayText) {
-    template.toPrimaryLayerConfig().copy(text = displayText)
-  }
-  val primaryClip = remember(primaryConfig) {
-    primaryConfig.toTextClip(timelineStartMs = 0L, durationMs = 3000L)
-  }
-
-  val infiniteTransition = rememberInfiniteTransition(label = "tpl_card_anim_${template.id}_${displayText.hashCode()}")
-  val animLoopMs by infiniteTransition.animateFloat(
-    initialValue = 0f,
-    targetValue = 2400f,
-    animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 2400, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
-    ),
-    label = "tpl_loop_ms"
-  )
-
-  Card(
-    modifier = modifier
-      .fillMaxWidth()
-      .clip(shape)
-      .clickable { onClick() },
-    shape = shape,
-    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1424)),
-    border = BorderStroke(
-      width = if (isSelected) 2.dp else 1.dp,
-      color = if (isSelected) Color(0xFF00C2FF) else Color(0xFF1E293B)
-    )
-  ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-      // Live Animated Canvas Box
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(110.dp)
-          .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-          .background(Color(0xFF030712))
-      ) {
-        // Real Live Animated Vector Canvas
-        Canvas(modifier = Modifier.fillMaxSize()) {
-          val nativeCanvas = drawContext.canvas.nativeCanvas
-          val w = size.width.toInt()
-          val h = size.height.toInt()
-          if (w > 0 && h > 0) {
-            TextLayerRenderer.drawTemplatePreview(
-              canvas = nativeCanvas,
-              clip = primaryClip,
-              previewLoopMs = animLoopMs.toLong(),
-              width = w,
-              height = h,
-              context = context
-            )
-          }
-        }
-
-        // Badge Emoji & HD/PRO (Top Left)
         Row(
           modifier = Modifier
-            .padding(6.dp)
-            .align(Alignment.TopStart),
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Surface(
-            shape = RoundedCornerShape(4.dp),
-            color = if (template.hdOrPro.equals("PRO", true)) Color(0xFFF59E0B) else Color(0xFF1E3A8A)
-          ) {
-            Text(
-              text = "${template.badgeEmoji} ${template.hdOrPro.uppercase()}",
-              fontSize = 8.sp,
-              fontWeight = FontWeight.Black,
-              color = if (template.hdOrPro.equals("PRO", true)) Color.Black else Color.White,
-              modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-            )
-          }
-        }
-
-        // Top Right Row: Cyan Diamond Badge & Favorite Toggle
-        Row(
-          modifier = Modifier
-            .padding(4.dp)
-            .align(Alignment.TopEnd),
+            .fillMaxSize()
+            .padding(horizontal = 12.dp),
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(2.dp)
+          horizontalArrangement = Arrangement.SpaceBetween
         ) {
-          if (template.isPremium || template.hdOrPro.equals("PRO", true)) {
-            Box(
-              modifier = Modifier
-                .size(16.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF00E5FF)),
-              contentAlignment = Alignment.Center
-            ) {
-              Text(
-                text = "◆",
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.Black
-              )
-            }
-          }
+          BasicTextField(
+            value = textInput,
+            onValueChange = { newText ->
+              textInput = newText
+              onUpdateClip(activeClip.copy(text = newText))
+            },
+            singleLine = true,
+            textStyle = TextStyle(
+              color = Color.White,
+              fontSize = 14.sp,
+              fontWeight = FontWeight.Medium
+            ),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { applyAndConfirm() }),
+            cursorBrush = SolidColor(CyanAccent),
+            decorationBox = { innerTextField ->
+              if (textInput.isEmpty()) {
+                Text(
+                  text = "Enter text",
+                  color = Color.White.copy(alpha = 0.4f),
+                  fontSize = 14.sp
+                )
+              }
+              innerTextField()
+            },
+            modifier = Modifier.weight(1f)
+          )
 
           IconButton(
-            onClick = onToggleFavorite,
-            modifier = Modifier.size(24.dp)
+            onClick = { showExpandedDialog = true },
+            modifier = Modifier.size(28.dp)
           ) {
             Icon(
-              imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-              contentDescription = "Favorite",
-              tint = if (isFavorite) Color(0xFFF43F5E) else Color.White.copy(alpha = 0.7f),
+              imageVector = Icons.Default.OpenInFull,
+              contentDescription = "Expand Text Editor",
+              tint = Color.White.copy(alpha = 0.7f),
               modifier = Modifier.size(16.dp)
             )
           }
         }
-      } // End Canvas Box
+      }
 
-      // Details Footer
-      Row(
+      // Checkmark Confirm Button
+      IconButton(
+        onClick = { applyAndConfirm() },
         modifier = Modifier
-          .fillMaxWidth()
-          .background(Color(0xFF0D1424))
-          .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+          .size(44.dp)
+          .clip(RoundedCornerShape(10.dp))
+          .background(Color(0xFF1E68F6))
       ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text(
-            text = template.name,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 11.sp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
-          Text(
-            text = "${template.category} • ${template.animationType}",
-            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
-        }
-
-        if (isSelected) {
-          Icon(Icons.Default.CheckCircle, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
-        }
-      }
-    }
-  }
-}
-
-// -------------------------------------------------------------
-// TAB 2: LIVE FONTS SECTION (Live Vector Canvas Typography)
-// -------------------------------------------------------------
-@Composable
-private fun LiveFontsTabSection(
-  clip: TextClip,
-  availableFonts: List<FontOption>,
-  onSelectFont: (fontId: String, customPath: String?) -> Unit,
-  onImportFont: () -> Unit
-) {
-  var selectedCategory by remember { mutableStateOf("Trending") }
-  val context = LocalContext.current
-
-  val displayedFonts = remember(selectedCategory, availableFonts) {
-    FontCatalog.getFontsForCategory(selectedCategory, availableFonts)
-  }
-
-  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    // Actions Row
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text(
-        text = "Typefaces & Typography",
-        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-      )
-
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (selectedCategory == "Brand Fonts") {
-          TextButton(
-            onClick = {
-              FontCatalog.addBrandFont(
-                BrandFontPreset(
-                  id = "brand_${System.currentTimeMillis()}",
-                  name = "Custom Brand Font",
-                  fontFamily = clip.fontFamily,
-                  customFontPath = clip.customFontPath,
-                  defaultColor = clip.textColor,
-                  fontWeight = clip.fontWeight
-                )
-              )
-            },
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-          ) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(2.dp))
-            Text("Save Brand Font", color = Color(0xFF10B981), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-          }
-        }
-
-        TextButton(
-          onClick = onImportFont,
-          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-        ) {
-          Icon(Icons.Default.FileOpen, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
-          Spacer(Modifier.width(2.dp))
-          Text("Import TTF/OTF", color = Color(0xFF10B981), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        }
-      }
-    }
-
-    // 8 Font Categories
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      contentPadding = PaddingValues(vertical = 2.dp)
-    ) {
-      items(FontCatalog.FONT_CATEGORIES) { cat ->
-        val isSelected = selectedCategory == cat
-        FilterChip(
-          selected = isSelected,
-          onClick = { selectedCategory = cat },
-          label = { Text(cat, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = Color(0xFF1E68F6).copy(alpha = 0.3f),
-            selectedLabelColor = Color(0xFF00C2FF),
-            containerColor = Color(0xFF162032),
-            labelColor = TextSecondary
-          ),
-          border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
-            selected = isSelected,
-            borderColor = Color(0xFF26354F),
-            selectedBorderColor = Color(0xFF00C2FF)
-          )
+        Icon(
+          imageVector = Icons.Default.Check,
+          contentDescription = "Apply Text",
+          tint = Color.White,
+          modifier = Modifier.size(22.dp)
         )
       }
     }
 
-    // Fonts Carousel
-    if (displayedFonts.isEmpty()) {
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(90.dp),
-        contentAlignment = Alignment.Center
-      ) {
-        if (selectedCategory == "My Fonts") {
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("No imported fonts yet.", color = TextSecondary, fontSize = 11.sp)
-            TextButton(onClick = onImportFont) {
-              Text("Tap here to import .ttf or .otf files", color = Color(0xFF00C2FF), fontSize = 11.sp)
-            }
-          }
-        } else {
-          Text("No fonts available in $selectedCategory", color = TextSecondary, fontSize = 11.sp)
-        }
-      }
-    } else {
-      LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(vertical = 2.dp)
-      ) {
-        items(displayedFonts) { fontOpt ->
-          val isSelected = clip.fontFamily.equals(fontOpt.id, true) ||
-            (clip.customFontPath != null && clip.customFontPath == fontOpt.filePath)
-
-          val fontSampleClip = remember(clip, fontOpt) {
-            clip.copy(fontFamily = fontOpt.id, customFontPath = fontOpt.filePath)
-          }
-
-          val infiniteTransition = rememberInfiniteTransition(label = "font_anim_${fontOpt.id}")
-          val animLoopMs by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 2400f,
-            animationSpec = infiniteRepeatable(
-              animation = tween(durationMillis = 2400, easing = LinearEasing),
-              repeatMode = RepeatMode.Restart
-            ),
-            label = "font_loop_ms"
+    // 3. TOP HORIZONTAL NAVIGATION TABS: Templates | Fonts | Styles | Effects | Animations | Bubbles
+    LazyRow(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(16.dp),
+      contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+      items(TextEditorSecondaryTab.values()) { tab ->
+        val isSelected = activeTab == tab
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          modifier = Modifier
+            .clickable { activeTab = tab }
+            .padding(vertical = 4.dp)
+        ) {
+          Text(
+            text = tab.label,
+            fontSize = 13.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f)
           )
-
-          Card(
+          Spacer(modifier = Modifier.height(4.dp))
+          // Cyan underline indicator
+          Box(
             modifier = Modifier
-              .width(160.dp)
-              .height(110.dp)
-              .clip(RoundedCornerShape(12.dp))
-              .clickable { onSelectFont(fontOpt.id, fontOpt.filePath) },
-            colors = CardDefaults.cardColors(
-              containerColor = if (isSelected) Color(0xFF1E68F6).copy(alpha = 0.25f) else Color(0xFF162032)
-            ),
-            border = BorderStroke(
-              if (isSelected) 2.dp else 1.dp,
-              if (isSelected) Color(0xFF00C2FF) else Color(0xFF26354F)
-            )
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-              verticalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = fontOpt.name,
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-                  modifier = Modifier.weight(1f)
-                )
-                if (isSelected) {
-                  Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF00C2FF), modifier = Modifier.size(14.dp))
-                }
-              }
-
-              // Live Animated Canvas Rendering for the font
-              Box(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(65.dp)
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(Color(0xFF030712))
-              ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                  val nativeCanvas = drawContext.canvas.nativeCanvas
-                  val w = size.width.toInt()
-                  val h = size.height.toInt()
-                  if (w > 0 && h > 0) {
-                    TextLayerRenderer.drawTemplatePreview(
-                      canvas = nativeCanvas,
-                      clip = fontSampleClip,
-                      previewLoopMs = animLoopMs.toLong(),
-                      width = w,
-                      height = h,
-                      context = context
-                    )
-                  }
-                }
-              }
-            }
-          }
+              .width(if (isSelected) 28.dp else 0.dp)
+              .height(2.5.dp)
+              .clip(RoundedCornerShape(2.dp))
+              .background(if (isSelected) CyanAccent else Color.Transparent)
+          )
         }
       }
     }
-  }
-}
 
-// -------------------------------------------------------------
-// TAB 3: LIVE STYLES SECTION
-// -------------------------------------------------------------
-@Composable
-private fun LiveStylesTabSection(
-  clip: TextClip,
-  onUpdate: (TextClip) -> Unit
-) {
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    // Quick Style Presets Row
-    Text("Live Style Presets", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-    val stylePresets = listOf(
-      "Clean White" to Pair(0xFFFFFFFFL, false),
-      "Glow Neon" to Pair(0xFF00E5FFL, true),
-      "Gold Luxury" to Pair(0xFFFFD700L, true),
-      "Hot Pink" to Pair(0xFFFF007FL, true),
-      "Emerald Green" to Pair(0xFF10B981L, false),
-      "Cyber Purple" to Pair(0xFF8B5CF6L, true)
+    // 4. SUB-CATEGORY FILTER CHIPS (Search, Shield, Bookmark, Trending, Whimsical, KATSEYE, Promo, Social, Titles, etc.)
+    val categoryChips = listOf(
+      "Trending" to "Trending",
+      "Whimsical" to "Whimsical",
+      "KATSEYE" to "KATSEYE 👠",
+      "Promo" to "Promo",
+      "Social" to "Social",
+      "Titles" to "Titles",
+      "Vlog" to "Vlog",
+      "3D & Neon" to "3D & Neon",
+      "Urdu" to "Urdu 🇵🇰",
+      "All" to "All"
     )
 
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      items(stylePresets) { (name, props) ->
-        val colorHex = props.first
-        val glow = props.second
+    LazyRow(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      contentPadding = PaddingValues(horizontal = 2.dp)
+    ) {
+      // 1. Search icon chip
+      item {
         Surface(
-          onClick = {
-            onUpdate(
-              clip.copy(
-                textColor = colorHex,
-                hasShadow = glow,
-                shadowColor = if (glow) colorHex else 0xFF000000,
-                shadowBlur = if (glow) 12f else 4f
-              )
+          shape = CircleShape,
+          color = if (showSearchField) CyanAccent else Color(0xFF1A1E29),
+          border = BorderStroke(1.dp, Color(0xFF2B3142)),
+          modifier = Modifier
+            .size(30.dp)
+            .clickable { showSearchField = !showSearchField }
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = Icons.Default.Search,
+              contentDescription = "Search",
+              tint = if (showSearchField) Color.Black else Color.White.copy(alpha = 0.8f),
+              modifier = Modifier.size(15.dp)
             )
-          },
-          shape = RoundedCornerShape(8.dp),
-          color = Color(colorHex).copy(alpha = 0.2f),
-          border = BorderStroke(1.dp, Color(colorHex))
+          }
+        }
+      }
+
+      // 2. Shield / Pro Filter Chip
+      item {
+        Surface(
+          shape = CircleShape,
+          color = if (selectedCategoryChip == "Pro") CyanAccent else Color(0xFF1A1E29),
+          border = BorderStroke(1.dp, Color(0xFF2B3142)),
+          modifier = Modifier
+            .size(30.dp)
+            .clickable { selectedCategoryChip = if (selectedCategoryChip == "Pro") "Trending" else "Pro" }
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = Icons.Default.Verified,
+              contentDescription = "Pro Templates",
+              tint = if (selectedCategoryChip == "Pro") Color.Black else Color.White.copy(alpha = 0.8f),
+              modifier = Modifier.size(15.dp)
+            )
+          }
+        }
+      }
+
+      // 3. Bookmark / Favorites Chip
+      item {
+        Surface(
+          shape = CircleShape,
+          color = if (selectedCategoryChip == "Favorites") CyanAccent else Color(0xFF1A1E29),
+          border = BorderStroke(1.dp, Color(0xFF2B3142)),
+          modifier = Modifier
+            .size(30.dp)
+            .clickable { selectedCategoryChip = if (selectedCategoryChip == "Favorites") "Trending" else "Favorites" }
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = Icons.Default.Bookmark,
+              contentDescription = "Saved",
+              tint = if (selectedCategoryChip == "Favorites") Color.Black else Color.White.copy(alpha = 0.8f),
+              modifier = Modifier.size(15.dp)
+            )
+          }
+        }
+      }
+
+      // 4. Text Category Chips
+      items(categoryChips) { (catId, catLabel) ->
+        val isSelected = selectedCategoryChip == catId
+        Surface(
+          shape = RoundedCornerShape(16.dp),
+          color = if (isSelected) Color(0xFF283046) else Color(0xFF161922),
+          border = BorderStroke(1.dp, if (isSelected) CyanAccent else Color(0xFF262C3D)),
+          modifier = Modifier.clickable { selectedCategoryChip = catId }
         ) {
           Text(
-            text = name,
+            text = catLabel,
             fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(colorHex),
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
           )
         }
       }
     }
 
-    // Format Toggles (B, I, U, TT)
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        FilterChip(
-          selected = clip.fontWeight >= 700,
-          onClick = { onUpdate(clip.copy(fontWeight = if (clip.fontWeight >= 700) 400 else 800)) },
-          label = { Text("B", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF1E68F6), selectedLabelColor = Color.White)
-        )
-        FilterChip(
-          selected = clip.isItalic,
-          onClick = { onUpdate(clip.copy(isItalic = !clip.isItalic)) },
-          label = { Text("I", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF1E68F6), selectedLabelColor = Color.White)
-        )
-        FilterChip(
-          selected = clip.isUnderline,
-          onClick = { onUpdate(clip.copy(isUnderline = !clip.isUnderline)) },
-          label = { Text("U", textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF1E68F6), selectedLabelColor = Color.White)
-        )
-        FilterChip(
-          selected = clip.isAllCaps,
-          onClick = { onUpdate(clip.copy(isAllCaps = !clip.isAllCaps)) },
-          label = { Text("TT", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-          colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF1E68F6), selectedLabelColor = Color.White)
-        )
-      }
-
-      Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        listOf("Left", "Center", "Right").forEach { align ->
-          FilterChip(
-            selected = clip.alignment.equals(align, true),
-            onClick = { onUpdate(clip.copy(alignment = align)) },
-            label = { Text(align, fontSize = 10.sp) },
-            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PurpleAccent, selectedLabelColor = Color.White)
-          )
-        }
-      }
-    }
-  }
-}
-
-// -------------------------------------------------------------
-// TAB 4: LIVE EFFECTS SECTION
-// -------------------------------------------------------------
-@Composable
-private fun LiveEffectsTabSection(
-  clip: TextClip,
-  onUpdate: (TextClip) -> Unit
-) {
-  val context = LocalContext.current
-
-  val effectsList = listOf(
-    "None" to Pair("Normal Default", clip.copy(subtitleStyle = "Classic", hasShadow = false, strokeWidth = 0f, hasGradient = false)),
-    "Neon Glow" to Pair("Cyber Neon Pulse", clip.copy(subtitleStyle = "Neon Glow", textColor = 0xFF00FFFF, hasShadow = true, shadowColor = 0xFF00FFFF, shadowBlur = 12f, strokeWidth = 2f, strokeColor = 0xFF003366)),
-    "3D Extrusion" to Pair("Isometric 3D Extruded", clip.copy(subtitleStyle = "3D Extrusion", hasShadow = true, shadowColor = 0xFF4C1D95, shadowOffsetX = 6f, shadowOffsetY = 6f, strokeWidth = 2.5f, strokeColor = 0xFF1E1035)),
-    "Chrome Metal" to Pair("Metallic Mirror Shine", clip.copy(subtitleStyle = "Chrome Metal", hasGradient = true, gradientColorStart = 0xFFE2E8F0, gradientColorEnd = 0xFF64748B, strokeWidth = 2f, strokeColor = 0xFF0F172A)),
-    "Comic Pop" to Pair("Retro Pop Art Halftone", clip.copy(subtitleStyle = "Comic Pop", textColor = 0xFFFFEA00, strokeWidth = 4f, strokeColor = 0xFF000000, hasShadow = true, shadowColor = 0xFFFF0055)),
-    "Glitch RGB" to Pair("Digital RGB Channel Shift", clip.copy(subtitleStyle = "Glitch RGB", animationType = "Shake", textColor = 0xFF00FFCC, strokeWidth = 2f, strokeColor = 0xFFFF0055)),
-    "Curved Arc" to Pair("Circular Curved Arc", clip.copy(subtitleStyle = "Curved Arc", textColor = 0xFFFFD700, strokeWidth = 1f)),
-    "Glassmorphism" to Pair("Frosted Translucent Blur", clip.copy(subtitleStyle = "Glassmorphism", hasBackground = true, backgroundColor = 0x88FFFFFF, cornerRadius = 12f, bgPadding = 10f))
-  )
-
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    Text("Artistic Live Text Effects", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold))
-
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      modifier = Modifier.fillMaxWidth()
-    ) {
-      items(effectsList) { (fxName, fxData) ->
-        val fxDesc = fxData.first
-        val fxClip = fxData.second
-        val isSelected = clip.subtitleStyle.equals(fxName, true) || (fxName == "None" && clip.subtitleStyle == "Classic")
-
-        val infiniteTransition = rememberInfiniteTransition(label = "fx_anim_$fxName")
-        val animLoopMs by infiniteTransition.animateFloat(
-          initialValue = 0f,
-          targetValue = 2400f,
-          animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-          ),
-          label = "fx_loop_ms"
-        )
-
-        Card(
-          modifier = Modifier
-            .width(150.dp)
-            .height(115.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onUpdate(fxClip) },
-          colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFF1E68F6).copy(alpha = 0.25f) else Color(0xFF162032)
-          ),
-          border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF00C2FF) else Color(0xFF26354F))
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .padding(6.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = fxName,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1
-              )
-              if (isSelected) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF00C2FF), modifier = Modifier.size(14.dp))
-              }
-            }
-
-            // Live Canvas Preview
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF030712))
-            ) {
-              Canvas(modifier = Modifier.fillMaxSize()) {
-                val nativeCanvas = drawContext.canvas.nativeCanvas
-                val w = size.width.toInt()
-                val h = size.height.toInt()
-                if (w > 0 && h > 0) {
-                  TextLayerRenderer.drawTemplatePreview(
-                    canvas = nativeCanvas,
-                    clip = fxClip,
-                    previewLoopMs = animLoopMs.toLong(),
-                    width = w,
-                    height = h,
-                    context = context
-                  )
-                }
-              }
-            }
-
-            Text(
-              text = fxDesc,
-              style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 8.sp),
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
-            )
-          }
-        }
-      }
-    }
-  }
-}
-
-// -------------------------------------------------------------
-// TAB 5: LIVE ANIMATIONS SECTION
-// -------------------------------------------------------------
-@Composable
-private fun LiveAnimationsTabSection(
-  clip: TextClip,
-  onUpdate: (TextClip) -> Unit
-) {
-  var animCategory by remember { mutableStateOf("In") }
-  val context = LocalContext.current
-
-  val inAnimations = listOf("Pop", "Fade", "Slide", "Zoom", "Bounce", "Typewriter", "Shake", "Drop", "Flip")
-  val outAnimations = listOf("Fade Out", "Slide Down", "Zoom Out", "Pop Out", "Wipe")
-  val loopAnimations = listOf("Pulse", "Float", "Shake Loop", "Wave", "Rainbow", "Glitch")
-
-  val currentList = when (animCategory) {
-    "In" -> inAnimations
-    "Out" -> outAnimations
-    else -> loopAnimations
-  }
-
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    // Category Chips & Duration Display
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("In", "Out", "Loop").forEach { cat ->
-          val isSelected = animCategory == cat
-          FilterChip(
-            selected = isSelected,
-            onClick = { animCategory = cat },
-            label = { Text(cat, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = Color(0xFF1E68F6),
-              selectedLabelColor = Color.White,
-              containerColor = Color(0xFF162032)
-            )
-          )
-        }
-      }
-
-      Text(
-        text = "Duration: ${(clip.animDurationMs / 1000f)}s",
-        style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF00C2FF), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-      )
-    }
-
-    // Live Animation Cards Carousel
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      modifier = Modifier.fillMaxWidth()
-    ) {
-      items(currentList) { anim ->
-        val isSelected = clip.animationType.equals(anim, true)
-        val animClip = remember(clip, anim) { clip.copy(animationType = anim) }
-
-        val infiniteTransition = rememberInfiniteTransition(label = "anim_preview_$anim")
-        val animLoopMs by infiniteTransition.animateFloat(
-          initialValue = 0f,
-          targetValue = 2400f,
-          animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-          ),
-          label = "anim_loop_ms"
-        )
-
-        Card(
-          modifier = Modifier
-            .width(135.dp)
-            .height(105.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onUpdate(clip.copy(animationType = anim)) },
-          colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFF1E68F6).copy(alpha = 0.25f) else Color(0xFF162032)
-          ),
-          border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) Color(0xFF00C2FF) else Color(0xFF26354F))
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .padding(6.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = anim,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1
-              )
-              if (isSelected) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF00C2FF), modifier = Modifier.size(14.dp))
-              }
-            }
-
-            // Live Canvas Preview
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF030712))
-            ) {
-              Canvas(modifier = Modifier.fillMaxSize()) {
-                val nativeCanvas = drawContext.canvas.nativeCanvas
-                val w = size.width.toInt()
-                val h = size.height.toInt()
-                if (w > 0 && h > 0) {
-                  TextLayerRenderer.drawTemplatePreview(
-                    canvas = nativeCanvas,
-                    clip = animClip,
-                    previewLoopMs = animLoopMs.toLong(),
-                    width = w,
-                    height = h,
-                    context = context
-                  )
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Animation Speed / Duration Slider
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text("Speed / Duration", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp))
-      Slider(
-        value = clip.animDurationMs.toFloat(),
-        onValueChange = { onUpdate(clip.copy(animDurationMs = it.toLong())) },
-        valueRange = 100f..3000f,
-        modifier = Modifier
-          .weight(1f)
-          .padding(horizontal = 12.dp),
-        colors = SliderDefaults.colors(thumbColor = Color(0xFF00C2FF), activeTrackColor = Color(0xFF1E68F6))
-      )
-    }
-  }
-}
-
-// -------------------------------------------------------------
-// FULLSCREEN LIVE INSPECTION PREVIEW MODAL
-// -------------------------------------------------------------
-@Composable
-private fun TextStudioFullscreenPreviewModal(
-  clip: TextClip,
-  onDismiss: () -> Unit,
-  onApplyToTimeline: () -> Unit
-) {
-  val context = LocalContext.current
-
-  var isPlaying by remember { mutableStateOf(true) }
-  var speedMultiplier by remember { mutableStateOf(1.0f) }
-  var replayTrigger by remember { mutableIntStateOf(0) }
-
-  Dialog(
-    onDismissRequest = onDismiss,
-    properties = DialogProperties(usePlatformDefaultWidth = false)
-  ) {
-    Surface(
-      modifier = Modifier.fillMaxSize(),
-      color = Color(0xFF030712)
-    ) {
-      Box(modifier = Modifier.fillMaxSize()) {
-        val infiniteTransition = rememberInfiniteTransition(label = "fs_anim_${clip.text.hashCode()}_$replayTrigger")
-        val animLoopMs by if (isPlaying) {
-          infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 2400f,
-            animationSpec = infiniteRepeatable(
-              animation = tween(durationMillis = 2400, easing = LinearEasing),
-              repeatMode = RepeatMode.Restart
-            ),
-            label = "fs_loop_ms"
-          )
-        } else {
-          remember { mutableFloatStateOf(1200f) }
-        }
-
-        // Fullscreen Live Canvas
-        Canvas(modifier = Modifier.fillMaxSize()) {
-          val nativeCanvas = drawContext.canvas.nativeCanvas
-          val w = size.width.toInt()
-          val h = size.height.toInt()
-          if (w > 0 && h > 0) {
-            TextLayerRenderer.drawTemplatePreview(
-              canvas = nativeCanvas,
-              clip = clip,
-              previewLoopMs = animLoopMs.toLong(),
-              width = w,
-              height = h,
-              context = context,
-              speedMultiplier = speedMultiplier
-            )
-          }
-        }
-
-        // Top Overlay Header
+    // Quick Search Input if expanded
+    if (showSearchField) {
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF161A24),
+        border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth().height(36.dp)
+      ) {
         Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(16.dp)
-            .align(Alignment.TopStart),
-          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = Color.Black.copy(alpha = 0.75f)
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(8.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFF00E5FF))
-              )
-              Text(
-                text = "FULLSCREEN LIVE INSPECTOR",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-              )
+          Icon(Icons.Default.Search, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(8.dp))
+          BasicTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            singleLine = true,
+            textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+            decorationBox = { inner ->
+              if (searchQuery.isEmpty()) Text("Search templates, fonts...", color = Color.Gray, fontSize = 12.sp)
+              inner()
+            },
+            modifier = Modifier.weight(1f)
+          )
+          if (searchQuery.isNotEmpty()) {
+            IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(20.dp)) {
+              Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color.Gray, modifier = Modifier.size(14.dp))
             }
           }
-
-          IconButton(
-            onClick = onDismiss,
-            modifier = Modifier
-              .size(36.dp)
-              .background(Color.Black.copy(alpha = 0.75f), CircleShape)
-          ) {
-            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-          }
         }
+      }
+    }
 
-        // Bottom Controls Bar
+    // 5. 4-COLUMN VISUAL IMAGE GRID (Replacing heavy text panels with graphical thumbnail cards)
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = 200.dp, max = 290.dp)
+    ) {
+      when (activeTab) {
+        TextEditorSecondaryTab.TEMPLATES -> {
+          VisualTemplatesGrid(
+            selectedCategory = selectedCategoryChip,
+            searchQuery = searchQuery,
+            activeClip = activeClip,
+            onSelectPreset = { preset ->
+              val textToUse = if (activeClip.text.isBlank() || activeClip.text == "Enter text") preset.sampleText else activeClip.text
+              val updated = activeClip.copy(
+                text = textToUse,
+                fontFamily = preset.fontFamily,
+                textColor = preset.textColor,
+                hasGradient = preset.hasGradient,
+                gradientColorStart = preset.gradientColorStart,
+                gradientColorEnd = preset.gradientColorEnd,
+                strokeWidth = preset.strokeWidth,
+                strokeColor = preset.strokeColor,
+                hasShadow = preset.hasShadow,
+                shadowColor = preset.shadowColor,
+                hasGlow = preset.hasGlow,
+                glowColor = preset.glowColor,
+                hasBackground = preset.hasBackground,
+                backgroundColor = preset.backgroundColor,
+                backgroundShape = preset.backgroundShape,
+                animationType = preset.animationType
+              )
+              onUpdateClip(updated)
+            }
+          )
+        }
+        TextEditorSecondaryTab.FONTS -> {
+          VisualFontsGrid(
+            activeClip = activeClip,
+            onSelectFont = { fontId, customPath ->
+              onUpdateClip(activeClip.copy(fontFamily = fontId, customFontPath = customPath))
+            },
+            onImportFont = { fontPickerLauncher.launch(arrayOf("*/*")) }
+          )
+        }
+        TextEditorSecondaryTab.STYLES -> {
+          VisualStylesGrid(
+            activeClip = activeClip,
+            onSelectStyle = { style ->
+              val updated = activeClip.copy(
+                textColor = style.textColor,
+                hasGradient = style.gradientStart != null,
+                gradientColorStart = style.gradientStart ?: style.textColor,
+                gradientColorEnd = style.gradientEnd ?: style.textColor,
+                strokeWidth = if (style.strokeColor != null) 3f else 0f,
+                strokeColor = style.strokeColor ?: 0xFF000000,
+                hasGlow = style.glowColor != null,
+                glowColor = style.glowColor ?: 0xFF00E5FF
+              )
+              onUpdateClip(updated)
+            }
+          )
+        }
+        TextEditorSecondaryTab.EFFECTS -> {
+          VisualEffectsGrid(
+            activeClip = activeClip,
+            onSelectEffect = { effect ->
+              val updated = activeClip.copy(
+                hasShadow = effect.shadow,
+                shadowBlur = if (effect.shadow) 8f else 0f,
+                hasGlow = effect.glow,
+                glowRadius = if (effect.glow) 12f else 0f,
+                strokeWidth = if (effect.stroke) 3.5f else 0f
+              )
+              onUpdateClip(updated)
+            }
+          )
+        }
+        TextEditorSecondaryTab.ANIMATIONS -> {
+          VisualAnimationsGrid(
+            activeClip = activeClip,
+            onSelectAnim = { animType ->
+              onUpdateClip(activeClip.copy(animationType = animType))
+            }
+          )
+        }
+        TextEditorSecondaryTab.BUBBLES -> {
+          VisualBubblesGrid(
+            activeClip = activeClip,
+            onSelectBubble = { bubble ->
+              val updated = activeClip.copy(
+                hasBackground = bubble.shape != "None",
+                backgroundShape = bubble.shape,
+                backgroundColor = bubble.bgColor
+              )
+              onUpdateClip(updated)
+            }
+          )
+        }
+      }
+    }
+  }
+
+  // Expanded multiline text editor modal if opened via ⤢ icon
+  if (showExpandedDialog) {
+    Dialog(
+      onDismissRequest = { showExpandedDialog = false },
+      properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+      Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF0F121C),
+        border = BorderStroke(1.dp, Color(0xFF262C3E)),
+        modifier = Modifier
+          .fillMaxWidth(0.92f)
+          .padding(16.dp)
+      ) {
         Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(16.dp)
-            .align(Alignment.BottomCenter)
-            .background(Color(0xFF0D1424).copy(alpha = 0.9f), RoundedCornerShape(16.dp))
-            .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
-            .padding(14.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp)
+          modifier = Modifier.padding(16.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
-              Text(
-                text = clip.text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-              )
-              Text(
-                text = "Font: ${clip.fontFamily} • Animation: ${clip.animationType}",
-                fontSize = 11.sp,
-                color = TextSecondary
-              )
-            }
-
-            // Speed Selector Pills
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-              listOf(0.5f, 1.0f, 1.5f, 2.5f).forEach { spd ->
-                val isSel = speedMultiplier == spd
-                Surface(
-                  onClick = { speedMultiplier = spd },
-                  shape = RoundedCornerShape(6.dp),
-                  color = if (isSel) Color(0xFF00C2FF) else Color(0xFF1E293B)
-                ) {
-                  Text(
-                    text = "${spd}x",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSel) Color.Black else Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                  )
-                }
-              }
+            Text("Edit Text Content", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+            IconButton(onClick = { showExpandedDialog = false }, modifier = Modifier.size(28.dp)) {
+              Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
             }
           }
 
+          BasicTextField(
+            value = textInput,
+            onValueChange = { newText ->
+              textInput = newText
+              onUpdateClip(activeClip.copy(text = newText))
+            },
+            textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+            cursorBrush = SolidColor(CyanAccent),
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 100.dp, max = 160.dp)
+              .background(Color(0xFF1A1F2D), RoundedCornerShape(8.dp))
+              .border(1.dp, Color(0xFF2C3448), RoundedCornerShape(8.dp))
+              .padding(12.dp)
+          )
+
+          Button(
+            onClick = {
+              showExpandedDialog = false
+              applyAndConfirm()
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E68F6)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text("Apply Text", fontWeight = FontWeight.Bold, color = Color.White)
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 4-Column Visual Templates Grid (Rendering visual graphical cards)
+ */
+@Composable
+private fun VisualTemplatesGrid(
+  selectedCategory: String,
+  searchQuery: String,
+  activeClip: TextClip,
+  onSelectPreset: (VisualTemplatePreset) -> Unit
+) {
+  val filteredPresets = remember(selectedCategory, searchQuery) {
+    VISUAL_CARD_PRESETS.filter { preset ->
+      val matchesCat = when (selectedCategory) {
+        "All" -> true
+        "Pro" -> preset.isPro
+        "Favorites" -> preset.isPro || preset.category == "Trending"
+        else -> preset.category.equals(selectedCategory, ignoreCase = true)
+      }
+      val matchesQuery = if (searchQuery.isBlank()) true else {
+        preset.name.contains(searchQuery, ignoreCase = true) ||
+          preset.sampleText.contains(searchQuery, ignoreCase = true) ||
+          preset.category.contains(searchQuery, ignoreCase = true)
+      }
+      matchesCat && matchesQuery
+    }
+  }
+
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(4),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+    contentPadding = PaddingValues(vertical = 4.dp),
+    modifier = Modifier.fillMaxSize()
+  ) {
+    items(filteredPresets, key = { it.id }) { preset ->
+      val isSelected = activeClip.fontFamily == preset.fontFamily && activeClip.textColor == preset.textColor
+      VisualThumbnailCard(
+        preset = preset,
+        isSelected = isSelected,
+        onClick = { onSelectPreset(preset) }
+      )
+    }
+  }
+}
+
+/**
+ * Visual Graphical Thumbnail Card Component (Rendering image/badge preview)
+ */
+@Composable
+private fun VisualThumbnailCard(
+  preset: VisualTemplatePreset,
+  isSelected: Boolean,
+  onClick: () -> Unit
+) {
+  Surface(
+    shape = RoundedCornerShape(8.dp),
+    color = Color(0xFF151821),
+    border = BorderStroke(
+      width = if (isSelected) 1.5.dp else 1.dp,
+      color = if (isSelected) CyanAccent else Color(0xFF222634)
+    ),
+    modifier = Modifier
+      .aspectRatio(1f)
+      .clickable { onClick() }
+  ) {
+    Box(
+      modifier = Modifier.fillMaxSize(),
+      contentAlignment = Alignment.Center
+    ) {
+      // Pro diamond badge at top right
+      if (preset.isPro) {
+        Box(
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(4.dp)
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(Color(0xFF00E5FF))
+        )
+      }
+
+      // Graphical Content per card type
+      when (preset.visualBadgeType) {
+        VisualCardType.DEFAULT -> {
+          Text(
+            text = "Default",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+          )
+        }
+        VisualCardType.SUBSCRIBE_CURSOR -> {
+          Box(
+            modifier = Modifier
+              .padding(4.dp)
+              .clip(RoundedCornerShape(4.dp))
+              .background(Color(0xFFDC2626))
+              .padding(horizontal = 6.dp, vertical = 3.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text("Subscribe", fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color.White)
+              Icon(Icons.Default.NearMe, contentDescription = null, tint = Color.White, modifier = Modifier.size(9.dp))
+            }
+          }
+        }
+        VisualCardType.THANKS_WATCHING_FRAME -> {
+          Box(
+            modifier = Modifier
+              .padding(4.dp)
+              .border(1.5.dp, Color(0xFFDC2626), RoundedCornerShape(2.dp))
+              .padding(horizontal = 4.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "THANKS FOR\nWATCHING",
+              fontSize = 7.sp,
+              fontWeight = FontWeight.Black,
+              color = Color.White,
+              textAlign = TextAlign.Center,
+              lineHeight = 9.sp
+            )
+          }
+        }
+        VisualCardType.EXPLORE_TAPE -> {
+          Box(
+            modifier = Modifier
+              .padding(4.dp)
+              .background(Color(0xFFFACC15), RoundedCornerShape(2.dp))
+              .padding(horizontal = 5.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "EXPLORE",
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Black,
+              color = Color.Black
+            )
+          }
+        }
+        VisualCardType.CLOUD_GLOW -> {
+          Box(
+            modifier = Modifier
+              .padding(4.dp)
+              .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+              .padding(horizontal = 6.dp, vertical = 3.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "CLOUD",
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Black,
+              color = Color.White
+            )
+          }
+        }
+        VisualCardType.TRUE_3D -> {
+          Text(
+            text = "TRUE",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFFFACC15),
+            modifier = Modifier.shadow(4.dp)
+          )
+        }
+        VisualCardType.GEOMETRIC_BARS -> {
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.width(2.dp).height(14.dp).background(Color.White))
+            Box(modifier = Modifier.width(2.dp).height(14.dp).background(Color.White))
+          }
+        }
+        VisualCardType.NOOK_BOLD -> {
+          Text(
+            text = "NOOK",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Black,
+            color = Color.White
+          )
+        }
+        VisualCardType.TRENDY_RING_PRO -> {
+          Box(
+            modifier = Modifier
+              .size(36.dp)
+              .border(1.5.dp, Color(0xFFEF4444), CircleShape),
+            contentAlignment = Alignment.Center
+          ) {
+            Text("TRENDY", fontSize = 6.5.sp, fontWeight = FontWeight.Black, color = Color.White)
+          }
+        }
+        VisualCardType.SUBSCRIBE_ARROW_PRO -> {
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.ArrowOutward, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(10.dp))
+            Box(
+              modifier = Modifier
+                .background(Color(0xFFDC2626), RoundedCornerShape(2.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp)
+            ) {
+              Text("SUBSCRIBE", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+          }
+        }
+        VisualCardType.YOUR_TITLE_BRUSH_PRO -> {
+          Box(
+            modifier = Modifier
+              .background(Color(0xFFEAB308), RoundedCornerShape(2.dp))
+              .padding(horizontal = 4.dp, vertical = 2.dp)
+          ) {
+            Text("YOUR TITLE", fontSize = 7.sp, fontWeight = FontWeight.Black, color = Color.Black)
+          }
+        }
+        VisualCardType.HIGHLIGHT_NEON -> {
+          Box(
+            modifier = Modifier
+              .background(
+                Brush.horizontalGradient(listOf(Color(0xFF3B82F6), Color(0xFFEC4899))),
+                RoundedCornerShape(3.dp)
+              )
+              .padding(horizontal = 5.dp, vertical = 2.dp)
+          ) {
+            Text("Highlight", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+        }
+        VisualCardType.W_EPISODE_TAG -> {
           Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+              .background(Color(0xFFDC2626), RoundedCornerShape(2.dp))
+              .padding(horizontal = 4.dp, vertical = 2.dp)
+          ) {
+            Text("W EPISODE", fontSize = 7.sp, fontWeight = FontWeight.Black, color = Color.White)
+          }
+        }
+        VisualCardType.UNLOCKED_BAR -> {
+          Row(
+            modifier = Modifier
+              .background(Color(0xFFE2E8F0), RoundedCornerShape(2.dp))
+              .padding(horizontal = 4.dp, vertical = 1.dp)
+          ) {
+            Text("UNLOCKED", fontSize = 6.5.sp, fontWeight = FontWeight.Black, color = Color.Black)
+          }
+        }
+        VisualCardType.NEW_POST_SCRIPT -> {
+          Text(
+            text = "New Post",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            fontStyle = FontStyle.Italic,
+            color = Color.White
+          )
+        }
+        VisualCardType.THANKS_UNDERLINE -> {
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("THANKS FOR\nWATCHING", fontSize = 6.sp, fontWeight = FontWeight.Black, color = Color.White, textAlign = TextAlign.Center)
+            Box(modifier = Modifier.width(24.dp).height(2.dp).background(Color(0xFFDC2626)))
+          }
+        }
+        VisualCardType.BEST_HIGHLIGHT -> {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color(0xFFDC2626)))
+            Spacer(Modifier.width(2.dp))
+            Text("Best Highlight", fontSize = 6.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+        }
+        VisualCardType.SUBSCRIBE_PLAY -> {
+          Row(
+            modifier = Modifier
+              .background(Color(0xFFDC2626), RoundedCornerShape(3.dp))
+              .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              IconButton(
-                onClick = { replayTrigger++ },
-                modifier = Modifier
-                  .size(38.dp)
-                  .background(Color(0xFF1E293B), CircleShape)
-              ) {
-                Icon(Icons.Default.Replay, contentDescription = "Replay", tint = Color.White)
-              }
-
-              IconButton(
-                onClick = { isPlaying = !isPlaying },
-                modifier = Modifier
-                  .size(38.dp)
-                  .background(Color(0xFF00C2FF), CircleShape)
-              ) {
-                Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.Black)
-              }
-            }
-
-            Button(
-              onClick = onApplyToTimeline,
-              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E68F6), contentColor = Color.White),
-              shape = RoundedCornerShape(10.dp)
-            ) {
-              Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-              Spacer(Modifier.width(6.dp))
-              Text("Apply to Canvas & Timeline", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
+            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(8.dp))
+            Text("Subscribe", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = Color.White)
           }
+        }
+        VisualCardType.SHOW_3D_YELLOW -> {
+          Text(
+            text = "SHOW",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFFFACC15)
+          )
+        }
+        VisualCardType.YOUTUBE_BELL -> {
+          Row(
+            modifier = Modifier
+              .background(Color(0xFFDC2626), RoundedCornerShape(3.dp))
+              .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(Icons.Default.Notifications, contentDescription = null, tint = Color.White, modifier = Modifier.size(8.dp))
+            Spacer(Modifier.width(1.dp))
+            Text("SUB", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = Color.White)
+          }
+        }
+        VisualCardType.KATSEYE_GLAM -> {
+          Text(
+            text = "KATSEYE ✨",
+            fontSize = 7.5.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFFF43F5E)
+          )
+        }
+        VisualCardType.WHIMSICAL_FAIRY -> {
+          Text(
+            text = "WHIMSICAL",
+            fontSize = 7.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFA78BFA)
+          )
+        }
+        VisualCardType.CYBERPUNK_GLITCH -> {
+          Text(
+            text = "CYBER",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFF00E5FF)
+          )
+        }
+        VisualCardType.VLOG_MINIMAL -> {
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("VLOG", fontSize = 9.sp, fontWeight = FontWeight.Light, color = Color.White)
+            Box(modifier = Modifier.width(16.dp).height(1.dp).background(Color.White.copy(alpha = 0.6f)))
+          }
+        }
+        VisualCardType.CINEMATIC_GOLD -> {
+          Text(
+            text = "CINEMA",
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFFCD34D)
+          )
+        }
+        VisualCardType.BREAKING_NEWS -> {
+          Box(
+            modifier = Modifier
+              .background(Color(0xFFB91C1C), RoundedCornerShape(2.dp))
+              .padding(horizontal = 3.dp, vertical = 1.dp)
+          ) {
+            Text("NEWS", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color.White)
+          }
+        }
+        VisualCardType.URDU_CALLIGRAPHY -> {
+          Text(
+            text = "خوش آمدید",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF38BDF8)
+          )
+        }
+        VisualCardType.FIRE_FLAME -> {
+          Text(
+            text = "FIRE 🔥",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFFF97316)
+          )
+        }
+        VisualCardType.HOLOGRAM_CYAN -> {
+          Text(
+            text = "HOLO",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF22D3EE)
+          )
+        }
+        VisualCardType.GLITCH_MATRIX -> {
+          Text(
+            text = "MATRIX",
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF22C55E)
+          )
+        }
+        VisualCardType.LUXURY_DIAMOND -> {
+          Text(
+            text = "LUXURY 💎",
+            fontSize = 7.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFE2E8F0)
+          )
+        }
+        VisualCardType.RETRO_80S -> {
+          Text(
+            text = "RETRO",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFFEC4899)
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 4-Column Visual Fonts Grid
+ */
+@Composable
+private fun VisualFontsGrid(
+  activeClip: TextClip,
+  onSelectFont: (String, String?) -> Unit,
+  onImportFont: () -> Unit
+) {
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(4),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+    contentPadding = PaddingValues(vertical = 4.dp),
+    modifier = Modifier.fillMaxSize()
+  ) {
+    // Import Font Button
+    item {
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF1B2234),
+        border = BorderStroke(1.dp, Color(0xFF2B3A5A)),
+        modifier = Modifier
+          .aspectRatio(1f)
+          .clickable { onImportFont() }
+      ) {
+        Column(
+          modifier = Modifier.fillMaxSize(),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Icon(Icons.Default.Add, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
+          Text("Import", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+      }
+    }
+
+    items(VISUAL_FONT_PRESETS, key = { it.id }) { font ->
+      val isSelected = activeClip.fontFamily == font.id
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF151821),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) CyanAccent else Color(0xFF222634)),
+        modifier = Modifier
+          .aspectRatio(1f)
+          .clickable { onSelectFont(font.id, null) }
+      ) {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(4.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Text(
+            text = "Aa",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (isSelected) CyanAccent else Color.White
+          )
+          Spacer(Modifier.height(2.dp))
+          Text(
+            text = font.name,
+            fontSize = 8.sp,
+            color = Color.White.copy(alpha = 0.7f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 4-Column Visual Styles Grid (Color swatches & gradients)
+ */
+@Composable
+private fun VisualStylesGrid(
+  activeClip: TextClip,
+  onSelectStyle: (VisualStylePreset) -> Unit
+) {
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(4),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+    contentPadding = PaddingValues(vertical = 4.dp),
+    modifier = Modifier.fillMaxSize()
+  ) {
+    items(VISUAL_STYLE_PRESETS, key = { it.id }) { style ->
+      val isSelected = activeClip.textColor == style.textColor
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF151821),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) CyanAccent else Color(0xFF222634)),
+        modifier = Modifier
+          .aspectRatio(1f)
+          .clickable { onSelectStyle(style) }
+      ) {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(4.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Box(
+            modifier = Modifier
+              .size(24.dp)
+              .clip(CircleShape)
+              .background(
+                if (style.gradientStart != null && style.gradientEnd != null) {
+                  Brush.horizontalGradient(listOf(Color(style.gradientStart), Color(style.gradientEnd)))
+                } else {
+                  SolidColor(Color(style.textColor))
+                }
+              )
+              .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+          )
+          Spacer(Modifier.height(4.dp))
+          Text(
+            text = style.name,
+            fontSize = 8.sp,
+            color = Color.White.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 4-Column Visual Effects Grid
+ */
+@Composable
+private fun VisualEffectsGrid(
+  activeClip: TextClip,
+  onSelectEffect: (VisualEffectPreset) -> Unit
+) {
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(4),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+    contentPadding = PaddingValues(vertical = 4.dp),
+    modifier = Modifier.fillMaxSize()
+  ) {
+    items(VISUAL_EFFECT_PRESETS, key = { it.id }) { effect ->
+      val isSelected = (effect.shadow == activeClip.hasShadow) && (effect.glow == activeClip.hasGlow)
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF151821),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) CyanAccent else Color(0xFF222634)),
+        modifier = Modifier
+          .aspectRatio(1f)
+          .clickable { onSelectEffect(effect) }
+      ) {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(4.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Text(
+            text = "FX",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Black,
+            color = if (effect.glow) CyanAccent else if (effect.shadow) Color(0xFFFCD34D) else Color.White
+          )
+          Spacer(Modifier.height(4.dp))
+          Text(
+            text = effect.name,
+            fontSize = 8.sp,
+            color = Color.White.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 4-Column Visual Animations Grid
+ */
+@Composable
+private fun VisualAnimationsGrid(
+  activeClip: TextClip,
+  onSelectAnim: (String) -> Unit
+) {
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(4),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+    contentPadding = PaddingValues(vertical = 4.dp),
+    modifier = Modifier.fillMaxSize()
+  ) {
+    items(VISUAL_ANIMATION_PRESETS, key = { it.id }) { anim ->
+      val isSelected = activeClip.animationType.equals(anim.type, ignoreCase = true)
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF151821),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) CyanAccent else Color(0xFF222634)),
+        modifier = Modifier
+          .aspectRatio(1f)
+          .clickable { onSelectAnim(anim.type) }
+      ) {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(4.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Text(
+            text = anim.iconEmoji,
+            fontSize = 16.sp
+          )
+          Spacer(Modifier.height(3.dp))
+          Text(
+            text = anim.name,
+            fontSize = 8.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = if (isSelected) CyanAccent else Color.White.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 4-Column Visual Bubbles Grid
+ */
+@Composable
+private fun VisualBubblesGrid(
+  activeClip: TextClip,
+  onSelectBubble: (VisualBubblePreset) -> Unit
+) {
+  LazyVerticalGrid(
+    columns = GridCells.Fixed(4),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+    contentPadding = PaddingValues(vertical = 4.dp),
+    modifier = Modifier.fillMaxSize()
+  ) {
+    items(VISUAL_BUBBLE_PRESETS, key = { it.id }) { bubble ->
+      val isSelected = activeClip.backgroundShape.equals(bubble.shape, ignoreCase = true)
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF151821),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) CyanAccent else Color(0xFF222634)),
+        modifier = Modifier
+          .aspectRatio(1f)
+          .clickable { onSelectBubble(bubble) }
+      ) {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(4.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Box(
+            modifier = Modifier
+              .size(24.dp)
+              .clip(RoundedCornerShape(4.dp))
+              .background(if (bubble.bgColor != 0x00000000L) Color(bubble.bgColor) else Color.Transparent)
+              .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
+            contentAlignment = Alignment.Center
+          ) {
+            Text("💬", fontSize = 10.sp)
+          }
+          Spacer(Modifier.height(4.dp))
+          Text(
+            text = bubble.name,
+            fontSize = 8.sp,
+            color = Color.White.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
         }
       }
     }

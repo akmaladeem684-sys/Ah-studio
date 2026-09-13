@@ -799,20 +799,20 @@ internal fun calculateExportDimensions(res: Resolution, aspect: AspectRatio): Pa
     Resolution.RES_VERTICAL_2K -> Pair(1440, 2560)
     Resolution.RES_VERTICAL_4K -> Pair(2160, 3840)
     else -> {
-      val shortSide = res.width
-      val longSide = res.height
+      val shortSide = minOf(res.width, res.height)
+      val longSide = maxOf(res.width, res.height)
       when (aspect) {
         AspectRatio.RATIO_9_16 -> Pair(shortSide, longSide)
         AspectRatio.RATIO_16_9 -> Pair(longSide, shortSide)
-        AspectRatio.RATIO_1_1 -> Pair(shortSide, shortSide)
+        AspectRatio.RATIO_1_1 -> Pair(longSide, longSide)
         AspectRatio.RATIO_4_5 -> Pair((shortSide * 4) / 5, shortSide)
         AspectRatio.RATIO_3_4 -> Pair((shortSide * 3) / 4, shortSide)
-        AspectRatio.CUSTOM -> Pair(shortSide, shortSide)
+        AspectRatio.CUSTOM -> Pair(longSide, shortSide)
       }
     }
   }
-  val alignedW = ((w + 15) / 16) * 16
-  val alignedH = ((h + 15) / 16) * 16
+  val alignedW = (w / 2) * 2
+  val alignedH = (h / 2) * 2
   return Pair(alignedW.coerceIn(320, 3840), alignedH.coerceIn(320, 3840))
 }
 

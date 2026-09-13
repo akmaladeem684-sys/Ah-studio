@@ -242,8 +242,9 @@ class VideoCompositionEngine(private val context: Context) {
     val isEffectHidden = timeline.trackSettings[TrackType.EFFECT]?.isHidden == true
     val activeEffects = if (!isEffectHidden) {
       timeline.effectClips.filter {
-        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-      }.map { clip ->
+        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs &&
+        (it.targetClipId == null || activeClip == null || it.targetClipId == activeClip.id)
+      }.sortedBy { it.timelineStartMs }.map { clip ->
         val relTime = posMs - clip.timelineStartMs
         val intensity = KeyframeInterpolator.interpolateEffectIntensity(clip, relTime)
         ComposedEffect(
@@ -256,8 +257,15 @@ class VideoCompositionEngine(private val context: Context) {
       }
     } else emptyList()
 
-    // Adjustments & Filters
-    val colorMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter, activeClip?.filter)
+    // Adjustments & Filters with active effect color matrix post-concatenated
+    val baseMatrix = ColorFilterGenerator.createCombinedMatrix(timeline.adjustments, timeline.filter, activeClip?.filter)
+    val colorMatrix = ColorMatrix(baseMatrix)
+    if (activeEffects.isNotEmpty()) {
+      val effectMat = VideoEffectRenderer.calculateEffectColorMatrix(activeEffects.map { it.clip }, posMs)
+      if (effectMat != null) {
+        colorMatrix.postConcat(effectMat)
+      }
+    }
     val colorFilter = ColorMatrixColorFilter(colorMatrix)
 
     val activeClipTransform = if (activeClip != null) {
@@ -326,6 +334,15 @@ class VideoCompositionEngine(private val context: Context) {
       } else {
         matrix.postScale(baseScale, baseScale)
         matrix.postTranslate(canvasWidth / 2f, canvasHeight / 2f)
+      }
+
+      // Apply accumulated camera motion from active effects (Shake, Zoom, Skater Zoom, Vertigo Dolly, Spin, Mirror)
+      if (frame.activeEffects.isNotEmpty()) {
+        val motion = VideoEffectRenderer.calculateMotionTransform(frame.activeEffects.map { it.clip }, frame.timelinePosMs)
+        matrix.postScale(motion.scaleX, motion.scaleY, canvasWidth / 2f, canvasHeight / 2f)
+        matrix.postRotate(motion.rotation, canvasWidth / 2f, canvasHeight / 2f)
+        matrix.postTranslate(motion.translationX * canvasWidth, motion.translationY * canvasHeight)
+        paint.alpha = ((paint.alpha / 255f) * motion.alpha * 255f).toInt().coerceIn(0, 255)
       }
 
       // Handle transition blending if active
@@ -461,64 +478,15 @@ class VideoCompositionEngine(private val context: Context) {
   }
 
   private fun drawVisualEffect(canvas: Canvas, effect: ComposedEffect, width: Int, height: Int) {
-    val intensity = effect.intensity
-    if (intensity <= 0.01f) return
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    when (effect.effectType) {
-      EffectType.FLASH -> {
-        val flashPhase = ((effect.timeInEffectMs % 400L).toFloat() / 400f)
-        val flashAlpha = ((1f - flashPhase) * (1f - flashPhase) * intensity * 220f).toInt().coerceIn(0, 255)
-        p.color = Color.WHITE
-        p.alpha = flashAlpha
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
-      }
-      EffectType.GLOW -> {
-        p.color = Color.CYAN
-        p.alpha = (intensity * 45f).toInt().coerceIn(0, 255)
-        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
-      }
-      EffectType.LIGHT_LEAK -> {
-        val shader = RadialGradient(
-          width * 0.15f, height * 0.15f, width * 0.7f,
-          intArrayOf(Color.argb((intensity * 160).toInt().coerceIn(0, 255), 255, 140, 50), Color.TRANSPARENT),
-          null, Shader.TileMode.CLAMP
-        )
-        p.shader = shader
-        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), p)
-      }
-      EffectType.LENS_FLARE -> {
-        val centerX = width * 0.4f
-        val centerY = height * 0.35f
-        p.color = Color.argb((intensity * 180).toInt().coerceIn(0, 255), 255, 230, 160)
-        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-        canvas.drawCircle(centerX, centerY, width * 0.12f, p)
-        // Anamorphic horizontal streak
-        val streakPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          color = Color.argb((intensity * 120).toInt().coerceIn(0, 255), 180, 220, 255)
-          xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-        }
-        canvas.drawRect(0f, centerY - 3f, width.toFloat(), centerY + 3f, streakPaint)
-      }
-      EffectType.RGB_SPLIT, EffectType.GLITCH -> {
-        val splitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-          shader = LinearGradient(
-            0f, 0f, width.toFloat(), 0f,
-            intArrayOf(
-              Color.argb((intensity * 50).toInt().coerceIn(0, 255), 255, 0, 50),
-              Color.TRANSPARENT,
-              Color.argb((intensity * 50).toInt().coerceIn(0, 255), 0, 100, 255)
-            ),
-            null, Shader.TileMode.CLAMP
-          )
-          xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-        }
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), splitPaint)
-      }
-      else -> {}
-    }
+    if (effect.intensity <= 0.01f) return
+    VideoEffectRenderer.renderSingleEffect(
+      canvas = canvas,
+      effect = effect.clip,
+      intensity = effect.intensity,
+      relTime = effect.timeInEffectMs,
+      width = width,
+      height = height
+    )
   }
 
   private fun drawTextClip(canvas: Canvas, composedText: ComposedText, width: Int, height: Int) {

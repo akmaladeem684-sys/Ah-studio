@@ -690,14 +690,18 @@ fun FiltersToolPanel(
 ) {
   val timeline by viewModel.timelineEngine.timeline.collectAsState()
   val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
+  val currentPosMs by viewModel.timelineEngine.currentPositionMs.collectAsState()
   
-  // Identify selected clip if any
-  val selectedClip = remember(timeline, selectedElement) {
-    when (selectedElement) {
+  // Identify selected clip if any, or active clip under playhead
+  val selectedClip = remember(timeline, selectedElement, currentPosMs) {
+    val fromSelection = when (selectedElement) {
       is SelectedTrackElement.Video -> timeline.videoClips.find { it.id == (selectedElement as SelectedTrackElement.Video).clipId }
       is SelectedTrackElement.Overlay -> timeline.overlayClips.find { it.id == (selectedElement as SelectedTrackElement.Overlay).clipId }
       else -> null
     }
+    fromSelection
+      ?: timeline.videoClips.find { currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs }
+      ?: timeline.videoClips.firstOrNull()
   }
 
   // Active filter either from selected clip or global timeline filter

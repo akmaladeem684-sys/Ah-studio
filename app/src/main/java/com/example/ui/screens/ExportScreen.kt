@@ -56,6 +56,7 @@ fun ExportScreen(
   val defaultFps by viewModel.activeFps.collectAsState()
   val projectName by viewModel.activeProjectName.collectAsState()
   val aspectRatio by viewModel.activeAspectRatio.collectAsState()
+  val isTemplateCreatorMode by viewModel.isTemplateCreatorMode.collectAsState()
 
   var selectedResolution by remember { mutableStateOf(defaultRes) }
   var selectedFps by remember { mutableStateOf(defaultFps) }
@@ -89,7 +90,13 @@ fun ExportScreen(
     containerColor = StudioDarkBg,
     topBar = {
       TopAppBar(
-        title = { Text("Export Project", color = TextPrimary, fontWeight = FontWeight.Bold) },
+        title = {
+          Text(
+            if (isTemplateCreatorMode) "Export Template (Publish)" else "Export Project",
+            color = TextPrimary,
+            fontWeight = FontWeight.Bold
+          )
+        },
         navigationIcon = {
           IconButton(onClick = { viewModel.navigateTo(AppScreen.EDITOR) }) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
@@ -606,14 +613,20 @@ fun ExportScreen(
                 // Option 2: Save as Template
                 Button(
                   onClick = { showSaveAsTemplateDialog = true },
-                  colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isTemplateCreatorMode) PurpleAccent else CyanAccent,
+                    contentColor = if (isTemplateCreatorMode) Color.White else Color.Black
+                  ),
                   modifier = Modifier
                     .fillMaxWidth()
                     .testTag("export_save_template_button")
                 ) {
-                  Icon(Icons.Default.Style, contentDescription = null, modifier = Modifier.size(18.dp))
+                  Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                   Spacer(modifier = Modifier.width(8.dp))
-                  Text("2. Save as Template to My Templates", fontWeight = FontWeight.Bold)
+                  Text(
+                    if (isTemplateCreatorMode) "★ Publish Template to Firebase" else "2. Publish as Template to Firebase",
+                    fontWeight = FontWeight.Bold
+                  )
                 }
 
                 // Option 3 & 4: TikTok Sharing & Direct Upload Row
@@ -739,13 +752,19 @@ fun ExportScreen(
   }
 
   if (showSaveAsTemplateDialog) {
+    val exportedFile = (exportState as? ExportState.Success)?.file
     com.example.ui.components.template.SaveAsTemplateDialog(
       currentTimeline = timeline,
       currentAspectRatio = aspectRatio,
       initialTitle = projectName,
+      exportedVideoFile = exportedFile,
       onDismiss = { showSaveAsTemplateDialog = false },
       onSaved = { tpl ->
         showSaveAsTemplateDialog = false
+        viewModel.exitTemplateCreatorMode()
+      },
+      onNavigateToTemplates = {
+        viewModel.navigateTo(AppScreen.HOME)
       }
     )
   }

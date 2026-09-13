@@ -63,6 +63,9 @@ import com.example.ui.components.navigation.*
 import coil.compose.AsyncImage
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.view.LayoutInflater
+import com.example.R
+import com.example.engine.composition.VideoEffectRenderer
 import com.example.data.presets.StockMediaCatalog
 import com.example.domain.model.*
 import com.example.engine.KeyframeInterpolator
@@ -246,128 +249,47 @@ fun EditorScreen(
         )
       },
     bottomBar = {
-      Column(modifier = Modifier.fillMaxWidth()) {
-        // Active Sub-Tool Panel (if opened)
-        AnimatedVisibility(
-          visible = activeTab != null,
-          enter = slideInVertically { it } + fadeIn(),
-          exit = slideOutVertically { it } + fadeOut()
-        ) {
-          when (activeTab) {
-            EditorToolbarTab.MEDIA -> MediaImportPanel(
-              viewModel = viewModel,
-              onDismiss = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.OVERLAY -> OverlayToolPanel(
-              viewModel = viewModel,
-              onDismiss = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.EDIT -> EditToolPanel(viewModel)
-            EditorToolbarTab.TRIM -> VideoTrimmingToolPanel(
-              viewModel = viewModel,
-              onDismiss = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.ADJUST -> AdjustToolPanel(viewModel)
-            EditorToolbarTab.SPEED -> com.example.ui.components.SpeedCurveToolPanel(
-              viewModel = viewModel,
-              onClose = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.MASK -> com.example.ui.components.MaskAndBlendToolPanel(
-              viewModel = viewModel,
-              onClose = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.AI -> com.example.ui.components.AiSuiteToolPanel(
-              viewModel = viewModel,
-              onClose = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.AI_MATTING -> com.example.ui.components.AiMattingToolPanel(
-              viewModel = viewModel,
-              onClose = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.ASSET_STORE -> com.example.ui.components.AssetStoreToolPanel(
-              viewModel = viewModel,
-              onClose = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.FILTERS -> FiltersToolPanel(viewModel)
-            EditorToolbarTab.EFFECTS -> EffectsToolPanel(viewModel)
-            EditorToolbarTab.TRANSITIONS -> TransitionsPanel(
-              viewModel = viewModel,
-              onStartDragTransition = { draggedTransitionType = it }
-            )
-            EditorToolbarTab.TEXT -> {
-              when (activeTextSubTool) {
-                TextSubTool.ADD_TEXT -> TextStudioPanel(
-                  viewModel = viewModel,
-                  onDismiss = { viewModel.setActiveToolbarTab(null) }
-                )
-                TextSubTool.AUTO_CAPTIONS -> CaptionsToolPanel(viewModel)
-                TextSubTool.STICKERS -> StickersToolPanel(viewModel)
-                TextSubTool.DRAW -> DrawToolPanel(
-                  viewModel = viewModel,
-                  onDismiss = { viewModel.setActiveToolbarTab(null) }
-                )
-                TextSubTool.TEXT_TEMPLATES -> TextTemplatesBrowserPanel(
-                  viewModel = viewModel,
-                  onDismiss = { viewModel.setActiveToolbarTab(null) }
-                )
-                TextSubTool.TEXT_TO_AUDIO -> TextToAudioToolPanel(
-                  viewModel = viewModel,
-                  onDismiss = { viewModel.setActiveToolbarTab(null) }
-                )
-                TextSubTool.AUTO_LYRICS -> AutoLyricsToolPanel(
-                  viewModel = viewModel,
-                  onDismiss = { viewModel.setActiveToolbarTab(null) }
-                )
-              }
+      // Bottom Navigation Bar (constant fixed height, never pushes or shrinks editor content)
+      if (activeTab == EditorToolbarTab.TEXT) {
+        TextToolsSubBar(
+          activeSubTool = activeTextSubTool,
+          onSelectSubTool = { activeTextSubTool = it },
+          onBackToMainMenu = { viewModel.setActiveToolbarTab(null) }
+        )
+      } else {
+        EditorBottomToolbar(
+          activeTab = activeTab,
+          onTabSelected = { tab ->
+            if (tab == EditorToolbarTab.TEXT) {
+              activeTextSubTool = TextSubTool.ADD_TEXT
             }
-            EditorToolbarTab.AUDIO -> com.example.ui.components.AdvancedAudioToolPanel(
-              viewModel = viewModel,
-              onClose = { viewModel.setActiveToolbarTab(null) }
-            )
-            EditorToolbarTab.VOLUME -> VolumeToolPanel(viewModel)
-            EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
-            EditorToolbarTab.CHROMA -> ChromaKeyPanel(viewModel)
-            EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
-            EditorToolbarTab.KEYFRAME -> KeyframeAnimationPanel(viewModel)
-            EditorToolbarTab.CAPTIONS -> CaptionsToolPanel(viewModel)
-            EditorToolbarTab.AI -> GenerateMediaToolPanel(viewModel)
-            EditorToolbarTab.AI_AVATAR -> AIAvatarToolPanel(viewModel)
-            EditorToolbarTab.BACKGROUND -> BackgroundToolPanel(viewModel)
-            EditorToolbarTab.ANIMATIONS -> AnimationsToolPanel(viewModel)
-            null -> {}
+            viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
+          },
+          onNavigateHome = {
+            viewModel.setActiveToolbarTab(null)
+            viewModel.timelineEngine.selectElement(SelectedTrackElement.None)
           }
-        }
-
-        // Bottom Navigation Bar: Switch to CapCut-style Sub-Bar when Text Tool is active
-        if (activeTab == EditorToolbarTab.TEXT) {
-          TextToolsSubBar(
-            activeSubTool = activeTextSubTool,
-            onSelectSubTool = { activeTextSubTool = it },
-            onBackToMainMenu = { viewModel.setActiveToolbarTab(null) }
-          )
-        } else {
-          EditorBottomToolbar(
-            activeTab = activeTab,
-            onTabSelected = { tab ->
-              if (tab == EditorToolbarTab.TEXT) {
-                activeTextSubTool = TextSubTool.ADD_TEXT
-              }
-              viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
-            },
-            onNavigateHome = {
-              viewModel.setActiveToolbarTab(null)
-              viewModel.timelineEngine.selectElement(SelectedTrackElement.None)
-            }
-          )
-        }
+        )
       }
-    }
+    },
+    contentWindowInsets = WindowInsets(0, 0, 0, 0)
   ) { padding ->
-    Column(
+    BoxWithConstraints(
       modifier = Modifier
         .fillMaxSize()
         .padding(padding)
     ) {
+      val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+      // Fixed, stable video preview height that never changes regardless of tool panels opening or tracks added
+      val fixedPreviewHeight = remember(maxHeight, isLandscape) {
+        if (isLandscape) (maxHeight * 0.65f).coerceIn(200.dp, 320.dp)
+        else (maxHeight * 0.44f).coerceIn(260.dp, 340.dp)
+      }
+
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+      ) {
       // Missing Media Warning Bar
       if (missingMediaList.isNotEmpty()) {
         Surface(
@@ -407,11 +329,11 @@ fun EditorScreen(
         }
       }
 
-      // 1. VIDEO PREVIEW CONTAINER (Clean, unobscured video surface for text, stickers & PIP)
+      // 1. VIDEO PREVIEW CONTAINER (Fixed stable height: never shrinks, jumps or reflows)
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .weight(2.8f)
+          .height(fixedPreviewHeight)
           .background(Color.Black)
           .testTag("video_preview_container"),
         contentAlignment = Alignment.Center
@@ -533,8 +455,39 @@ fun EditorScreen(
           }
         }
 
-        // Right side Spacer to maintain horizontal centering of play controls
-        Spacer(modifier = Modifier.width(72.dp))
+        // Above media track: Add Media button (White plus, Blue color)
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = Color(0xFF0080FF),
+          modifier = Modifier
+            .clickable {
+              timelineMediaPickerLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+              )
+            }
+            .testTag("above_media_track_add_btn")
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.Add,
+              contentDescription = "Add Media",
+              tint = Color.White,
+              modifier = Modifier.size(16.dp)
+            )
+            Text(
+              text = "Add Media",
+              style = MaterialTheme.typography.labelSmall.copy(
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.5.sp
+              )
+            )
+          }
+        }
       }
 
       var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
@@ -708,6 +661,226 @@ fun EditorScreen(
           .size(0.dp)
           .testTag("layers_panel")
       )
+    }
+
+    // 2. Active Sub-Tool Panel Overlay (Overlays at the bottom without shifting or resizing preview/timeline)
+    AnimatedVisibility(
+      visible = activeTab != null,
+      enter = slideInVertically { it } + fadeIn(),
+      exit = slideOutVertically { it } + fadeOut(),
+      modifier = Modifier.align(Alignment.BottomCenter)
+    ) {
+      Surface(
+        color = StudioSurface,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        tonalElevation = 8.dp,
+        shadowElevation = 20.dp,
+        border = BorderStroke(1.dp, Color(0xFF1E283E)),
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(max = (maxHeight * 0.46f).coerceAtMost(320.dp))
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null
+          ) {} // Consume touch events so they don't fall through to timeline underneath
+      ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+          // Universal Tool Panel Header Bar with ❌ Cross Button
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(Color(0xFF0F1523))
+              .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(28.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF1E283E)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = when (activeTab) {
+                    EditorToolbarTab.EFFECTS -> Icons.Default.AutoAwesome
+                    EditorToolbarTab.TEXT -> Icons.Default.TextFields
+                    EditorToolbarTab.FILTERS -> Icons.Default.FilterVintage
+                    EditorToolbarTab.ADJUST -> Icons.Default.Tune
+                    EditorToolbarTab.AUDIO -> Icons.Default.MusicNote
+                    EditorToolbarTab.EDIT -> Icons.Default.Edit
+                    EditorToolbarTab.TRIM -> Icons.Default.ContentCut
+                    EditorToolbarTab.SPEED -> Icons.Default.Speed
+                    EditorToolbarTab.TRANSITIONS -> Icons.Default.Transform
+                    EditorToolbarTab.STICKERS -> Icons.Default.EmojiEmotions
+                    EditorToolbarTab.OVERLAY -> Icons.Default.Layers
+                    EditorToolbarTab.MEDIA -> Icons.Default.VideoLibrary
+                    else -> Icons.Default.Build
+                  },
+                  contentDescription = null,
+                  tint = Color(0xFF00C2FF),
+                  modifier = Modifier.size(16.dp)
+                )
+              }
+              Text(
+                text = when (activeTab) {
+                  EditorToolbarTab.EFFECTS -> "Effects Tools"
+                  EditorToolbarTab.TEXT -> "Text Tools"
+                  EditorToolbarTab.FILTERS -> "Filters"
+                  EditorToolbarTab.ADJUST -> "Adjustments"
+                  EditorToolbarTab.AUDIO -> "Audio Studio"
+                  EditorToolbarTab.EDIT -> "Edit Clip"
+                  EditorToolbarTab.TRIM -> "Trimming"
+                  EditorToolbarTab.SPEED -> "Speed & Curve"
+                  EditorToolbarTab.TRANSITIONS -> "Transitions"
+                  EditorToolbarTab.STICKERS -> "Stickers"
+                  EditorToolbarTab.OVERLAY -> "Overlay / PIP"
+                  EditorToolbarTab.MEDIA -> "Import Media"
+                  EditorToolbarTab.MASK -> "Mask & Blend"
+                  EditorToolbarTab.AI -> "AI Suite"
+                  EditorToolbarTab.AI_MATTING -> "AI Matting"
+                  EditorToolbarTab.ASSET_STORE -> "Asset Store"
+                  EditorToolbarTab.VOLUME -> "Volume Control"
+                  EditorToolbarTab.CHROMA -> "Chroma Key"
+                  EditorToolbarTab.CANVAS -> "Canvas Background"
+                  EditorToolbarTab.KEYFRAME -> "Keyframe Animation"
+                  EditorToolbarTab.CAPTIONS -> "Auto Captions"
+                  EditorToolbarTab.ANIMATIONS -> "Animations"
+                  EditorToolbarTab.BACKGROUND -> "Background"
+                  EditorToolbarTab.AI_AVATAR -> "AI Avatar"
+                  null -> "Tools"
+                },
+                style = MaterialTheme.typography.titleMedium.copy(
+                  color = Color.White,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                )
+              )
+            }
+
+            // ❌ Prominent Cross Button to close/exit all tool panels
+            IconButton(
+              onClick = {
+                viewModel.setActiveToolbarTab(null)
+              },
+              modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF1E283E))
+                .testTag("close_tool_panel_cross_button")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close tool panel",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+              )
+            }
+          }
+
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(1.dp)
+              .background(Color(0xFF1E283E))
+          )
+
+          // Sub-Tool Content
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .weight(1f, fill = false)
+          ) {
+            when (activeTab) {
+              EditorToolbarTab.MEDIA -> MediaImportPanel(
+                viewModel = viewModel,
+                onDismiss = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.OVERLAY -> OverlayToolPanel(
+                viewModel = viewModel,
+                onDismiss = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.EDIT -> EditToolPanel(viewModel)
+              EditorToolbarTab.TRIM -> VideoTrimmingToolPanel(
+                viewModel = viewModel,
+                onDismiss = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.ADJUST -> AdjustToolPanel(viewModel)
+              EditorToolbarTab.SPEED -> com.example.ui.components.SpeedCurveToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.MASK -> com.example.ui.components.MaskAndBlendToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.AI -> com.example.ui.components.AiSuiteToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.AI_MATTING -> com.example.ui.components.AiMattingToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.ASSET_STORE -> com.example.ui.components.AssetStoreToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.FILTERS -> FiltersToolPanel(viewModel)
+              EditorToolbarTab.EFFECTS -> EffectsToolPanel(viewModel)
+              EditorToolbarTab.TRANSITIONS -> TransitionsPanel(
+                viewModel = viewModel,
+                onStartDragTransition = { draggedTransitionType = it }
+              )
+              EditorToolbarTab.TEXT -> {
+                when (activeTextSubTool) {
+                  TextSubTool.ADD_TEXT -> TextStudioPanel(
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.setActiveToolbarTab(null) }
+                  )
+                  TextSubTool.AUTO_CAPTIONS -> CaptionsToolPanel(viewModel)
+                  TextSubTool.STICKERS -> StickersToolPanel(viewModel)
+                  TextSubTool.DRAW -> DrawToolPanel(
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.setActiveToolbarTab(null) }
+                  )
+                  TextSubTool.TEXT_TEMPLATES -> TextTemplatesBrowserPanel(
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.setActiveToolbarTab(null) }
+                  )
+                  TextSubTool.TEXT_TO_AUDIO -> TextToAudioToolPanel(
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.setActiveToolbarTab(null) }
+                  )
+                  TextSubTool.AUTO_LYRICS -> AutoLyricsToolPanel(
+                    viewModel = viewModel,
+                    onDismiss = { viewModel.setActiveToolbarTab(null) }
+                  )
+                }
+              }
+              EditorToolbarTab.AUDIO -> com.example.ui.components.AdvancedAudioToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
+              EditorToolbarTab.VOLUME -> VolumeToolPanel(viewModel)
+              EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
+              EditorToolbarTab.CHROMA -> ChromaKeyPanel(viewModel)
+              EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
+              EditorToolbarTab.KEYFRAME -> KeyframeAnimationPanel(viewModel)
+              EditorToolbarTab.CAPTIONS -> CaptionsToolPanel(viewModel)
+              EditorToolbarTab.AI -> GenerateMediaToolPanel(viewModel)
+              EditorToolbarTab.AI_AVATAR -> AIAvatarToolPanel(viewModel)
+              EditorToolbarTab.BACKGROUND -> BackgroundToolPanel(viewModel)
+              EditorToolbarTab.ANIMATIONS -> AnimationsToolPanel(viewModel)
+              null -> {}
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -902,6 +1075,7 @@ fun EditorScreen(
       }
     }
   }
+}
 }
 
 @Composable
@@ -1111,6 +1285,15 @@ fun VideoPreviewSurface(
   val activeEffects = remember(timeline.effectClips, currentPosMs) {
     timeline.effectClips.filter {
       currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs
+    }.sortedBy { it.timelineStartMs }
+  }
+
+  // Calculate accumulated motion transform from active effects (shake, zoom, skater zoom, vertigo dolly, spin, pan, mirror)
+  val effectMotion = remember(activeEffects, currentPosMs, com.example.ui.components.effects.isBeforeAfterComparing) {
+    if (com.example.ui.components.effects.isBeforeAfterComparing || activeEffects.isEmpty()) {
+      VideoEffectRenderer.EffectMotionTransform()
+    } else {
+      VideoEffectRenderer.calculateMotionTransform(activeEffects, currentPosMs)
     }
   }
 
@@ -1122,14 +1305,50 @@ fun VideoPreviewSurface(
     } else null
   }
 
-  // Color Matrix for video adjustments and filter presets matching export pipeline
-  val combinedColorFilter = remember(timeline.adjustments, timeline.filter, activeClip?.filter) {
-    val androidMatrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+  // Color Matrix for video adjustments, filter presets, and active color effects matching export pipeline
+  val androidCombinedMatrix = remember(timeline.adjustments, timeline.filter, activeClip?.filter, activeEffects, currentPosMs, com.example.ui.components.effects.isBeforeAfterComparing) {
+    val baseMatrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
       timeline.adjustments,
       timeline.filter,
       activeClip?.filter
     )
-    ColorFilter.colorMatrix(ColorMatrix(androidMatrix.array))
+    val resultMatrix = android.graphics.ColorMatrix(baseMatrix)
+    if (!com.example.ui.components.effects.isBeforeAfterComparing && activeEffects.isNotEmpty()) {
+      val effectMat = VideoEffectRenderer.calculateEffectColorMatrix(activeEffects, currentPosMs)
+      if (effectMat != null) {
+        resultMatrix.postConcat(effectMat)
+      }
+    }
+    resultMatrix
+  }
+
+  val combinedColorFilter = remember(androidCombinedMatrix) {
+    ColorFilter.colorMatrix(ColorMatrix(androidCombinedMatrix.array))
+  }
+
+  // Synchronize color filter directly with ExoPlayer's video effects pipeline
+  LaunchedEffect(player, androidCombinedMatrix) {
+    if (player != null) {
+      try {
+        if (com.example.engine.composition.ColorFilterGenerator.isIdentityMatrix(androidCombinedMatrix)) {
+          player.setVideoEffects(emptyList())
+          if (!player.isPlaying && player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
+            player.seekTo(player.currentPosition)
+          }
+        } else {
+          val glMatrix = com.example.engine.composition.ColorFilterGenerator.colorMatrixToGlMatrix(androidCombinedMatrix)
+          val rgbMatrix = object : androidx.media3.effect.RgbMatrix {
+            override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = glMatrix
+          }
+          player.setVideoEffects(listOf(rgbMatrix))
+          if (!player.isPlaying && player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
+            player.seekTo(player.currentPosition)
+          }
+        }
+      } catch (e: Exception) {
+        android.util.Log.w("VideoPreviewSurface", "Failed to apply video effects to ExoPlayer: ${e.message}")
+      }
+    }
   }
 
   // Pinch-to-zoom & pan inspection state
@@ -1199,14 +1418,19 @@ fun VideoPreviewSurface(
             modifier = Modifier
               .fillMaxSize()
               .graphicsLayer {
-                clipTransform?.let { t ->
-                  scaleX = t.scaleX
-                  scaleY = t.scaleY
-                  rotationZ = t.rotation
-                  translationX = t.posX * size.width
-                  translationY = t.posY * size.height
-                  alpha = t.opacity
-                }
+                val baseScaleX = clipTransform?.scaleX ?: 1f
+                val baseScaleY = clipTransform?.scaleY ?: 1f
+                val baseRot = clipTransform?.rotation ?: 0f
+                val baseTransX = (clipTransform?.posX ?: 0f) * size.width
+                val baseTransY = (clipTransform?.posY ?: 0f) * size.height
+                val baseAlpha = clipTransform?.opacity ?: 1f
+
+                scaleX = baseScaleX * effectMotion.scaleX
+                scaleY = baseScaleY * effectMotion.scaleY
+                rotationZ = baseRot + effectMotion.rotation
+                translationX = baseTransX + effectMotion.translationX * size.width
+                translationY = baseTransY + effectMotion.translationY * size.height
+                alpha = (baseAlpha * effectMotion.alpha).coerceIn(0f, 1f)
               },
             contentAlignment = Alignment.Center
           ) {
@@ -1214,13 +1438,6 @@ fun VideoPreviewSurface(
               MediaRelinkManager.isRealPlayableMedia(context, activeClip.uri)
             }
             if (activeClip.isVideo && isRealPlayable && player != null) {
-              val androidMatrix = remember(timeline.adjustments, timeline.filter, activeClip.filter) {
-                com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
-                  timeline.adjustments,
-                  timeline.filter,
-                  activeClip.filter
-                )
-              }
               var fallbackBitmap by remember(activeClip.id, activeClip.uri) {
                 mutableStateOf<Bitmap?>(null)
               }
@@ -1251,23 +1468,19 @@ fun VideoPreviewSurface(
                 }
                 AndroidView(
                   factory = { ctx ->
-                    PlayerView(ctx).apply {
-                      this.player = player
-                      useController = false
-                      setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                      setKeepContentOnPlayerReset(true)
-                      layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                      )
-                    }
+                    val pv = LayoutInflater.from(ctx).inflate(R.layout.editor_player_view, null, false) as PlayerView
+                    pv.player = player
+                    pv.useController = false
+                    pv.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    pv.setKeepContentOnPlayerReset(true)
+                    pv.layoutParams = FrameLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    pv
                   },
                   update = { pv ->
                     pv.player = player
-                    val filterPaint = android.graphics.Paint().apply {
-                      colorFilter = android.graphics.ColorMatrixColorFilter(androidMatrix)
-                    }
-                    pv.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, filterPaint)
                   },
                   modifier = Modifier.fillMaxSize()
                 )
@@ -1335,94 +1548,19 @@ fun VideoPreviewSurface(
           }
         }
 
-        // Active Visual Effects Overlay (Video, Body, Photo, AI Effects)
+        // Active Visual Effects Overlay (procedural shaders, flares, sparks, scanlines, glitch, wings, grids)
         if (activeEffects.isNotEmpty() && !com.example.ui.components.effects.isBeforeAfterComparing) {
-          activeEffects.forEach { effect ->
-            val alpha = (0.25f * effect.intensity).coerceIn(0.05f, 0.85f)
-            when (effect.effectType.category) {
-              "Body Effects" -> {
-                Box(
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                      Brush.radialGradient(
-                        colors = listOf(Color(0xFF00E5FF).copy(alpha = alpha), Color(0xFFEC4899).copy(alpha = alpha * 0.5f), Color.Transparent)
-                      )
-                    )
-                )
-              }
-              "Photo Effects" -> {
-                Box(
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                      Brush.verticalGradient(
-                        colors = listOf(Color(0xFFF59E0B).copy(alpha = alpha * 0.6f), Color(0xFF8B5CF6).copy(alpha = alpha * 0.6f))
-                      )
-                    )
-                )
-              }
-              "AI Effects" -> {
-                Box(
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                      Brush.horizontalGradient(
-                        colors = listOf(Color(0xFFA855F7).copy(alpha = alpha), Color(0xFF00E5FF).copy(alpha = alpha))
-                      )
-                    )
-                )
-              }
-              else -> { // Video Effects
-                when (effect.effectType) {
-                  EffectType.GLOW, EffectType.HALO_GLOW -> {
-                    Box(
-                      modifier = Modifier
-                        .fillMaxSize()
-                        .background(CyanAccent.copy(alpha = alpha))
-                    )
-                  }
-                  EffectType.FLASH, EffectType.STROBE -> {
-                    val isFlash = (currentPosMs % 300L) < 150L
-                    if (isFlash) {
-                      Box(
-                        modifier = Modifier
-                          .fillMaxSize()
-                          .background(Color.White.copy(alpha = alpha * 1.5f))
-                      )
-                    }
-                  }
-                  EffectType.RGB_SPLIT, EffectType.GLITCH, EffectType.VHS_VINTAGE -> {
-                    Box(
-                      modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                          Brush.horizontalGradient(
-                            listOf(Color.Red.copy(alpha = alpha * 0.8f), Color.Blue.copy(alpha = alpha * 0.8f))
-                          )
-                        )
-                    )
-                  }
-                  EffectType.VIGNETTE -> {
-                    Box(
-                      modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                          Brush.radialGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = alpha * 2.0f))
-                          )
-                        )
-                    )
-                  }
-                  else -> {
-                    Box(
-                      modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF38BDF8).copy(alpha = alpha * 0.3f))
-                    )
-                  }
-                }
-              }
+          androidx.compose.foundation.Canvas(
+            modifier = Modifier.fillMaxSize()
+          ) {
+            drawIntoCanvas { composeCanvas ->
+              VideoEffectRenderer.renderEffectsOnCanvas(
+                canvas = composeCanvas.nativeCanvas,
+                activeEffects = activeEffects,
+                currentPosMs = currentPosMs,
+                width = size.width.toInt(),
+                height = size.height.toInt()
+              )
             }
           }
         }

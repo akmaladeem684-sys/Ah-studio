@@ -21,6 +21,10 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    buildConfigField("String", "OAUTH_CLIENT_ID", "\"368906369830-nqn2crd6fsepp1q9mkikr54pojg6jvjm.apps.googleusercontent.com\"")
+    buildConfigField("String", "FIREBASE_API_KEY", "\"AIzaSyCg6RcmUXofXcDA3o3-YU7So3kbtSsD-nY\"")
+    buildConfigField("String", "FIREBASE_PROJECT_ID", "\"gen-lang-client-0291066258\"")
   }
 
   signingConfigs {
@@ -106,15 +110,15 @@ dependencies {
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
+  implementation(libs.firebase.firestore)
+  implementation(libs.firebase.storage)
 
-  // Uncomment ALL FOUR of the following dependencies together to use Firebase Auth and Google
-  // Sign-In via Credential Manager:
-  // implementation(libs.firebase.auth)
-  // implementation(libs.androidx.credentials)
-  // implementation(libs.androidx.credentials.play.services)
-  // implementation(libs.googleid)
+  // Authentication & Credential Manager dependencies
+  implementation(libs.firebase.auth)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
+  implementation(libs.androidx.datastore.preferences)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)

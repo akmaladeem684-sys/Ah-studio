@@ -35,7 +35,15 @@ import com.example.data.local.ProjectEntity
 import com.example.data.presets.TemplatesCatalog
 import com.example.data.presets.VideoTemplate
 import com.example.domain.StudioAccountManager
-import com.example.domain.UserProfile
+import com.example.auth.AuthResult
+import com.example.auth.StorageBreakdown
+import kotlinx.coroutines.launch
+import com.example.data.local.OAuthConnectionEntity
+import com.example.data.local.UserAccountEntity
+import com.example.ui.components.account.RealAuthDialog
+import com.example.ui.components.account.RealOAuthPlatformDialog
+import com.example.ui.components.account.RealStorageDetailsDialog
+import com.example.ui.components.account.RealSwitchAccountDialog
 import com.example.domain.model.AspectRatio
 import com.example.ui.AppScreen
 import com.example.ui.StudioViewModel
@@ -55,29 +63,25 @@ fun HomeTemplatesTabView(
 ) {
   val context = LocalContext.current
   val savedTemplateIds by StudioAccountManager.savedTemplateIds.collectAsState()
-  val customTemplates by StudioAccountManager.customTemplates.collectAsState()
+  val firebaseTemplates by com.example.data.firebase.FirebaseTemplateManager.templates.collectAsState()
 
   var searchQuery by remember { mutableStateOf("") }
-  var selectedFilter by remember { mutableStateOf("All") } // "All", "Trending", "Saved", "My Created"
-  var showCreateTemplateDialog by remember { mutableStateOf(false) }
+  var selectedFilter by remember { mutableStateOf("All") } // "All", "Reels", "TikTok", "Shorts", "Saved"
   var previewTemplate by remember { mutableStateOf<VideoTemplate?>(null) }
 
-  val allAvailableTemplates = remember(customTemplates) {
-    customTemplates + TemplatesCatalog.templates
-  }
-
-  val filteredTemplates = remember(allAvailableTemplates, searchQuery, selectedFilter, savedTemplateIds) {
-    allAvailableTemplates.filter { tpl ->
+  val filteredTemplates = remember(firebaseTemplates, searchQuery, selectedFilter, savedTemplateIds) {
+    firebaseTemplates.filter { tpl ->
       val matchesSearch = searchQuery.isBlank() ||
         tpl.title.contains(searchQuery, ignoreCase = true) ||
         tpl.category.contains(searchQuery, ignoreCase = true) ||
-        tpl.description.contains(searchQuery, ignoreCase = true)
+        tpl.description.contains(searchQuery, ignoreCase = true) ||
+        tpl.creatorName.contains(searchQuery, ignoreCase = true) ||
+        tpl.creatorHandle.contains(searchQuery, ignoreCase = true)
 
       val matchesFilter = when (selectedFilter) {
-        "Trending" -> tpl.isPro || tpl.id.contains("reels") || tpl.id.contains("yt")
         "Saved" -> savedTemplateIds.contains(tpl.id)
-        "My Created" -> tpl.category == "User-Created" || tpl.id.startsWith("cust_")
-        else -> true
+        "All" -> true
+        else -> tpl.category.contains(selectedFilter, ignoreCase = true)
       }
 
       matchesSearch && matchesFilter
@@ -89,7 +93,7 @@ fun HomeTemplatesTabView(
       .fillMaxSize()
       .padding(horizontal = 16.dp)
   ) {
-    // Top Bar Header & Action
+    // Top Bar Header (No Create Button - Template creation is only via Template Creator)
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -97,9 +101,9 @@ fun HomeTemplatesTabView(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Column(modifier = Modifier.weight(1f)) {
+      Column {
         Text(
-          text = "Template Studio",
+          text = "Templates Community",
           style = MaterialTheme.typography.titleLarge.copy(
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
@@ -107,21 +111,9 @@ fun HomeTemplatesTabView(
           )
         )
         Text(
-          text = "Trending motion presets & custom auto-saving templates",
+          text = "Real Firebase templates • Live views & cuts synchronization",
           style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 12.sp)
         )
-      }
-
-      Button(
-        onClick = { showCreateTemplateDialog = true },
-        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-        shape = RoundedCornerShape(12.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        modifier = Modifier.testTag("create_custom_template_button")
-      ) {
-        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Create", fontWeight = FontWeight.Bold, fontSize = 12.sp)
       }
     }
 
@@ -129,7 +121,7 @@ fun HomeTemplatesTabView(
     OutlinedTextField(
       value = searchQuery,
       onValueChange = { searchQuery = it },
-      placeholder = { Text("Search templates, categories, motion styles...", color = TextTertiary, fontSize = 13.sp) },
+      placeholder = { Text("Search templates, creators, motion styles...", color = TextTertiary, fontSize = 13.sp) },
       leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary) },
       trailingIcon = {
         if (searchQuery.isNotEmpty()) {
@@ -161,7 +153,7 @@ fun HomeTemplatesTabView(
         .padding(bottom = 12.dp),
       horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      listOf("All", "Trending", "Saved", "My Created").forEach { filterName ->
+      listOf("All", "Reels", "TikTok", "Shorts", "Saved").forEach { filterName ->
         val isSelected = selectedFilter == filterName
         FilterChip(
           selected = isSelected,
@@ -169,10 +161,9 @@ fun HomeTemplatesTabView(
           label = {
             Text(
               text = when (filterName) {
-                "Trending" -> "🔥 Trending"
                 "Saved" -> "⭐ Saved (${savedTemplateIds.size})"
-                "My Created" -> "✏️ My Created (${customTemplates.size})"
-                else -> "All Templates"
+                "All" -> "All Templates (${firebaseTemplates.size})"
+                else -> filterName
               },
               fontSize = 12.sp,
               fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
@@ -202,17 +193,18 @@ fun HomeTemplatesTabView(
           .weight(1f),
         contentAlignment = Alignment.Center
       ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          Icon(Icons.Outlined.Style, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(56.dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+          Icon(Icons.Outlined.Style, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(56.dp))
           Spacer(modifier = Modifier.height(12.dp))
           Text(
-            text = if (searchQuery.isNotBlank()) "No matching templates" else "No templates in this category",
-            style = MaterialTheme.typography.titleMedium.copy(color = TextSecondary)
+            text = if (searchQuery.isNotBlank()) "No matching templates found" else "No Firebase templates published yet",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
           )
           Spacer(modifier = Modifier.height(6.dp))
           Text(
-            text = "Try clearing your search query or tap Create to make a new template",
-            style = MaterialTheme.typography.bodySmall.copy(color = TextTertiary, fontSize = 12.sp)
+            text = "Templates are created exclusively through the Template Creator flow. Design in Screen Editor, export, and publish live to Firebase!",
+            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 12.sp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
           )
         }
       }
@@ -238,12 +230,15 @@ fun HomeTemplatesTabView(
                 color = if (isSaved) AmberAccent.copy(alpha = 0.6f) else StudioBorder,
                 shape = RoundedCornerShape(16.dp)
               )
-              .clickable { previewTemplate = tpl }
+              .clickable {
+                com.example.data.firebase.FirebaseTemplateManager.recordTemplateView(tpl.id, tpl.creatorId)
+                previewTemplate = tpl
+              }
               .testTag("template_card_${tpl.id}"),
             colors = CardDefaults.cardColors(containerColor = StudioSurface)
           ) {
             Column {
-              // Thumbnail Header Box
+              // Thumbnail Header Box (Preview)
               Box(
                 modifier = Modifier
                   .fillMaxWidth()
@@ -293,11 +288,11 @@ fun HomeTemplatesTabView(
                   }
                 }
 
-                // Bottom Aspect Ratio Badge
+                // Bottom Aspect Ratio & Duration Badge
                 Surface(
                   modifier = Modifier.align(Alignment.BottomStart),
                   shape = RoundedCornerShape(6.dp),
-                  color = Color.Black.copy(alpha = 0.6f)
+                  color = Color.Black.copy(alpha = 0.65f)
                 ) {
                   Text(
                     text = "${tpl.aspectRatio.label} • ${tpl.durationMs / 1000}s",
@@ -311,78 +306,91 @@ fun HomeTemplatesTabView(
                 }
               }
 
-              // Details Body
-              Column(modifier = Modifier.padding(12.dp)) {
+              // Details Body: Title, Creator, Real Views & Uses/Cuts, and Use Template Button
+              Column(modifier = Modifier.padding(10.dp)) {
                 Text(
                   text = tpl.title,
                   style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
-                    fontSize = 14.sp
+                    fontSize = 13.sp
                   ),
                   maxLines = 1,
                   overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                  text = tpl.category,
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    color = CyanAccent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
-                  )
-                )
-                Spacer(modifier = Modifier.height(8.dp))
 
-                // Action Row: Primary "Edit Template" button + Overflow / Action Menu
+                // Creator Row
                 Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.padding(top = 2.dp)
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(16.dp)
+                      .clip(CircleShape)
+                      .background(Brush.linearGradient(listOf(CyanAccent, PurpleAccent))),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Text(
+                      tpl.creatorName.take(1).uppercase().ifBlank { "C" },
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color.Black
+                    )
+                  }
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = tpl.creatorName.ifBlank { "Creator" },
+                    style = MaterialTheme.typography.bodySmall.copy(
+                      color = CyanAccent,
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Real-time Views & Uses / Cuts Statistics
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(StudioSurfaceVariant)
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Button(
-                    onClick = {
-                      viewModel.applyTemplate(tpl)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 6.dp),
-                    modifier = Modifier
-                      .weight(1f)
-                      .height(32.dp)
-                      .testTag("use_template_btn_${tpl.id}")
-                  ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Edit Template", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                  }
+                  Text(
+                    text = "👁️ ${tpl.viewsCount}",
+                    style = MaterialTheme.typography.labelSmall.copy(color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                  )
+                  Text(
+                    text = "✂️ ${tpl.usesCount} cuts",
+                    style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                  )
+                }
 
-                  // Duplicate Action
-                  IconButton(
-                    onClick = {
-                      val dup = StudioAccountManager.duplicateCustomTemplate(tpl.id)
-                      Toast.makeText(context, "Template duplicated as \"${dup?.title ?: "Copy"}\"!", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier
-                      .size(32.dp)
-                      .background(StudioSurfaceVariant, RoundedCornerShape(8.dp))
-                  ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = TextSecondary, modifier = Modifier.size(14.dp))
-                  }
+                Spacer(modifier = Modifier.height(8.dp))
 
-                  // Delete Action (For custom templates or saved templates)
-                  if (tpl.id.startsWith("cust_") || tpl.category == "User-Created") {
-                    IconButton(
-                      onClick = {
-                        StudioAccountManager.deleteCustomTemplate(tpl.id)
-                        Toast.makeText(context, "Template deleted.", Toast.LENGTH_SHORT).show()
-                      },
-                      modifier = Modifier
-                        .size(32.dp)
-                        .background(StudioSurfaceVariant, RoundedCornerShape(8.dp))
-                    ) {
-                      Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
-                    }
-                  }
+                // Primary "Use Template" Button
+                Button(
+                  onClick = {
+                    viewModel.applyTemplate(tpl)
+                  },
+                  colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                  shape = RoundedCornerShape(8.dp),
+                  contentPadding = PaddingValues(vertical = 4.dp, horizontal = 6.dp),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(34.dp)
+                    .testTag("use_template_btn_${tpl.id}")
+                ) {
+                  Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Use Template", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                 }
               }
             }
@@ -390,24 +398,6 @@ fun HomeTemplatesTabView(
         }
       }
     }
-  }
-
-  // Create Custom Template Modal Dialog
-  if (showCreateTemplateDialog) {
-    CreateTemplateModalDialog(
-      onDismiss = { showCreateTemplateDialog = false },
-      onCreate = { title, category, description, durationSec, aspect ->
-        val newTpl = StudioAccountManager.saveProjectAsTemplate(
-          title = title,
-          category = category,
-          description = description,
-          timeline = viewModel.timelineEngine.timeline.value,
-          aspectRatio = aspect
-        )
-        Toast.makeText(context, "Custom Template \"${newTpl.title}\" saved successfully!", Toast.LENGTH_SHORT).show()
-        showCreateTemplateDialog = false
-      }
-    )
   }
 
   // Template Preview Inspector Modal
@@ -1081,19 +1071,29 @@ fun HomeAccountTabView(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  val profile by StudioAccountManager.profile.collectAsState()
-  val socialConnections by StudioAccountManager.socialConnections.collectAsState()
-  val userAccounts by StudioAccountManager.userAccounts.collectAsState()
+  val coroutineScope = rememberCoroutineScope()
+
+  val currentAccount by StudioAccountManager.currentAccount.collectAsState()
+  val allAccounts by StudioAccountManager.allAccounts.collectAsState()
+  val oauthConnections by StudioAccountManager.oauthConnections.collectAsState()
+  val storageBreakdown by StudioAccountManager.storageBreakdown.collectAsState()
   val projects by viewModel.allProjects.collectAsState()
   val exportedVideos by viewModel.exportedVideos.collectAsState()
   val savedTemplates by StudioAccountManager.savedTemplateIds.collectAsState()
 
+  var showAuthDialog by remember { mutableStateOf(false) }
   var showEditProfileDialog by remember { mutableStateOf(false) }
   var showFeedbackDialog by remember { mutableStateOf(false) }
   var showTermsDialog by remember { mutableStateOf(false) }
   var showPrivacyDialog by remember { mutableStateOf(false) }
   var showSwitchAccountDialog by remember { mutableStateOf(false) }
+  var showStorageDetailsDialog by remember { mutableStateOf(false) }
+  var selectedOAuthPlatform by remember { mutableStateOf<OAuthConnectionEntity?>(null) }
   var showLogOutDialog by remember { mutableStateOf(false) }
+
+  LaunchedEffect(Unit) {
+    StudioAccountManager.refreshStorageUsage()
+  }
 
   LazyColumn(
     modifier = modifier
@@ -1137,7 +1137,7 @@ fun HomeAccountTabView(
       }
     }
 
-    // User Profile Header Card
+    // User Profile Header Card (Authenticated vs Guest)
     item {
       Card(
         modifier = Modifier
@@ -1148,102 +1148,211 @@ fun HomeAccountTabView(
         colors = CardDefaults.cardColors(containerColor = StudioSurface)
       ) {
         Column(modifier = Modifier.padding(16.dp)) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-              modifier = Modifier
-                .size(60.dp)
-                .clip(CircleShape)
-                .background(Color(profile.avatarColor)),
-              contentAlignment = Alignment.Center
-            ) {
-              Text(
-                text = profile.name.take(2).uppercase(),
-                style = MaterialTheme.typography.titleLarge.copy(
-                  fontWeight = FontWeight.Bold,
-                  color = Color.Black,
-                  fontSize = 22.sp
+          val account = currentAccount
+          if (account != null) {
+            // Signed In View
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                modifier = Modifier
+                  .size(60.dp)
+                  .clip(CircleShape)
+                  .background(Color(account.avatarColor)),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = account.displayName.take(2).uppercase(),
+                  style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black,
+                    fontSize = 22.sp
+                  )
                 )
-              )
+              }
+
+              Spacer(modifier = Modifier.width(14.dp))
+
+              Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text(
+                    text = account.displayName,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                      fontWeight = FontWeight.Bold,
+                      color = TextPrimary,
+                      fontSize = 17.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (account.providerId.contains("google", ignoreCase = true)) Color(0xFF4285F4) else AmberAccent
+                  ) {
+                    Text(
+                      text = if (account.providerId.contains("google", ignoreCase = true)) "GOOGLE AUTH" else "VERIFIED",
+                      style = MaterialTheme.typography.labelSmall.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 9.sp
+                      ),
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                  }
+                }
+
+                Text(
+                  text = account.customHandle.ifBlank { account.email },
+                  style = MaterialTheme.typography.bodySmall.copy(color = CyanAccent, fontSize = 12.sp),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                  text = account.bio.ifBlank { "Mobile Video Creator & Editor" },
+                  style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp),
+                  maxLines = 2,
+                  overflow = TextOverflow.Ellipsis
+                )
+              }
             }
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
+            // Real Stats Bar Row
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(StudioSurfaceVariant)
+                .clickable { showStorageDetailsDialog = true }
+                .padding(vertical = 10.dp),
+              horizontalArrangement = Arrangement.SpaceAround
+            ) {
+              AccountStatItem("Projects", "${projects.size}")
+              AccountStatItem("Clips", "${exportedVideos.size}")
+              AccountStatItem("Templates", "${savedTemplates.size}")
+              AccountStatItem("Storage", storageBreakdown.formattedTotal)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              OutlinedButton(
+                onClick = { showEditProfileDialog = true },
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, StudioBorder),
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("edit_profile_btn")
+              ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = CyanAccent)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Edit Profile", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TextPrimary)
+              }
+
+              Button(
+                onClick = { showSwitchAccountDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = StudioSurfaceVariant, contentColor = TextPrimary),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("switch_account_btn")
+              ) {
+                Icon(Icons.Default.SwitchAccount, contentDescription = null, modifier = Modifier.size(16.dp), tint = AmberAccent)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Switch (${allAccounts.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+              }
+            }
+          } else {
+            // Guest / Not Signed In View
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                modifier = Modifier
+                  .size(54.dp)
+                  .clip(CircleShape)
+                  .background(StudioSurfaceVariant),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(Icons.Default.PersonOutline, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(28.dp))
+              }
+
+              Spacer(modifier = Modifier.width(14.dp))
+
+              Column(modifier = Modifier.weight(1f)) {
                 Text(
-                  text = profile.name,
+                  text = "Guest Creator Session",
                   style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                     fontSize = 17.sp
                   )
                 )
+                Text(
+                  text = "Sign in to synchronize profile, multi-account switch & direct OAuth export.",
+                  style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Real Stats Bar Row
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(StudioSurfaceVariant)
+                .clickable { showStorageDetailsDialog = true }
+                .padding(vertical = 10.dp),
+              horizontalArrangement = Arrangement.SpaceAround
+            ) {
+              AccountStatItem("Projects", "${projects.size}")
+              AccountStatItem("Clips", "${exportedVideos.size}")
+              AccountStatItem("Templates", "${savedTemplates.size}")
+              AccountStatItem("Storage", storageBreakdown.formattedTotal)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Button(
+                onClick = {
+                  coroutineScope.launch {
+                    val result = StudioAccountManager.signInWithGoogle(context)
+                    if (result is AuthResult.Success) {
+                      Toast.makeText(context, "Welcome, ${result.user.displayName}!", Toast.LENGTH_SHORT).show()
+                    }
+                  }
+                },
+                modifier = Modifier.weight(1.1f),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+              ) {
+                Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Color(0xFF4285F4), modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Surface(
-                  shape = RoundedCornerShape(6.dp),
-                  color = AmberAccent
-                ) {
-                  Text(
-                    text = "PRO VIP",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      color = Color.Black,
-                      fontWeight = FontWeight.ExtraBold,
-                      fontSize = 9.sp
-                    ),
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                  )
-                }
+                Text("Google Sign-In", fontWeight = FontWeight.Bold, fontSize = 12.sp)
               }
 
-              Text(
-                text = profile.handle,
-                style = MaterialTheme.typography.bodySmall.copy(color = CyanAccent, fontSize = 12.sp)
-              )
-              Text(
-                text = profile.bio,
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-              )
+              Button(
+                onClick = { showAuthDialog = true },
+                modifier = Modifier.weight(0.9f),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
+              ) {
+                Text("Sign In / Register", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+              }
             }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          // Stats Bar Row
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(12.dp))
-              .background(StudioSurfaceVariant)
-              .padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceAround
-          ) {
-            AccountStatItem("Projects", "${projects.size}")
-            AccountStatItem("Clips", "${exportedVideos.size}")
-            AccountStatItem("Templates", "${savedTemplates.size}")
-            AccountStatItem("Storage", "1.2 GB")
-          }
-
-          Spacer(modifier = Modifier.height(12.dp))
-
-          Button(
-            onClick = { showEditProfileDialog = true },
-            colors = ButtonDefaults.buttonColors(containerColor = StudioSurfaceVariant, contentColor = TextPrimary),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-              .fillMaxWidth()
-              .testTag("edit_profile_btn")
-          ) {
-            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Edit Profile & Account", fontWeight = FontWeight.Bold, fontSize = 13.sp)
           }
         }
       }
     }
 
-    // Social Accounts Connection Card
+    // Real OAuth Connected Social Accounts Card
     item {
       Card(
         modifier = Modifier
@@ -1253,53 +1362,67 @@ fun HomeAccountTabView(
         colors = CardDefaults.cardColors(containerColor = StudioSurface)
       ) {
         Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Connected Social Accounts",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-          )
-          Text(
-            text = "Direct 1-tap export to YouTube, TikTok & Reels",
-            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
-          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "Connected OAuth Channels",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+              )
+              Text(
+                text = "Direct publishing & authenticated channel export",
+                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+              )
+            }
+          }
 
           Spacer(modifier = Modifier.height(12.dp))
 
-          socialConnections.forEach { conn ->
+          oauthConnections.forEach { conn ->
             Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp),
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { selectedOAuthPlatform = conn }
+                .padding(vertical = 8.dp, horizontal = 4.dp),
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
               Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(conn.platformIcon, fontSize = 18.sp)
+                Text(conn.platformIcon, fontSize = 20.sp)
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
-                  Text(conn.platformName, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(conn.platformName, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
+                    if (conn.isConnected) {
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Icon(Icons.Default.CheckCircle, contentDescription = "Connected", tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                    }
+                  }
                   Text(
-                    text = if (conn.isConnected) conn.handle else "Not connected",
+                    text = if (conn.isConnected) conn.accountHandle else "Not authorized • Tap to connect",
                     color = if (conn.isConnected) CyanAccent else TextTertiary,
                     fontSize = 11.sp
                   )
                 }
               }
 
-              Switch(
-                checked = conn.isConnected,
-                onCheckedChange = {
-                  StudioAccountManager.toggleSocialConnection(conn.platformName)
-                  Toast.makeText(
-                    context,
-                    if (conn.isConnected) "Disconnected ${conn.platformName}" else "Connected ${conn.platformName}!",
-                    Toast.LENGTH_SHORT
-                  ).show()
-                },
-                colors = SwitchDefaults.colors(
-                  checkedThumbColor = Color.Black,
-                  checkedTrackColor = CyanAccent
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (conn.isConnected) Color(0xFF064E3B) else StudioSurfaceVariant,
+                modifier = Modifier.clickable { selectedOAuthPlatform = conn }
+              ) {
+                Text(
+                  text = if (conn.isConnected) "Manage" else "Connect",
+                  color = if (conn.isConnected) Color(0xFF34D399) else CyanAccent,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 11.sp,
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                 )
-              )
+              }
             }
           }
         }
@@ -1317,20 +1440,24 @@ fun HomeAccountTabView(
       ) {
         Column(modifier = Modifier.padding(8.dp)) {
           AccountOptionRow(
+            icon = Icons.Default.Storage,
+            title = "Device Storage & Render Cache",
+            subtitle = "${storageBreakdown.formattedTotal} used (${storageBreakdown.formattedCache} cache)",
+            onClick = { showStorageDetailsDialog = true }
+          )
+
+          AccountOptionRow(
+            icon = Icons.Default.SwitchAccount,
+            title = "Switch Account Profile",
+            subtitle = if (currentAccount != null) "Active: ${currentAccount?.displayName} (${allAccounts.size} saved)" else "Sign in or link an account",
+            onClick = { showSwitchAccountDialog = true }
+          )
+
+          AccountOptionRow(
             icon = Icons.Default.Feedback,
             title = "Feedback & Bug Report",
             subtitle = "Send thoughts & feature requests to developers",
             onClick = { showFeedbackDialog = true }
-          )
-
-          AccountOptionRow(
-            icon = Icons.Default.CleaningServices,
-            title = "Clear App Cache",
-            subtitle = "Free up 48.5 MB temporary render buffers",
-            onClick = {
-              val cleared = StudioAccountManager.clearAppCache()
-              Toast.makeText(context, "Cache cleared successfully! 48.5 MB freed.", Toast.LENGTH_SHORT).show()
-            }
           )
 
           AccountOptionRow(
@@ -1347,20 +1474,23 @@ fun HomeAccountTabView(
             onClick = { showPrivacyDialog = true }
           )
 
-          AccountOptionRow(
-            icon = Icons.Default.SwitchAccount,
-            title = "Switch Account Profile",
-            subtitle = "Currently active: ${profile.name}",
-            onClick = { showSwitchAccountDialog = true }
-          )
-
-          AccountOptionRow(
-            icon = Icons.Default.Logout,
-            title = "Log Out",
-            subtitle = "Sign out of active creator session",
-            textColor = RoseAccent,
-            onClick = { showLogOutDialog = true }
-          )
+          if (currentAccount != null) {
+            AccountOptionRow(
+              icon = Icons.Default.Logout,
+              title = "Log Out",
+              subtitle = "Sign out of active creator session",
+              textColor = RoseAccent,
+              onClick = { showLogOutDialog = true }
+            )
+          } else {
+            AccountOptionRow(
+              icon = Icons.Default.Login,
+              title = "Sign In / Register",
+              subtitle = "Connect Google or Email account",
+              textColor = CyanAccent,
+              onClick = { showAuthDialog = true }
+            )
+          }
         }
       }
     }
@@ -1378,19 +1508,52 @@ fun HomeAccountTabView(
           style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = TextTertiary, fontSize = 11.sp)
         )
         Text(
-          text = "v3.5.0 (Build 2026.09) • Professional Timeline Engine",
+          text = "v3.5.0 • Authenticated Session Engine",
           style = MaterialTheme.typography.labelSmall.copy(color = TextTertiary, fontSize = 10.sp)
         )
       }
     }
   }
 
+  // Real Auth Dialog (Google Sign-In + Email/Password)
+  if (showAuthDialog) {
+    RealAuthDialog(
+      onDismiss = { showAuthDialog = false },
+      onSuccess = { showAuthDialog = false }
+    )
+  }
+
+  // Real Switch Account Dialog
+  if (showSwitchAccountDialog) {
+    RealSwitchAccountDialog(
+      accounts = allAccounts,
+      currentAccount = currentAccount,
+      onDismiss = { showSwitchAccountDialog = false },
+      onAddNewAccount = { showAuthDialog = true }
+    )
+  }
+
+  // Real OAuth Platform Dialog
+  selectedOAuthPlatform?.let { platform ->
+    RealOAuthPlatformDialog(
+      connection = platform,
+      onDismiss = { selectedOAuthPlatform = null }
+    )
+  }
+
+  // Real Storage Details Dialog
+  if (showStorageDetailsDialog) {
+    RealStorageDetailsDialog(
+      onDismiss = { showStorageDetailsDialog = false }
+    )
+  }
+
   // Edit Profile Dialog
-  if (showEditProfileDialog) {
-    var editName by remember { mutableStateOf(profile.name) }
-    var editHandle by remember { mutableStateOf(profile.handle) }
-    var editBio by remember { mutableStateOf(profile.bio) }
-    var editEmail by remember { mutableStateOf(profile.email) }
+  if (showEditProfileDialog && currentAccount != null) {
+    val cur = currentAccount!!
+    var editName by remember { mutableStateOf(cur.displayName) }
+    var editHandle by remember { mutableStateOf(cur.customHandle) }
+    var editBio by remember { mutableStateOf(cur.bio) }
 
     AlertDialog(
       onDismissRequest = { showEditProfileDialog = false },
@@ -1412,13 +1575,6 @@ fun HomeAccountTabView(
             modifier = Modifier.fillMaxWidth()
           )
           OutlinedTextField(
-            value = editEmail,
-            onValueChange = { editEmail = it },
-            label = { Text("Email Address") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-          )
-          OutlinedTextField(
             value = editBio,
             onValueChange = { editBio = it },
             label = { Text("Bio / Tagline") },
@@ -1429,9 +1585,15 @@ fun HomeAccountTabView(
       confirmButton = {
         Button(
           onClick = {
-            StudioAccountManager.updateProfile(editName, editHandle, editBio, editEmail)
-            Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
-            showEditProfileDialog = false
+            coroutineScope.launch {
+              val res = StudioAccountManager.updateProfile(editName, editBio, editHandle)
+              if (res.isSuccess) {
+                Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+              } else {
+                Toast.makeText(context, "Failed to update profile", Toast.LENGTH_SHORT).show()
+              }
+              showEditProfileDialog = false
+            }
           },
           colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
         ) {
@@ -1518,7 +1680,7 @@ fun HomeAccountTabView(
       title = { Text("Privacy Policy", color = TextPrimary) },
       text = {
         Text(
-          "Privacy Policy Summary:\n\nYour video files, raw media assets, and timeline projects are stored locally on your device. AH Video Studio respects your privacy and does not upload your raw media without explicit permission.",
+          "Privacy Policy Summary:\n\nYour video files, raw media assets, and timeline projects are stored locally on your device. AH Video Studio respects your privacy and does not upload your raw media without explicit permission. Authentication tokens are securely handled via Google Credential Manager and Firebase Auth.",
           color = TextSecondary,
           fontSize = 12.sp
         )
@@ -1535,57 +1697,6 @@ fun HomeAccountTabView(
     )
   }
 
-  // Switch Account Dialog
-  if (showSwitchAccountDialog) {
-    AlertDialog(
-      onDismissRequest = { showSwitchAccountDialog = false },
-      title = { Text("Switch Creator Account", color = TextPrimary) },
-      text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          userAccounts.forEach { acc ->
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (acc.isCurrent) StudioSurfaceVariant else Color.Transparent)
-                .clickable {
-                  StudioAccountManager.switchActiveAccount(acc.id)
-                  Toast.makeText(context, "Switched to ${acc.name}", Toast.LENGTH_SHORT).show()
-                  showSwitchAccountDialog = false
-                }
-                .padding(10.dp),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(36.dp)
-                  .clip(CircleShape)
-                  .background(Color(acc.avatarColor)),
-                contentAlignment = Alignment.Center
-              ) {
-                Text(acc.name.take(1), fontWeight = FontWeight.Bold, color = Color.Black)
-              }
-              Spacer(modifier = Modifier.width(10.dp))
-              Column(modifier = Modifier.weight(1f)) {
-                Text(acc.name, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
-                Text(acc.email, color = TextTertiary, fontSize = 11.sp)
-              }
-              if (acc.isCurrent) {
-                Icon(Icons.Default.Check, contentDescription = null, tint = CyanAccent)
-              }
-            }
-          }
-        }
-      },
-      confirmButton = {
-        TextButton(onClick = { showSwitchAccountDialog = false }) {
-          Text("Close", color = CyanAccent)
-        }
-      },
-      containerColor = StudioSurface
-    )
-  }
-
   // Log Out Dialog
   if (showLogOutDialog) {
     AlertDialog(
@@ -1595,8 +1706,11 @@ fun HomeAccountTabView(
       confirmButton = {
         Button(
           onClick = {
-            showLogOutDialog = false
-            Toast.makeText(context, "Logged out successfully", Toast.LENGTH_SHORT).show()
+            coroutineScope.launch {
+              StudioAccountManager.signOut()
+              showLogOutDialog = false
+              Toast.makeText(context, "Logged out successfully", Toast.LENGTH_SHORT).show()
+            }
           },
           colors = ButtonDefaults.buttonColors(containerColor = RoseAccent, contentColor = Color.White)
         ) {
@@ -1648,73 +1762,6 @@ private fun AccountOptionRow(
   }
 }
 
-// Modal dialog to create custom template
-@Composable
-private fun CreateTemplateModalDialog(
-  onDismiss: () -> Unit,
-  onCreate: (title: String, category: String, description: String, durationSec: Int, aspect: AspectRatio) -> Unit
-) {
-  var title by remember { mutableStateOf("") }
-  var category by remember { mutableStateOf("User-Created") }
-  var description by remember { mutableStateOf("") }
-  var durationSec by remember { mutableStateOf("6") }
-  var selectedAspect by remember { mutableStateOf(AspectRatio.RATIO_9_16) }
-
-  AlertDialog(
-    onDismissRequest = onDismiss,
-    title = { Text("Create Custom Template", color = TextPrimary) },
-    text = {
-      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
-          value = title,
-          onValueChange = { title = it },
-          label = { Text("Template Title") },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-          value = category,
-          onValueChange = { category = it },
-          label = { Text("Category (e.g. Reels, Vlog, Ads)") },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-          value = durationSec,
-          onValueChange = { durationSec = it.filter { char -> char.isDigit() } },
-          label = { Text("Duration (Seconds)") },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-          value = description,
-          onValueChange = { description = it },
-          label = { Text("Description & Style Notes") },
-          modifier = Modifier.fillMaxWidth()
-        )
-      }
-    },
-    confirmButton = {
-      Button(
-        onClick = {
-          if (title.isNotBlank()) {
-            onCreate(title, category, description, durationSec.toIntOrNull() ?: 6, selectedAspect)
-          }
-        },
-        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
-      ) {
-        Text("Save Template")
-      }
-    },
-    dismissButton = {
-      TextButton(onClick = onDismiss) {
-        Text("Cancel", color = TextSecondary)
-      }
-    },
-    containerColor = StudioSurface
-  )
-}
-
 // Modal dialog to preview template details
 @Composable
 private fun TemplatePreviewModalDialog(
@@ -1726,12 +1773,62 @@ private fun TemplatePreviewModalDialog(
 ) {
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("${template.iconEmoji} ${template.title}", color = TextPrimary) },
+    title = {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("${template.iconEmoji} ${template.title}", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+      }
+    },
     text = {
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Creator Row
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(StudioSurfaceVariant)
+            .padding(8.dp)
+        ) {
+          Box(
+            modifier = Modifier
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(Brush.linearGradient(listOf(CyanAccent, PurpleAccent))),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              template.creatorName.take(1).uppercase().ifBlank { "C" },
+              color = Color.Black,
+              fontWeight = FontWeight.Bold,
+              fontSize = 14.sp
+            )
+          }
+          Spacer(modifier = Modifier.width(10.dp))
+          Column {
+            Text(
+              template.creatorName.ifBlank { "Verified Creator" },
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+            )
+            Text(
+              template.creatorHandle.ifBlank { "@creator" },
+              style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 11.sp)
+            )
+          }
+        }
+
+        // Live stats: Views and Cuts
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+          Text("👁️ ${template.viewsCount} views", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+          Text("✂️ ${template.usesCount} cuts", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+
         Text("Category: ${template.category}", color = CyanAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-        Text(template.description, color = TextSecondary, fontSize = 12.sp)
-        Spacer(modifier = Modifier.height(4.dp))
+        if (template.description.isNotBlank()) {
+          Text(template.description, color = TextSecondary, fontSize = 12.sp)
+        }
         Text("🎵 Soundtrack: ${template.audioTitle}", color = TextPrimary, fontSize = 12.sp)
         Text("⏱️ Duration: ${template.durationMs / 1000}s • Aspect: ${template.aspectRatio.label}", color = TextTertiary, fontSize = 11.sp)
         Text("🎞️ Media Slots: ${template.mediaPlaceholders.size} • Text Slots: ${template.textPlaceholders.size}", color = TextTertiary, fontSize = 11.sp)
@@ -1742,7 +1839,9 @@ private fun TemplatePreviewModalDialog(
         onClick = onUseTemplate,
         colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black)
       ) {
-        Text("Use Template")
+        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Use Template", fontWeight = FontWeight.Bold)
       }
     },
     dismissButton = {

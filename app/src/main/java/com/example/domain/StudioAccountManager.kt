@@ -1,80 +1,163 @@
 package com.example.domain
 
-import com.example.data.presets.MediaPlaceholder
-import com.example.data.presets.PlaceholderType
-import com.example.data.presets.TextPlaceholder
+import android.content.Context
+import com.example.auth.AuthManager
+import com.example.auth.AuthResult
+import com.example.auth.StorageBreakdown
+import com.example.data.local.OAuthConnectionEntity
+import com.example.data.local.UserAccountEntity
 import com.example.data.presets.VideoTemplate
-import com.example.domain.model.*
+import com.example.domain.model.AspectRatio
+import com.example.domain.model.AudioClip
+import com.example.domain.model.FilterSettings
+import com.example.domain.model.FilterType
+import com.example.domain.model.FrameRate
+import com.example.domain.model.Resolution
+import com.example.domain.model.TextClip
+import com.example.domain.model.Timeline
+import com.example.domain.model.VideoClip
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.util.UUID
 
-data class UserProfile(
-  val name: String = "Akmal Adeem",
-  val handle: String = "@akmal_creator_pro",
-  val email: String = "akmaladeem684@gmail.com",
-  val bio: String = "4K Cinematic Video Director & Motion Graphics Specialist 🎬",
-  val planName: String = "Pro VIP Creator Pass",
-  val isPro: Boolean = true,
-  val avatarColor: Long = 0xFF00E5FF
-)
-
-data class SocialAccountConnection(
-  val platformName: String,
-  val platformIcon: String,
-  val handle: String,
-  val isConnected: Boolean
-)
-
-data class UserAccountProfile(
-  val id: String,
-  val name: String,
-  val email: String,
-  val avatarColor: Long,
-  val isCurrent: Boolean
-)
-
 object StudioAccountManager {
-  private val _profile = MutableStateFlow(UserProfile())
-  val profile: StateFlow<UserProfile> = _profile.asStateFlow()
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private var authManager: AuthManager? = null
 
-  private val _savedTemplateIds = MutableStateFlow<Set<String>>(
-    setOf("tpl_reels_beat_pulse", "tpl_yt_tech_review")
-  )
+  // Real Account & Auth State
+  private val _currentAccount = MutableStateFlow<UserAccountEntity?>(null)
+  val currentAccount: StateFlow<UserAccountEntity?> = _currentAccount.asStateFlow()
+
+  private val _allAccounts = MutableStateFlow<List<UserAccountEntity>>(emptyList())
+  val allAccounts: StateFlow<List<UserAccountEntity>> = _allAccounts.asStateFlow()
+
+  private val _oauthConnections = MutableStateFlow<List<OAuthConnectionEntity>>(emptyList())
+  val oauthConnections: StateFlow<List<OAuthConnectionEntity>> = _oauthConnections.asStateFlow()
+
+  private val _storageBreakdown = MutableStateFlow(StorageBreakdown(0L, 0L, 0L, 0L))
+  val storageBreakdown: StateFlow<StorageBreakdown> = _storageBreakdown.asStateFlow()
+
+  private val _isLoading = MutableStateFlow(false)
+  val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+  private val _authError = MutableStateFlow<String?>(null)
+  val authError: StateFlow<String?> = _authError.asStateFlow()
+
+  // Custom Video Templates Management
+  private val _savedTemplateIds = MutableStateFlow<Set<String>>(emptySet())
   val savedTemplateIds: StateFlow<Set<String>> = _savedTemplateIds.asStateFlow()
 
-  private val _customTemplates = MutableStateFlow<List<VideoTemplate>>(
-    listOf(createInitialCustomTemplate())
-  )
+  private val _customTemplates = MutableStateFlow<List<VideoTemplate>>(emptyList())
   val customTemplates: StateFlow<List<VideoTemplate>> = _customTemplates.asStateFlow()
 
-  private val _socialConnections = MutableStateFlow<List<SocialAccountConnection>>(
-    listOf(
-      SocialAccountConnection("YouTube", "🔴", "@AkmalStudioPro", true),
-      SocialAccountConnection("TikTok", "🎵", "@akmal_edits", true),
-      SocialAccountConnection("Instagram", "📸", "@akmal.reels", true),
-      SocialAccountConnection("X / Twitter", "🐦", "@akmal_dev", false)
-    )
-  )
-  val socialConnections: StateFlow<List<SocialAccountConnection>> = _socialConnections.asStateFlow()
+  fun init(context: Context) {
+    com.example.data.firebase.FirebaseTemplateManager.init(context.applicationContext)
+    if (authManager == null) {
+      val manager = AuthManager.getInstance(context.applicationContext)
+      authManager = manager
 
-  private val _userAccounts = MutableStateFlow<List<UserAccountProfile>>(
-    listOf(
-      UserAccountProfile("acc_1", "Akmal Adeem", "akmaladeem684@gmail.com", 0xFF00E5FF, true),
-      UserAccountProfile("acc_2", "AH Studio Official", "business@ahvideostudio.com", 0xFF9333EA, false),
-      UserAccountProfile("acc_3", "Personal Channel", "personal@creator.io", 0xFF10B981, false)
-    )
-  )
-  val userAccounts: StateFlow<List<UserAccountProfile>> = _userAccounts.asStateFlow()
+      scope.launch {
+        manager.currentAccount.collect { account ->
+          _currentAccount.value = account
+        }
+      }
 
-  fun updateProfile(name: String, handle: String, bio: String, email: String) {
-    _profile.value = _profile.value.copy(
-      name = name.ifBlank { "Creator" },
-      handle = if (handle.startsWith("@")) handle else "@$handle",
-      bio = bio,
-      email = email
-    )
+      scope.launch {
+        manager.allAccounts.collect { list ->
+          _allAccounts.value = list
+        }
+      }
+
+      scope.launch {
+        manager.oauthConnections.collect { list ->
+          _oauthConnections.value = list
+        }
+      }
+
+      scope.launch {
+        manager.storageBreakdown.collect { breakdown ->
+          _storageBreakdown.value = breakdown
+        }
+      }
+
+      scope.launch {
+        manager.isLoading.collect { loading ->
+          _isLoading.value = loading
+        }
+      }
+
+      scope.launch {
+        manager.authError.collect { err ->
+          _authError.value = err
+        }
+      }
+    }
+  }
+
+  suspend fun signInWithGoogle(activityContext: Context): AuthResult {
+    val manager = authManager ?: AuthManager.getInstance(activityContext.applicationContext).also { authManager = it }
+    return manager.signInWithGoogle(activityContext)
+  }
+
+  suspend fun signInWithEmail(email: String, pass: String): AuthResult {
+    val manager = authManager ?: throw IllegalStateException("AuthManager not initialized")
+    return manager.signInWithEmail(email, pass)
+  }
+
+  suspend fun registerWithEmail(email: String, pass: String, name: String): AuthResult {
+    val manager = authManager ?: throw IllegalStateException("AuthManager not initialized")
+    return manager.registerWithEmail(email, pass, name)
+  }
+
+  suspend fun sendPasswordReset(email: String): Result<Unit> {
+    val manager = authManager ?: throw IllegalStateException("AuthManager not initialized")
+    return manager.sendPasswordReset(email)
+  }
+
+  suspend fun updateProfile(name: String, bio: String, handle: String): Result<Unit> {
+    val manager = authManager ?: return Result.failure(IllegalStateException("AuthManager not initialized"))
+    return manager.updateProfile(name, bio, handle)
+  }
+
+  suspend fun switchActiveAccount(uid: String) {
+    authManager?.switchAccount(uid)
+  }
+
+  suspend fun removeAccount(uid: String) {
+    authManager?.removeAccount(uid)
+  }
+
+  suspend fun signOut() {
+    authManager?.signOut()
+  }
+
+  suspend fun connectOAuthPlatform(
+    platformId: String,
+    accountHandle: String,
+    accountId: String,
+    accessToken: String,
+    refreshToken: String? = null
+  ) {
+    authManager?.connectOAuthPlatform(platformId, accountHandle, accountId, accessToken, refreshToken)
+  }
+
+  suspend fun disconnectOAuthPlatform(platformId: String) {
+    authManager?.disconnectOAuthPlatform(platformId)
+  }
+
+  suspend fun refreshStorageUsage(): StorageBreakdown {
+    return authManager?.calculateRealStorageUsage() ?: StorageBreakdown(0L, 0L, 0L, 0L)
+  }
+
+  suspend fun clearRealAppCache(): Long {
+    return authManager?.clearRealAppCache() ?: 0L
   }
 
   fun toggleSavedTemplate(templateId: String) {
@@ -122,7 +205,7 @@ object StudioAccountManager {
 
   fun duplicateCustomTemplate(templateId: String): VideoTemplate? {
     val target = _customTemplates.value.find { it.id == templateId }
-      ?: com.example.data.presets.TemplatesCatalog.templates.find { it.id == templateId }
+      ?: com.example.data.firebase.FirebaseTemplateManager.templates.value.find { it.id == templateId }
       ?: return null
 
     val copyId = "cust_tpl_${UUID.randomUUID().toString().take(8)}"
@@ -145,100 +228,5 @@ object StudioAccountManager {
     val currentSaved = _savedTemplateIds.value.toMutableSet()
     currentSaved.remove(templateId)
     _savedTemplateIds.value = currentSaved
-  }
-
-  private fun createInitialCustomTemplate(): VideoTemplate {
-    val sampleTimeline = Timeline(
-      videoClips = listOf(
-        VideoClip(
-          id = "cust_v1",
-          name = "Cinematic Travel Hook.mp4",
-          uri = "sample_travel_hook",
-          timelineStartMs = 0L,
-          durationMs = 3000L,
-          sourceStartMs = 0L,
-          sourceEndMs = 3000L,
-          speed = 1.0f,
-          volume = 0.9f
-        ),
-        VideoClip(
-          id = "cust_v2",
-          name = "Sunset Cityscape.mp4",
-          uri = "sample_sunset_city",
-          timelineStartMs = 3000L,
-          durationMs = 3000L,
-          sourceStartMs = 0L,
-          sourceEndMs = 3000L,
-          speed = 1.1f,
-          volume = 0.9f
-        )
-      ),
-      textClips = listOf(
-        TextClip(
-          id = "cust_t1",
-          text = "DAILY VLOG OPENER",
-          timelineStartMs = 500L,
-          durationMs = 3500L,
-          fontFamily = "Montserrat-Bold",
-          fontSizeSp = 40f,
-          textColor = 0xFF00E5FF
-        )
-      ),
-      audioClips = listOf(
-        AudioClip(
-          id = "cust_a1",
-          title = "Ambient Morning Chill.mp3",
-          uri = "sample_ambient_chill",
-          timelineStartMs = 0L,
-          durationMs = 6000L,
-          volume = 0.8f
-        )
-      ),
-      filter = FilterSettings(FilterType.CINEMATIC, 0.85f)
-    )
-
-    return VideoTemplate(
-      id = "cust_tpl_vlog_intro",
-      title = "My Daily Vlog Opener",
-      category = "User-Created",
-      description = "Personalized cinematic travel opener with atmospheric text animations and custom color grade.",
-      aspectRatio = AspectRatio.RATIO_16_9,
-      resolution = Resolution.RES_1080P,
-      fps = FrameRate.FPS_30,
-      durationMs = 6000L,
-      thumbnailGradientStart = 0xFF10B981,
-      thumbnailGradientEnd = 0xFF3B82F6,
-      iconEmoji = "✨",
-      audioTitle = "Ambient Morning Chill",
-      savedTimeline = sampleTimeline,
-      createTimeline = { _, _ -> sampleTimeline }
-    )
-  }
-
-  fun toggleSocialConnection(platformName: String) {
-    _socialConnections.value = _socialConnections.value.map { conn ->
-      if (conn.platformName == platformName) {
-        conn.copy(isConnected = !conn.isConnected)
-      } else {
-        conn
-      }
-    }
-  }
-
-  fun switchActiveAccount(accountId: String) {
-    _userAccounts.value = _userAccounts.value.map { acc ->
-      acc.copy(isCurrent = acc.id == accountId)
-    }
-    _userAccounts.value.find { it.id == accountId }?.let { active ->
-      _profile.value = _profile.value.copy(
-        name = active.name,
-        email = active.email,
-        avatarColor = active.avatarColor
-      )
-    }
-  }
-
-  fun clearAppCache(): Long {
-    return 48_500_000L // 48.5 MB cleared
   }
 }

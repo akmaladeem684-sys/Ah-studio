@@ -223,22 +223,35 @@ class TimelineEngine {
   }
 
   /**
-   * Hard-enforces the Zero Point Lock (🔒 0.0s) rule on the Primary/First Media Track.
-   * The first video clip in the main track MUST start at exactly 0.0s.
-   * If any operation moves, trims, or deletes clips such that the first clip is not at 0.0s,
-   * this automatically snaps the primary clip to 0.0s.
+   * Hard-enforces magnetic continuity and the Zero Point Lock (🔒 0.0s) rule on the Primary Media Track.
+   * All video clips in the main track MUST be packed consecutively:
+   * Clip 0 starts at 0.0s, Clip 1 immediately follows Clip 0 with zero gap, etc.
+   * The track ends exactly where the last media clip ends.
    */
-  fun enforceZeroPointLock(): Boolean {
+  fun enforceMainTrackContinuity(): Boolean {
     val clips = _timeline.value.videoClips
     if (clips.isEmpty()) return false
-    val sorted = clips.sortedBy { it.timelineStartMs }
-    if (sorted.first().timelineStartMs != 0L) {
-      val firstClip = sorted.first().copy(timelineStartMs = 0L)
-      val updated = listOf(firstClip) + sorted.drop(1)
-      _timeline.value = _timeline.value.copy(videoClips = updated)
-      return true
+    var currentStart = 0L
+    var modified = false
+    val updated = clips.map { clip ->
+      if (clip.timelineStartMs != currentStart) {
+        modified = true
+        val c = clip.copy(timelineStartMs = currentStart)
+        currentStart += clip.durationMs
+        c
+      } else {
+        currentStart += clip.durationMs
+        clip
+      }
     }
-    return false
+    if (modified) {
+      _timeline.value = _timeline.value.copy(videoClips = updated)
+    }
+    return modified
+  }
+
+  fun enforceZeroPointLock(): Boolean {
+    return enforceMainTrackContinuity()
   }
 
   private val _isVideoTrackEndLocked = MutableStateFlow(true)
@@ -931,6 +944,7 @@ class TimelineEngine {
     }
 
     _timeline.value = _timeline.value.copy(videoClips = currentClips)
+    enforceMainTrackContinuity()
     _selectedElement.value = SelectedTrackElement.Video(newClip.id)
     _currentPositionMs.value = startMs + durationMs
   }
@@ -1306,6 +1320,7 @@ class TimelineEngine {
           else it
         }
         _timeline.value = _timeline.value.copy(videoClips = list)
+        enforceMainTrackContinuity()
       }
       is SelectedTrackElement.Overlay -> {
         if (isTrackLocked(TrackType.OVERLAY)) return
@@ -1475,10 +1490,9 @@ class TimelineEngine {
     val moveDesc = if (targets.size > 1) "Move (${targets.size} clips)" else "Move Clip"
     recordHistory(TimelineActionType.MOVE_CLIP, moveDesc, targets)
     val newVideo = if (!isTrackLocked(TrackType.MAIN_VIDEO)) {
-      val firstClipId = _timeline.value.videoClips.minByOrNull { it.timelineStartMs }?.id
       _timeline.value.videoClips.map {
         if (it.id in targets) {
-          val candidate = if (it.id == firstClipId) 0L else (it.timelineStartMs + effectiveDelta).coerceAtLeast(0L)
+          val candidate = (it.timelineStartMs + effectiveDelta).coerceAtLeast(0L)
           it.copy(timelineStartMs = candidate)
         } else it
       }.sortedBy { it.timelineStartMs }
@@ -2749,11 +2763,15 @@ class TimelineEngine {
 
   fun updateFilter(filter: FilterSettings, targetClipId: String? = null) {
     recordHistory()
+    val playheadClipId = _timeline.value.videoClips.find {
+      _currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs
+    }?.id ?: _timeline.value.videoClips.firstOrNull()?.id
+
     val clipId = targetClipId ?: when (val sel = _selectedElement.value) {
       is SelectedTrackElement.Video -> sel.clipId
       is SelectedTrackElement.Overlay -> sel.clipId
       else -> null
-    }
+    } ?: playheadClipId
 
     if (clipId != null) {
       val newVideos = _timeline.value.videoClips.map {
@@ -3206,19 +3224,101 @@ class TimelineEngine {
 
   // --- Effect Operations ---
 
-  fun addEffectClip(effectType: EffectType): EffectClip {
+  fun applyEffectToCurrentClip(
+    effectType: EffectType,
+    intensity: Float = 0.8f,
+    customName: String = ""
+  ): EffectClip {
     recordHistory()
-    val newEffect = EffectClip(
-      effectType = effectType,
-      timelineStartMs = _currentPositionMs.value,
-      durationMs = 3000L,
-      intensity = 0.8f
-    )
-    val list = _timeline.value.effectClips.toMutableList()
-    list.add(newEffect)
-    _timeline.value = _timeline.value.copy(effectClips = list)
-    _selectedElement.value = SelectedTrackElement.Effect(newEffect.id)
-    return newEffect
+    val sel = _selectedElement.value
+    val targetVideoClip = when (sel) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == sel.clipId }
+      is SelectedTrackElement.Effect -> {
+        val eff = _timeline.value.effectClips.find { it.id == sel.clipId }
+        eff?.targetClipId?.let { cid -> _timeline.value.videoClips.find { it.id == cid } }
+          ?: _timeline.value.videoClips.find { _currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs }
+      }
+      else -> _timeline.value.videoClips.find { _currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs }
+        ?: _timeline.value.videoClips.firstOrNull()
+    }
+
+    val startMs = targetVideoClip?.timelineStartMs ?: _currentPositionMs.value
+    val durationMs = targetVideoClip?.durationMs ?: 3000L
+    val targetClipId = targetVideoClip?.id
+
+    val existing = if (targetClipId != null) {
+      _timeline.value.effectClips.find { it.targetClipId == targetClipId || (it.timelineStartMs == startMs && it.durationMs == durationMs) }
+    } else {
+      (sel as? SelectedTrackElement.Effect)?.let { effSel ->
+        _timeline.value.effectClips.find { it.id == effSel.clipId }
+      } ?: _timeline.value.effectClips.find { _currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs }
+    }
+
+    val effect = if (existing != null) {
+      existing.copy(
+        effectType = effectType,
+        intensity = intensity,
+        customName = customName.ifBlank { effectType.displayName },
+        timelineStartMs = startMs,
+        durationMs = durationMs,
+        targetClipId = targetClipId
+      )
+    } else {
+      EffectClip(
+        effectType = effectType,
+        timelineStartMs = startMs,
+        durationMs = durationMs,
+        intensity = intensity,
+        customName = customName.ifBlank { effectType.displayName },
+        targetClipId = targetClipId
+      )
+    }
+
+    val list = _timeline.value.effectClips.filter { it.id != effect.id }.toMutableList()
+    list.add(effect)
+    _timeline.value = _timeline.value.copy(effectClips = list.sortedBy { it.timelineStartMs })
+    _selectedElement.value = SelectedTrackElement.Effect(effect.id)
+    return effect
+  }
+
+  fun removeEffectFromCurrentClip() {
+    recordHistory()
+    val sel = _selectedElement.value
+    val targetClip = when (sel) {
+      is SelectedTrackElement.Video -> _timeline.value.videoClips.find { it.id == sel.clipId }
+      is SelectedTrackElement.Effect -> {
+        val eff = _timeline.value.effectClips.find { it.id == sel.clipId }
+        eff?.targetClipId?.let { cid -> _timeline.value.videoClips.find { it.id == cid } }
+          ?: _timeline.value.videoClips.find { _currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs }
+      }
+      else -> _timeline.value.videoClips.find { _currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs }
+        ?: _timeline.value.videoClips.firstOrNull()
+    }
+    val targetClipId = targetClip?.id
+
+    val toRemove = _timeline.value.effectClips.filter {
+      (targetClipId != null && it.targetClipId == targetClipId) ||
+      (sel is SelectedTrackElement.Effect && it.id == sel.clipId) ||
+      (targetClip != null && it.timelineStartMs == targetClip.timelineStartMs && it.durationMs == targetClip.durationMs) ||
+      (_currentPositionMs.value >= it.timelineStartMs && _currentPositionMs.value < it.timelineStartMs + it.durationMs)
+    }
+
+    if (toRemove.isNotEmpty()) {
+      val removeIds = toRemove.map { it.id }.toSet()
+      val list = _timeline.value.effectClips.filterNot { it.id in removeIds }
+      _timeline.value = _timeline.value.copy(effectClips = list)
+      if (sel is SelectedTrackElement.Effect && sel.clipId in removeIds) {
+        if (targetClipId != null) {
+          _selectedElement.value = SelectedTrackElement.Video(targetClipId)
+        } else {
+          _selectedElement.value = SelectedTrackElement.None
+        }
+      }
+    }
+  }
+
+  fun addEffectClip(effectType: EffectType): EffectClip {
+    return applyEffectToCurrentClip(effectType)
   }
 
   fun updateEffectIntensity(effectId: String, intensity: Float) {

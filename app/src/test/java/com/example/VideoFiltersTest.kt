@@ -20,7 +20,7 @@ class VideoFiltersTest {
   @Before
   fun setUp() {
     timelineEngine = TimelineEngine()
-    timelineEngine.newProject()
+    timelineEngine.loadTimeline(Timeline())
   }
 
   @Test
@@ -99,19 +99,25 @@ class VideoFiltersTest {
   @Test
   fun testFilterApplicationIsNonDestructiveToOtherTracks() {
     // Setup timeline with video, audio, text, sticker, and effect
-    val video1 = VideoClip(id = "v1", uri = "uri1", durationMs = 5000L, timelineStartMs = 0L)
-    val video2 = VideoClip(id = "v2", uri = "uri2", durationMs = 5000L, timelineStartMs = 5000L)
-    val audio = AudioClip(id = "a1", uri = "a_uri", durationMs = 10000L, timelineStartMs = 0L)
-    val text = TextOverlay(id = "t1", text = "Title", startTimeMs = 0L, endTimeMs = 4000L)
-    val sticker = StickerOverlay(id = "s1", emoji = "🔥", startTimeMs = 1000L, endTimeMs = 3000L)
-    val effect = EffectClip(id = "e1", effectType = EffectType.GLITCH, timelineStartMs = 0L, durationMs = 2000L)
-
-    timelineEngine.addClip(video1)
-    timelineEngine.addClip(video2)
-    timelineEngine.addAudioClip(audio)
-    timelineEngine.addTextOverlay(text)
-    timelineEngine.addStickerOverlay(sticker)
-    timelineEngine.addEffectClip(effect)
+    val initialTimeline = Timeline(
+      videoClips = listOf(
+        VideoClip(id = "v1", name = "v1", uri = "uri1", durationMs = 5000L, timelineStartMs = 0L),
+        VideoClip(id = "v2", name = "v2", uri = "uri2", durationMs = 5000L, timelineStartMs = 5000L)
+      ),
+      audioClips = listOf(
+        AudioClip(id = "a1", title = "a1", uri = "a_uri", durationMs = 10000L, timelineStartMs = 0L)
+      ),
+      textClips = listOf(
+        TextClip(id = "t1", text = "Title", timelineStartMs = 0L, durationMs = 4000L)
+      ),
+      stickerClips = listOf(
+        StickerClip(id = "s1", emojiOrAsset = "🔥", timelineStartMs = 1000L, durationMs = 2000L)
+      ),
+      effectClips = listOf(
+        EffectClip(id = "e1", effectType = EffectType.GLITCH, timelineStartMs = 0L, durationMs = 2000L)
+      )
+    )
+    timelineEngine.loadTimeline(initialTimeline)
 
     val initialDuration = timelineEngine.timeline.value.totalDurationMs
     assertEquals(10000L, initialDuration)
@@ -124,8 +130,8 @@ class VideoFiltersTest {
     // Verify tracks are intact and unchanged in position/duration
     assertEquals(2, afterFilter.videoClips.size)
     assertEquals(1, afterFilter.audioClips.size)
-    assertEquals(1, afterFilter.textOverlays.size)
-    assertEquals(1, afterFilter.stickerOverlays.size)
+    assertEquals(1, afterFilter.textClips.size)
+    assertEquals(1, afterFilter.stickerClips.size)
     assertEquals(1, afterFilter.effectClips.size)
     assertEquals(initialDuration, afterFilter.totalDurationMs)
 

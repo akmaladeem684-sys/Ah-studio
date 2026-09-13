@@ -45,3 +45,34 @@ data class ExportedVideoEntity(
   val timestamp: Long,
   val fileSizeBytes: Long
 )
+
+@Entity(tableName = "user_accounts")
+data class UserAccountEntity(
+  @PrimaryKey val uid: String,
+  val email: String,
+  val displayName: String,
+  val photoUrl: String? = null,
+  val providerId: String = "google.com",
+  val bio: String = "",
+  val customHandle: String = "",
+  val lastActiveTimestamp: Long = System.currentTimeMillis(),
+  val isCurrent: Boolean = false,
+  val idToken: String? = null,
+  val refreshToken: String? = null,
+  val avatarColor: Long = 0xFF00E5FF
+)
+
+@Entity(tableName = "oauth_connections")
+data class OAuthConnectionEntity(
+  @PrimaryKey val platformId: String,
+  val platformName: String,
+  val platformIcon: String,
+  val accountHandle: String = "",
+  val accountId: String = "",
+  val accessToken: String = "",
+  val refreshToken: String? = null,
+  val expiresAtTimestamp: Long = 0L,
+  val grantedScopes: String = "",
+  val connectedAtTimestamp: Long = 0L,
+  val isConnected: Boolean = false
+)

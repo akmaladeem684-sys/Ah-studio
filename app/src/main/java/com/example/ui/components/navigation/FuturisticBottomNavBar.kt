@@ -88,6 +88,7 @@ fun FuturisticBottomNavBarContainer(
     Surface(
       modifier = Modifier
         .fillMaxWidth()
+        .height(68.dp)
         .shadow(
           elevation = 12.dp,
           shape = RoundedCornerShape(26.dp),

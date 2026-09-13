@@ -38,7 +38,7 @@ class TimelineSynchronizationTest {
 
   @Test
   fun testSynchronizedMovementMovesAllTracksTogether() {
-    timelineEngine.enableTracksSync(true)
+    timelineEngine.setTracksSyncEnabled(true)
     assertTrue(timelineEngine.isTracksSyncEnabled.value)
 
     // Move clip v1 forward by 1000ms
@@ -100,7 +100,7 @@ class TimelineSynchronizationTest {
 
   @Test
   fun testMoveSelectedClipToPlayheadAlignsStartAtCti() {
-    timelineEngine.enableTracksSync(false)
+    timelineEngine.setTracksSyncEnabled(false)
     timelineEngine.selectElement(SelectedTrackElement.Overlay("o1"))
     // CTI at 3000ms
     timelineEngine.setPosition(3000L)

@@ -60,3 +60,48 @@ interface ExportedVideoDao {
   @Query("DELETE FROM exported_videos WHERE id = :id")
   suspend fun deleteExportedVideo(id: String)
 }
+
+@Dao
+interface AccountDao {
+  @Query("SELECT * FROM user_accounts ORDER BY lastActiveTimestamp DESC")
+  fun getAllAccounts(): Flow<List<UserAccountEntity>>
+
+  @Query("SELECT * FROM user_accounts WHERE isCurrent = 1 LIMIT 1")
+  fun getCurrentAccount(): Flow<UserAccountEntity?>
+
+  @Query("SELECT * FROM user_accounts WHERE isCurrent = 1 LIMIT 1")
+  suspend fun getCurrentAccountSync(): UserAccountEntity?
+
+  @Query("SELECT * FROM user_accounts WHERE uid = :uid LIMIT 1")
+  suspend fun getAccountByUid(uid: String): UserAccountEntity?
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun insertOrUpdateAccount(account: UserAccountEntity)
+
+  @Query("UPDATE user_accounts SET isCurrent = CASE WHEN uid = :activeUid THEN 1 ELSE 0 END, lastActiveTimestamp = CASE WHEN uid = :activeUid THEN :now ELSE lastActiveTimestamp END")
+  suspend fun setActiveAccount(activeUid: String, now: Long = System.currentTimeMillis())
+
+  @Query("UPDATE user_accounts SET displayName = :name, bio = :bio, customHandle = :handle WHERE uid = :uid")
+  suspend fun updateProfileInfo(uid: String, name: String, bio: String, handle: String)
+
+  @Query("DELETE FROM user_accounts WHERE uid = :uid")
+  suspend fun deleteAccount(uid: String)
+
+  @Query("UPDATE user_accounts SET isCurrent = 0")
+  suspend fun clearActiveAccount()
+}
+
+@Dao
+interface OAuthConnectionDao {
+  @Query("SELECT * FROM oauth_connections")
+  fun getAllConnections(): Flow<List<OAuthConnectionEntity>>
+
+  @Query("SELECT * FROM oauth_connections WHERE platformId = :platformId LIMIT 1")
+  suspend fun getConnection(platformId: String): OAuthConnectionEntity?
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun saveConnection(connection: OAuthConnectionEntity)
+
+  @Query("UPDATE oauth_connections SET isConnected = 0, accessToken = '', refreshToken = NULL WHERE platformId = :platformId")
+  suspend fun disconnectPlatform(platformId: String)
+}

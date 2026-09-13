@@ -62,12 +62,12 @@ fun HomeBottomNavigationBar(
         HomeTab.values().forEach { tab ->
           val isSelected = activeTab == tab
           val iconColor by animateColorAsState(
-            targetValue = if (isSelected) CyanAccent else TextTertiary,
+            targetValue = if (isSelected) CyanAccent else TextSecondary,
             animationSpec = tween(200),
             label = "nav_icon_color"
           )
           val textColor by animateColorAsState(
-            targetValue = if (isSelected) TextPrimary else TextTertiary,
+            targetValue = if (isSelected) CyanAccent else TextSecondary,
             animationSpec = tween(200),
             label = "nav_text_color"
           )

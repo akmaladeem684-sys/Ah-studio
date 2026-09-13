@@ -271,27 +271,38 @@ fun HomeScreen(
 
               Spacer(modifier = Modifier.height(16.dp))
 
-              Row(
+              LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 2.dp)
               ) {
-                QuickActionChip(icon = Icons.Default.Collections, label = "Gallery") {
-                  pickGalleryForNewProjectLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                  )
+                item {
+                  QuickActionChip(icon = Icons.Default.Collections, label = "Gallery") {
+                    pickGalleryForNewProjectLauncher.launch(
+                      PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                  }
                 }
-                QuickActionChip(icon = Icons.Default.VideoLibrary, label = "Videos") {
-                  pickVideosForNewProjectLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                  )
+                item {
+                  QuickActionChip(icon = Icons.Default.VideoLibrary, label = "Videos") {
+                    pickVideosForNewProjectLauncher.launch(
+                      PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                    )
+                  }
                 }
-                QuickActionChip(icon = Icons.Default.PhotoLibrary, label = "Photos") {
-                  pickPhotosForNewProjectLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                  )
+                item {
+                  QuickActionChip(icon = Icons.Default.PhotoLibrary, label = "Photos") {
+                    pickPhotosForNewProjectLauncher.launch(
+                      PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                  }
                 }
-                QuickActionChip(icon = Icons.Default.CameraAlt, label = "Camera") { showNewProjectDialog = true }
-                QuickActionChip(icon = Icons.Default.AutoFixHigh, label = "AI Edit") { viewModel.navigateTo(AppScreen.AI_SUITE) }
+                item {
+                  QuickActionChip(icon = Icons.Default.CameraAlt, label = "Camera") { showNewProjectDialog = true }
+                }
+                item {
+                  QuickActionChip(icon = Icons.Default.AutoFixHigh, label = "AI Edit") { viewModel.navigateTo(AppScreen.AI_SUITE) }
+                }
               }
             }
           }
@@ -405,18 +416,18 @@ fun HomeScreen(
               Icon(
                 Icons.Outlined.VideoLibrary,
                 contentDescription = null,
-                tint = TextTertiary,
+                tint = CyanAccent.copy(alpha = 0.8f),
                 modifier = Modifier.size(56.dp)
               )
               Spacer(modifier = Modifier.height(12.dp))
               Text(
                 text = if (searchQuery.isNotBlank()) "No matching projects" else "No projects yet",
-                style = MaterialTheme.typography.titleMedium.copy(color = TextSecondary)
+                style = MaterialTheme.typography.titleMedium.copy(color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
               )
               Spacer(modifier = Modifier.height(6.dp))
               Text(
-                text = "Tap 'New Project' above to start your first video edit.",
-                style = MaterialTheme.typography.bodySmall.copy(color = TextTertiary)
+                text = "Tap 'Create New Project' above to start your first video edit.",
+                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 13.sp)
               )
               Spacer(modifier = Modifier.height(16.dp))
               PrimaryPillButton(

@@ -148,20 +148,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   private val _currentScreen = MutableStateFlow(AppScreen.HOME)
   val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
-  // App Startup State - Ready immediately on launch
-  private val _isStartupLoading = MutableStateFlow(false)
-  val isStartupLoading: StateFlow<Boolean> = _isStartupLoading.asStateFlow()
-
-  private val _startupProgress = MutableStateFlow(1.0f)
-  val startupProgress: StateFlow<Float> = _startupProgress.asStateFlow()
-
-  private val _startupStatus = MutableStateFlow("Studio Ready")
-  val startupStatus: StateFlow<String> = _startupStatus.asStateFlow()
-
-  fun finishStartupLoading() {
-    _isStartupLoading.value = false
-  }
-
   // Active Project State
   private val _activeProjectId = MutableStateFlow("")
   val activeProjectId: StateFlow<String> = _activeProjectId.asStateFlow()
@@ -393,11 +379,31 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     checkMissingMedia()
   }
 
+  // Template Creator Mode
+  private val _isTemplateCreatorMode = MutableStateFlow(false)
+  val isTemplateCreatorMode: StateFlow<Boolean> = _isTemplateCreatorMode.asStateFlow()
+
+  fun enterTemplateCreatorMode() {
+    _isTemplateCreatorMode.value = true
+    createNewProject(
+      name = "Template Project ${System.currentTimeMillis() % 1000}",
+      aspectRatio = AspectRatio.RATIO_9_16,
+      resolution = Resolution.RES_1080P,
+      fps = FrameRate.FPS_30
+    )
+  }
+
+  fun exitTemplateCreatorMode() {
+    _isTemplateCreatorMode.value = false
+  }
+
   fun applyTemplate(
     template: VideoTemplate,
     mediaReplacements: Map<String, String> = emptyMap(),
     textReplacements: Map<String, String> = emptyMap()
   ) {
+    _isTemplateCreatorMode.value = false
+    com.example.data.firebase.FirebaseTemplateManager.recordTemplateUse(template.id, template.creatorId)
     val projectId = UUID.randomUUID().toString()
     _activeProjectId.value = projectId
     _activeProjectName.value = "${template.title} Project"

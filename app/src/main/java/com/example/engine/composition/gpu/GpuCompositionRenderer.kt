@@ -291,13 +291,14 @@ class GpuCompositionRenderer(private val context: Context) {
     }
 
     // Bind uniforms
+    val effectiveFilter = clip?.filter ?: filter
     bindCommonUniforms(
       program = program,
       textureId = textureId,
       isOes = isOes,
       opacity = finalOpacity,
       adjustments = finalAdjustments,
-      filter = filter,
+      filter = effectiveFilter,
       chromaKey = chromaKey,
       viewportWidth = viewportWidth,
       viewportHeight = viewportHeight,
@@ -556,32 +557,6 @@ class GpuCompositionRenderer(private val context: Context) {
       GLES20.glUniform1i(uUseColorMatrixHandle, 1)
     } else if (uUseColorMatrixHandle >= 0) {
       GLES20.glUniform1i(uUseColorMatrixHandle, 0)
-    }
-
-    // Mask Uniforms
-    val uMaskEnabledHandle = GLES20.glGetUniformLocation(program, "uMaskEnabled")
-    if (uMaskEnabledHandle >= 0) {
-      if (mask.enabled && mask.shape != com.example.domain.model.MaskShape.NONE) {
-        val shapeInt = when (mask.shape) {
-          com.example.domain.model.MaskShape.RECTANGLE -> 1
-          com.example.domain.model.MaskShape.CIRCLE -> 2
-          com.example.domain.model.MaskShape.LINEAR -> 3
-          com.example.domain.model.MaskShape.MIRROR -> 4
-          com.example.domain.model.MaskShape.STAR -> 5
-          com.example.domain.model.MaskShape.HEART -> 6
-          else -> 0
-        }
-        GLES20.glUniform1i(uMaskEnabledHandle, 1)
-        GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uMaskShape"), shapeInt)
-        GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uMaskPos"), mask.posX, mask.posY)
-        GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uMaskSize"), mask.width, mask.height)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uMaskRotation"), mask.rotation)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uMaskFeather"), mask.feather)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uMaskOpacity"), mask.opacity)
-        GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uMaskInverted"), if (mask.isInverted) 1 else 0)
-      } else {
-        GLES20.glUniform1i(uMaskEnabledHandle, 0)
-      }
     }
   }
 

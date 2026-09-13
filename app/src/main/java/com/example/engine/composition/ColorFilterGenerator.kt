@@ -74,18 +74,44 @@ object ColorFilterGenerator {
     }
 
     // 6. Active Filter Preset (Clip override if set, otherwise timeline filter)
-    val activeFilter = if (clipFilter != null && clipFilter.type != FilterType.NONE) {
-      clipFilter
-    } else {
-      filterSettings
+    val activeFilter = when {
+      clipFilter != null -> clipFilter
+      else -> filterSettings
     }
 
     val filterMatrix = getFilterMatrix(activeFilter.type, activeFilter.intensity)
+
     if (filterMatrix != null) {
       result.postConcat(filterMatrix)
     }
 
     return result
+  }
+
+  /**
+   * Converts Android's 4x5 row-major ColorMatrix array (20 floats) to Media3 / OpenGL
+   * 4x4 column-major matrix (16 floats), with normalized offsets (0..1).
+   */
+  fun colorMatrixToGlMatrix(colorMatrix: ColorMatrix): FloatArray {
+    val arr = colorMatrix.array
+    return floatArrayOf(
+      arr[0], arr[5], arr[10], arr[15],
+      arr[1], arr[6], arr[11], arr[16],
+      arr[2], arr[7], arr[12], arr[17],
+      arr[4] / 255.0f, arr[9] / 255.0f, arr[14] / 255.0f, arr[18]
+    )
+  }
+
+  /**
+   * Checks if a ColorMatrix represents the identity transform (no filtering/adjustments).
+   */
+  fun isIdentityMatrix(colorMatrix: ColorMatrix): Boolean {
+    val a = colorMatrix.array
+    return a[0] == 1f && a[6] == 1f && a[11] == 1f && a[18] == 1f &&
+      a[1] == 0f && a[2] == 0f && a[3] == 0f && a[4] == 0f &&
+      a[5] == 0f && a[7] == 0f && a[8] == 0f && a[9] == 0f &&
+      a[10] == 0f && a[12] == 0f && a[13] == 0f && a[14] == 0f &&
+      a[15] == 0f && a[16] == 0f && a[17] == 0f && a[19] == 0f
   }
 
   /**

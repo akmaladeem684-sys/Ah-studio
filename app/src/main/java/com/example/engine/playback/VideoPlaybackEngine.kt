@@ -90,9 +90,53 @@ class VideoPlaybackEngine(
     return MediaRelinkManager.isRealPlayableMedia(context, uriString)
   }
 
+  private var lastAppliedFilterMatrix: FloatArray? = null
+
+  /**
+   * Connects the color filter matrix directly to Media3 ExoPlayer's video effects pipeline.
+   * Modifies rendered video frames via hardware GPU shader in real time.
+   */
+  fun applyVideoFilter(colorMatrix: android.graphics.ColorMatrix?) {
+    try {
+      if (colorMatrix == null || com.example.engine.composition.ColorFilterGenerator.isIdentityMatrix(colorMatrix)) {
+        if (lastAppliedFilterMatrix != null) {
+          lastAppliedFilterMatrix = null
+          player.setVideoEffects(emptyList())
+          if (!player.isPlaying && player.playbackState != Player.STATE_IDLE) {
+            player.seekTo(player.currentPosition)
+          }
+        }
+        return
+      }
+
+      val glMatrix = com.example.engine.composition.ColorFilterGenerator.colorMatrixToGlMatrix(colorMatrix)
+      if (lastAppliedFilterMatrix != null && lastAppliedFilterMatrix!!.contentEquals(glMatrix)) {
+        return
+      }
+      lastAppliedFilterMatrix = glMatrix
+
+      val rgbMatrix = object : androidx.media3.effect.RgbMatrix {
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = glMatrix
+      }
+
+      player.setVideoEffects(listOf(rgbMatrix))
+      if (!player.isPlaying && player.playbackState != Player.STATE_IDLE) {
+        player.seekTo(player.currentPosition)
+      }
+    } catch (e: Exception) {
+      Log.w(tag, "Failed to apply video effects to ExoPlayer: ${e.message}", e)
+    }
+  }
+
   fun updateTimeline(timeline: Timeline) {
     this.currentTimeline = timeline
-    // Re-verify current active clip
+    val clip = findClipAt(currentPosMs)
+    val matrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+      timeline.adjustments,
+      timeline.filter,
+      clip?.filter
+    )
+    applyVideoFilter(matrix)
     syncWithPosition(currentPosMs, forceReload = false)
   }
 
@@ -273,6 +317,13 @@ class VideoPlaybackEngine(
   private fun syncWithPosition(posMs: Long, forceReload: Boolean = false) {
     val clip = findClipAt(posMs)
     _activeClip.value = clip
+
+    val matrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+      currentTimeline.adjustments,
+      currentTimeline.filter,
+      clip?.filter
+    )
+    applyVideoFilter(matrix)
 
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
       val needsReload = forceReload || loadedUri != clip.uri || player.mediaItemCount == 0

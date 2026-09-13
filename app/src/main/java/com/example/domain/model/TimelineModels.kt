@@ -537,7 +537,8 @@ data class EffectClip(
   val intensity: Float = 0.8f,
   val keyframes: List<ClipKeyframe> = emptyList(),
   val customName: String = "",
-  val effectCategory: String = "Video Effects"
+  val effectCategory: String = "Video Effects",
+  val targetClipId: String? = null
 )
 
 enum class TransitionType(val displayName: String) {
@@ -684,6 +685,10 @@ data class Timeline(
       val textDur = textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
       val stickerDur = stickerClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
       val effectDur = effectClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-      return maxOf(videoDur, overlayDur, audioDur, textDur, stickerDur, effectDur).coerceAtLeast(3000L)
+      return if (videoClips.isNotEmpty()) {
+        videoDur
+      } else {
+        maxOf(overlayDur, audioDur, textDur, stickerDur, effectDur)
+      }
     }
 }
