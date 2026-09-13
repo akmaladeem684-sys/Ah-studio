@@ -1,17 +1,18 @@
-name: Android Build
+name: Android CI Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -19,17 +20,34 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
-      # NDK aur CMake install karne ka step
-      - name: Setup Android NDK and CMake
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            ndk;26.1.10909125
-            cmake;3.22.1
+      - name: Configure Pre-installed Android NDK & CMake
+        run: |
+          echo "Finding installed NDK versions..."
+          ls -la $ANDROID_SDK_ROOT/ndk || true
+          
+          # Agar 26.x pehle se mojood hai to path set karein
+          if [ -d "$ANDROID_SDK_ROOT/ndk/26.1.10909125" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+            echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+          else
+            # Agar exact minor build na mile to available latest NDK auto-detect karein
+            LATEST_NDK=$(ls -1 $ANDROID_SDK_ROOT/ndk | tail -n 1)
+            echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$LATEST_NDK" >> $GITHUB_ENV
+            echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$LATEST_NDK" >> $GITHUB_ENV
+          fi
 
-      - name: Make Gradle Wrapper Executable
+      - name: Grant Execute Permission for Gradlew
         run: chmod +x ./gradlew
 
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build Debug APK with Gradle
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
