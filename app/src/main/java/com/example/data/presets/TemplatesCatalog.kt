@@ -40,12 +40,13 @@ data class VideoTemplate(
   val textPlaceholders: List<TextPlaceholder> = emptyList(),
   val audioTitle: String = "Soundtrack",
   val isPro: Boolean = false,
+  val savedTimeline: Timeline? = null,
   val createTimeline: (
     mediaReplacements: Map<String, String>,
     textReplacements: Map<String, String>
-  ) -> Timeline
+  ) -> Timeline = { _, _ -> savedTimeline ?: Timeline() }
 ) {
-  fun createDefaultTimeline(): Timeline = createTimeline(emptyMap(), emptyMap())
+  fun createDefaultTimeline(): Timeline = savedTimeline ?: createTimeline(emptyMap(), emptyMap())
 }
 
 object TemplatesCatalog {

@@ -78,7 +78,10 @@ enum class EditorToolbarTab {
   CAPTIONS,
   BACKGROUND,
   AI_AVATAR,
-  ANIMATIONS
+  ANIMATIONS,
+  MASK,
+  AI_MATTING,
+  ASSET_STORE
 }
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
@@ -90,6 +93,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   val aiTools = AIToolsService(application)
   val compositionEngine = com.example.engine.composition.VideoCompositionEngine(application)
   val videoExporter = VideoExporter(application)
+  val memoryManager = com.example.engine.memory.EngineMemoryManager.getInstance(application)
+  val reliabilityManager = com.example.engine.reliability.EngineReliabilityManager(application)
+  val proxyMediaEngine = com.example.engine.playback.ProxyMediaEngine(application)
+  val pluginExecutionEngine = com.example.engine.plugin.PluginExecutionEngine(application)
 
   private var isSyncingFromPlayback = false
 
@@ -114,20 +121,41 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   val exportedVideos: StateFlow<List<ExportedVideoEntity>> = repository.exportedVideos
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+  fun getSelectedVideoClip(): VideoClip? {
+    val sel = timelineEngine.selectedElement.value
+    val selectedId = (sel as? SelectedTrackElement.Video)?.clipId ?: timelineEngine.selectedClipIds.value.firstOrNull()
+    return timelineEngine.timeline.value.videoClips.find { it.id == selectedId }
+      ?: timelineEngine.timeline.value.videoClips.firstOrNull()
+  }
+
+  // Global Undo / Redo Memento State
+  val canUndo: StateFlow<Boolean> = timelineEngine.canUndo
+  val canRedo: StateFlow<Boolean> = timelineEngine.canRedo
+  val undoActionTitle: StateFlow<String?> = timelineEngine.undoActionTitle
+  val redoActionTitle: StateFlow<String?> = timelineEngine.redoActionTitle
+
+  fun undo() {
+    timelineEngine.undo()
+  }
+
+  fun redo() {
+    timelineEngine.redo()
+  }
+
   val settings: StateFlow<UserSettings> = StudioPreferencesManager.settings
 
   // Navigation State - Home page as the initial opening screen
   private val _currentScreen = MutableStateFlow(AppScreen.HOME)
   val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
-  // App Startup Loading State (Editing tools animation during 3-5s launch)
-  private val _isStartupLoading = MutableStateFlow(true)
+  // App Startup State - Ready immediately on launch
+  private val _isStartupLoading = MutableStateFlow(false)
   val isStartupLoading: StateFlow<Boolean> = _isStartupLoading.asStateFlow()
 
-  private val _startupProgress = MutableStateFlow(0.08f)
+  private val _startupProgress = MutableStateFlow(1.0f)
   val startupProgress: StateFlow<Float> = _startupProgress.asStateFlow()
 
-  private val _startupStatus = MutableStateFlow("Initializing Timeline Engine...")
+  private val _startupStatus = MutableStateFlow("Studio Ready")
   val startupStatus: StateFlow<String> = _startupStatus.asStateFlow()
 
   fun finishStartupLoading() {
@@ -190,31 +218,6 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     // 1. Initialize with a clean, blank timeline
     timelineEngine.loadTimeline(Timeline())
-
-    // App Startup Loading Sequence (3.2 seconds showcasing editing tools preparation, then auto-dismiss)
-    viewModelScope.launch {
-      val phases = listOf(
-        Pair(0.22f, "Initializing Timeline & Multi-Track Engine..."),
-        Pair(0.48f, "Loading Precision Trimming & Razor Cut Tools..."),
-        Pair(0.72f, "Synthesizing Audio Waveforms & Keyframe Buffers..."),
-        Pair(0.92f, "Calibrating 4K 60fps Preview & Color Shaders..."),
-        Pair(1.00f, "Studio Ready • Opening Workspace...")
-      )
-
-      for (phase in phases) {
-        val targetProgress = phase.first
-        _startupStatus.value = phase.second
-        val startProgress = _startupProgress.value
-        val steps = 10
-        for (s in 1..steps) {
-          delay(45L)
-          _startupProgress.value = startProgress + (targetProgress - startProgress) * (s.toFloat() / steps)
-        }
-        delay(120L)
-      }
-      delay(250L)
-      _isStartupLoading.value = false
-    }
 
     // Sync Timeline changes with Playback Engine, mark unsaved, and persist recovery snapshot
     viewModelScope.launch {

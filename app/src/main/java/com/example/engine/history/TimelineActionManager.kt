@@ -26,6 +26,11 @@ enum class TimelineActionType(val displayName: String) {
   AUDIO_VOLUME("Volume Change"),
   ALIGN_TO_PLAYHEAD("Align to Playhead"),
   CLIP_RENAME("Rename Clip"),
+  MASK_EDIT("Mask & Shape"),
+  BLEND_MODE_CHANGE("Blend Mode"),
+  SPEED_CURVE_EDIT("Speed Curve"),
+  AUDIO_EFFECTS_EDIT("Audio Effects & EQ"),
+  TRACK_SETTINGS_EDIT("Track Settings"),
   GENERIC_EDIT("Timeline Edit")
 }
 

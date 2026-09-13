@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         val startupProgress by viewModel.startupProgress.collectAsState()
         val startupStatus by viewModel.startupStatus.collectAsState()
 
-        BackHandler(enabled = currentScreen != AppScreen.HOME && !isStartupLoading) {
+        BackHandler(enabled = currentScreen != AppScreen.HOME) {
           when (currentScreen) {
             AppScreen.EDITOR -> {
               viewModel.saveCurrentProject()
@@ -53,44 +53,24 @@ class MainActivity : ComponentActivity() {
           }
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
-          // Primary Application Screens (Home Screen is default on open)
-          Surface(
-            modifier = Modifier
-              .fillMaxSize()
-              .statusBarsPadding()
-              .navigationBarsPadding()
-              .background(StudioDarkBg),
-            color = StudioDarkBg
-          ) {
-            Crossfade(targetState = currentScreen, label = "screen_transition") { screen ->
-              when (screen) {
-                AppScreen.HOME -> HomeScreen(viewModel = viewModel)
-                AppScreen.EDITOR -> EditorScreen(viewModel = viewModel)
-                AppScreen.EXPORT -> ExportScreen(viewModel = viewModel)
-                AppScreen.TEMPLATES -> TemplatesScreen(viewModel = viewModel)
-                AppScreen.AI_SUITE -> AISuiteScreen(viewModel = viewModel)
-                AppScreen.EXPORTED_LIBRARY -> ExportedVideosScreen(viewModel = viewModel)
-                AppScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
-              }
+        Surface(
+          modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .background(StudioDarkBg),
+          color = StudioDarkBg
+        ) {
+          Crossfade(targetState = currentScreen, label = "screen_transition") { screen ->
+            when (screen) {
+              AppScreen.HOME -> HomeScreen(viewModel = viewModel)
+              AppScreen.EDITOR -> EditorScreen(viewModel = viewModel)
+              AppScreen.EXPORT -> ExportScreen(viewModel = viewModel)
+              AppScreen.TEMPLATES -> TemplatesScreen(viewModel = viewModel)
+              AppScreen.AI_SUITE -> AISuiteScreen(viewModel = viewModel)
+              AppScreen.EXPORTED_LIBRARY -> ExportedVideosScreen(viewModel = viewModel)
+              AppScreen.SETTINGS -> SettingsScreen(viewModel = viewModel)
             }
-          }
-
-          // Startup Loading Animation Screen with Editing Tools
-          AnimatedVisibility(
-            visible = isStartupLoading,
-            enter = fadeIn(),
-            exit = fadeOut(animationSpec = tween(500))
-          ) {
-            StartupLoadingScreen(
-              progress = startupProgress,
-              statusText = startupStatus,
-              onFinished = { viewModel.finishStartupLoading() },
-              modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-            )
           }
         }
       }

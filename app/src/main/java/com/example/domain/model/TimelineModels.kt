@@ -27,6 +27,71 @@ enum class KeyframeInterpolation(val displayName: String) {
   }
 }
 
+enum class MaskShape(val displayName: String) {
+  NONE("None"),
+  RECTANGLE("Rectangle (Shape)"),
+  CIRCLE("Circle (Radial)"),
+  LINEAR("Linear Wipe"),
+  MIRROR("Mirror Split"),
+  STAR("Star"),
+  HEART("Heart")
+}
+
+data class MaskSettings(
+  val enabled: Boolean = false,
+  val shape: MaskShape = MaskShape.RECTANGLE,
+  val posX: Float = 0f,         // -1f to 1f normalized center offset
+  val posY: Float = 0f,         // -1f to 1f normalized center offset
+  val width: Float = 0.6f,       // 0f to 2f
+  val height: Float = 0.6f,      // 0f to 2f
+  val rotation: Float = 0f,      // 0 to 360 degrees
+  val feather: Float = 0.1f,     // 0f to 1f edge softness
+  val opacity: Float = 1.0f,     // 0f to 1f
+  val isInverted: Boolean = false
+)
+
+enum class SpeedCurvePreset(val displayName: String) {
+  STANDARD("Standard (Linear)"),
+  EASE_IN("Ease In"),
+  EASE_OUT("Ease Out"),
+  HERO_MONTAGE("Hero Montage (Fast-Slow-Fast)"),
+  BULLET_TIME("Bullet Time (Slow-Fast-Slow)"),
+  JUMPER("Jumper (Accelerate-Pause)"),
+  CUSTOM_BEZIER("Custom Bezier Curve")
+}
+
+data class SpeedPoint(
+  val x: Float = 0f,
+  val y: Float = 0f
+)
+
+data class SpeedCurve(
+  val preset: SpeedCurvePreset = SpeedCurvePreset.STANDARD,
+  val bezierPoints: List<Float> = listOf(0.42f, 0.0f, 0.58f, 1.0f),
+  val velocityGraph: List<SpeedPoint> = emptyList()
+)
+
+enum class VoiceEffect(val displayName: String) {
+  NONE("Normal (Original)"),
+  DEEP_VOICE("Deep Voice (Monster)"),
+  CHIPMUNK("Chipmunk (High Pitch)"),
+  ROBOT("Synthesized Robot"),
+  ECHO_REVERB("Echo & Cathedral Reverb"),
+  TELEPHONE("Vintage Radio / Telephone"),
+  ANONYMOUS("Anonymous Pitch Shift")
+}
+
+data class AudioEffectsSettings(
+  val noiseReductionDb: Float = 0.0f,
+  val voiceEffect: VoiceEffect = VoiceEffect.NONE,
+  val pitchShiftSemitones: Float = 0.0f,
+  val lowGainDb: Float = 0.0f,
+  val midGainDb: Float = 0.0f,
+  val highGainDb: Float = 0.0f,
+  val normalizeVolume: Boolean = false,
+  val compressorThresholdDb: Float = 0.0f
+)
+
 data class ClipKeyframe(
   val id: String = UUID.randomUUID().toString(),
   val timeMs: Long,
@@ -42,6 +107,13 @@ data class ClipKeyframe(
   val contrast: Float = 1f,
   val saturation: Float = 1f,
   val effectParam: Float = 0f,
+  val maskPosX: Float = 0f,
+  val maskPosY: Float = 0f,
+  val maskWidth: Float = 0.6f,
+  val maskHeight: Float = 0.6f,
+  val maskRotation: Float = 0f,
+  val maskFeather: Float = 0.1f,
+  val maskOpacity: Float = 1.0f,
   val interpolation: KeyframeInterpolation = KeyframeInterpolation.LINEAR,
   val customCurvePoints: List<Float> = listOf(0.42f, 0.0f, 0.58f, 1.0f) // P1x, P1y, P2x, P2y
 ) {
@@ -186,18 +258,43 @@ data class VideoClip(
   val sourceTotalDurationMs: Long = 0L,
   val keyframes: List<ClipKeyframe> = emptyList(),
   val filter: FilterSettings? = null,
-  val animation: ClipAnimationSettings = ClipAnimationSettings()
+  val animation: ClipAnimationSettings = ClipAnimationSettings(),
+  val mask: MaskSettings = MaskSettings(),
+  val speedCurve: SpeedCurve = SpeedCurve(),
+  val audioEffects: AudioEffectsSettings = AudioEffectsSettings()
 ) {
   val totalMediaDurationMs: Long
     get() = if (sourceTotalDurationMs > 0L) sourceTotalDurationMs else maxOf(sourceEndMs, durationMs)
 
   fun timelineToSourceMs(timelinePosMs: Long): Long {
     val offset = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
-    val scaledOffset = (offset * speed).toLong()
+    val factor = if (speedCurve.preset != SpeedCurvePreset.STANDARD) {
+      evaluateSpeedCurveFactor(offset.toFloat() / durationMs.coerceAtLeast(1L))
+    } else 1.0f
+    val scaledOffset = (offset * speed * factor).toLong()
     return if (isReversed) {
       (sourceEndMs - scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
     } else {
       (sourceStartMs + scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
+    }
+  }
+
+  private fun evaluateSpeedCurveFactor(normalizedT: Float): Float {
+    return when (speedCurve.preset) {
+      SpeedCurvePreset.EASE_IN -> normalizedT * normalizedT
+      SpeedCurvePreset.EASE_OUT -> 1f - (1f - normalizedT) * (1f - normalizedT)
+      SpeedCurvePreset.HERO_MONTAGE -> if (normalizedT < 0.33f || normalizedT > 0.66f) 2.2f else 0.4f
+      SpeedCurvePreset.BULLET_TIME -> if (normalizedT in 0.25f..0.75f) 0.25f else 1.8f
+      SpeedCurvePreset.JUMPER -> if (normalizedT < 0.5f) 2.0f else 0.5f
+      SpeedCurvePreset.CUSTOM_BEZIER -> {
+        val pts = speedCurve.bezierPoints.ifEmpty { listOf(0.42f, 0f, 0.58f, 1f) }
+        val p1x = pts.getOrNull(0) ?: 0.42f
+        val p1y = pts.getOrNull(1) ?: 0.0f
+        val p2x = pts.getOrNull(2) ?: 0.58f
+        val p2y = pts.getOrNull(3) ?: 1.0f
+        3f * (1f - normalizedT) * (1f - normalizedT) * normalizedT * p1y + 3f * (1f - normalizedT) * normalizedT * normalizedT * p2y + normalizedT * normalizedT * normalizedT
+      }
+      else -> 1.0f
     }
   }
 }
@@ -219,7 +316,9 @@ data class AudioClip(
   val waveformData: List<Float> = emptyList(),
   val gainDb: Float = 0.0f,
   val isReversed: Boolean = false,
-  val keyframes: List<ClipKeyframe> = emptyList()
+  val keyframes: List<ClipKeyframe> = emptyList(),
+  val speedCurve: SpeedCurve = SpeedCurve(),
+  val audioEffects: AudioEffectsSettings = AudioEffectsSettings()
 )
 
 data class WordTiming(
@@ -233,6 +332,7 @@ data class TextClip(
   val text: String = "Tap to edit",
   val timelineStartMs: Long = 0L,
   val durationMs: Long = 3000L,
+  val trackIndex: Int = 0,
   val fontFamily: String = "Default",
   val customFontPath: String? = null,
   val fontSizeSp: Float = 24f,
@@ -333,29 +433,100 @@ data class StickerClip(
 )
 
 enum class EffectType(val category: String, val displayName: String) {
-  // Blur & Glow
-  BLUR("Basic", "Blur"),
-  GLOW("Basic", "Glow"),
-  MOTION_BLUR("Motion", "Motion Blur"),
-  // Motion
-  SHAKE("Motion", "Shake"),
-  ZOOM("Motion", "Zoom"),
-  SPIN("Motion", "Spin"),
-  // Light
-  FLASH("Light", "Flash"),
-  LENS_FLARE("Light", "Lens Flare"),
-  LIGHT_LEAK("Light", "Light Leak"),
-  // Distortion & Glitch
-  GLITCH("Distortion", "Glitch"),
-  RGB_SPLIT("Distortion", "RGB Split"),
-  DISTORTION("Distortion", "Distortion"),
-  // Additional presets
-  SHARPEN("Basic", "Sharpen"),
-  NOISE("Basic", "Noise"),
-  VIGNETTE("Basic", "Vignette"),
-  CAMERA_MOVEMENT("Motion", "Wander Pan"),
-  WAVE("Distortion", "Wave Ripple"),
-  RIPPLE("Distortion", "Shockwave")
+  // Video Effects - Basic & Blur
+  BLUR("Video Effects", "Blur"),
+  GLOW("Video Effects", "Glow"),
+  MOTION_BLUR("Video Effects", "Motion Blur"),
+  SHARPEN("Video Effects", "Sharpen"),
+  NOISE("Video Effects", "Noise Grain"),
+  VIGNETTE("Video Effects", "Vignette Dark"),
+  SOFT_FOCUS("Video Effects", "Soft Focus Dream"),
+  HALO_GLOW("Video Effects", "Halo Glow"),
+
+  // Video Effects - Motion & Zoom
+  SHAKE("Video Effects", "Camera Shake"),
+  ZOOM("Video Effects", "Zoom Pulse"),
+  SPIN("Video Effects", "360 Spin"),
+  CAMERA_MOVEMENT("Video Effects", "Wander Pan"),
+  WARP_SPEED("Video Effects", "Warp Speed"),
+  SKATER_ZOOM("Video Effects", "Skater Fast Zoom"),
+  VERTIGO_DOLLY("Video Effects", "Vertigo Dolly"),
+
+  // Video Effects - Light & Sparkle
+  FLASH("Video Effects", "White Flash"),
+  LENS_FLARE("Video Effects", "Anamorphic Flare"),
+  LIGHT_LEAK("Video Effects", "Vintage Light Leak"),
+  SOLAR_FLARE("Video Effects", "Solar Burst"),
+  BOKEH("Video Effects", "Bokeh Dreams"),
+  GOLDEN_HOUR("Video Effects", "Golden Hour Glow"),
+  FIRE_SPARK("Video Effects", "Fire Sparkles"),
+  LASER_GRID("Video Effects", "Laser Grid"),
+  STROBE("Video Effects", "RGB Strobe"),
+
+  // Video Effects - Distortion & Glitch
+  GLITCH("Video Effects", "Glitch Scanline"),
+  RGB_SPLIT("Video Effects", "RGB Split"),
+  DISTORTION("Video Effects", "Barrel Distortion"),
+  WAVE("Video Effects", "Wave Ripple"),
+  RIPPLE("Video Effects", "Shockwave"),
+  VHS_VINTAGE("Video Effects", "1998 VHS Tape"),
+  CRT_TV("Video Effects", "CRT Scanline"),
+  MIRROR("Video Effects", "Kaleido Mirror"),
+  FISHEYE("Video Effects", "Fisheye Lens"),
+  ACID_TRIP("Video Effects", "Psychedelic Acid"),
+
+  // Body Effects
+  BODY_AURA("Body Effects", "Neon Body Aura"),
+  NEON_OUTLINE("Body Effects", "Cyber Neon Outline"),
+  GLOW_EYES("Body Effects", "Laser Glow Eyes"),
+  ANGEL_WINGS("Body Effects", "Angelic Wings"),
+  CYBER_WINGS("Body Effects", "Mecha Cyber Wings"),
+  FACE_BEAUTY("Body Effects", "AI Smooth Skin"),
+  ANIME_SILHOUETTE("Body Effects", "Anime Shadow Silhouette"),
+  SLIM_SHAPE("Body Effects", "Pro Slim Contour"),
+  MUSCLE_GLOW("Body Effects", "Electric Muscle Glow"),
+  SKELETON_XRAY("Body Effects", "Neon Skeleton X-Ray"),
+  GHOST_CLONE("Body Effects", "Spectral Ghost Clone"),
+  CYBER_FACE("Body Effects", "Cybernetic Face Grid"),
+  FIRE_AURA("Body Effects", "Super Saiyan Flame"),
+  LIGHTNING_BODY("Body Effects", "Thor Lightning Aura"),
+  HEART_TRAIL("Body Effects", "Cupid Heart Trail"),
+  FLORAL_CROWN("Body Effects", "Goddess Floral Crown"),
+  DRAGON_FLAME("Body Effects", "Dragon Breath Flame"),
+
+  // Photo Effects
+  POLAROID_VINTAGE("Photo Effects", "Polaroid 1984"),
+  DOUBLE_EXPOSURE("Photo Effects", "Double Exposure Silhouette"),
+  COMIC_SKETCH("Photo Effects", "Marvel Comic Sketch"),
+  MANGA_LINE("Photo Effects", "Shonen Manga Ink"),
+  POP_ART_POSTER("Photo Effects", "Andy Warhol Pop Art"),
+  THERMAL_CAMERA("Photo Effects", "Predator Thermal"),
+  HALFTONE_DOT("Photo Effects", "Newspaper Halftone"),
+  OIL_PAINTING("Photo Effects", "Van Gogh Oil Paint"),
+  WATERCOLOR("Photo Effects", "Watercolor Splash"),
+  CHARCOAL_DRAW("Photo Effects", "Charcoal Portrait"),
+  BLUEPRINT_CAD("Photo Effects", "Architectural Blueprint"),
+  PASTEL_DREAM("Photo Effects", "Soft Pastel Dream"),
+  COLOR_POP_SPLASH("Photo Effects", "Selective Color Pop"),
+  STAMP_ART("Photo Effects", "Vintage Rubber Stamp"),
+
+  // AI Effects
+  AI_EXPANSION("AI Effects", "AI Canvas Expand"),
+  AI_STYLE_MORPH("AI Effects", "AI Universe Morph"),
+  AI_BG_SWAP("AI Effects", "AI Cyber City Swap"),
+  AI_CYBERPUNK_CITY("AI Effects", "AI Neon Matrix"),
+  AI_PARTICLE_DISPERSE("AI Effects", "Thanos Snap Disperse"),
+  AI_MANGA_UNIVERSE("AI Effects", "AI Anime Character"),
+  AI_ANIME_WORLD("AI Effects", "Ghibli Fantasy World"),
+  AI_NEON_TRAIL("AI Effects", "AI Speed Force Trail"),
+  AI_FANTASY_KINGDOM("AI Effects", "AI Enchanted Kingdom"),
+  AI_SCI_FI_PORTAL("AI Effects", "AI Wormhole Portal"),
+  AI_GOLDEN_GOD("AI Effects", "AI Celestial Divinity"),
+  AI_LIQUID_GOLD("AI Effects", "AI Metallic Liquid Gold"),
+  AI_FREEZE_TIME("AI Effects", "AI Temporal Freeze"),
+  AI_SPEED_FORCE("AI Effects", "AI Hyper Lightning"),
+  AI_GHOST_MOTION("AI Effects", "AI Chrono Motion"),
+  AI_GLITCH_REALITY("AI Effects", "AI Quantum Glitch")
 }
 
 data class EffectClip(
@@ -364,7 +535,9 @@ data class EffectClip(
   val timelineStartMs: Long = 0L,
   val durationMs: Long = 3000L,
   val intensity: Float = 0.8f,
-  val keyframes: List<ClipKeyframe> = emptyList()
+  val keyframes: List<ClipKeyframe> = emptyList(),
+  val customName: String = "",
+  val effectCategory: String = "Video Effects"
 )
 
 enum class TransitionType(val displayName: String) {
@@ -380,7 +553,11 @@ enum class TransitionType(val displayName: String) {
   BLUR("Blur Zoom"),
   FLASH("White Flash"),
   GLITCH("Glitch Cut"),
-  WIPE("Wipe Curtain")
+  WIPE("Wipe Curtain"),
+  WHIP_PAN("Whip Pan"),
+  ZOOM_BLUR("Zoom Blur"),
+  GLITCH_WIPE("Glitch Wipe"),
+  LIGHT_LEAK("Light Leak")
 }
 
 data class Transition(

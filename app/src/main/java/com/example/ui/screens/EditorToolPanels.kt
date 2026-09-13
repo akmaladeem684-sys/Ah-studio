@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -970,17 +972,67 @@ fun FiltersToolPanel(
               }
             }
 
-            // Apply to all clips button
-            TextButton(
-              onClick = {
-                viewModel.timelineEngine.applyFilterToAllClips(currentFilter)
-              },
-              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-              modifier = Modifier.testTag("filter_apply_all_button")
+            // Compare & Apply to All actions
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically
             ) {
-              Icon(Icons.Default.DoneAll, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(14.dp))
-              Spacer(Modifier.width(4.dp))
-              Text("Apply to All", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+              var isComparingOriginal by remember { mutableStateOf(false) }
+
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isComparingOriginal) AmberAccent.copy(alpha = 0.25f) else StudioSurface,
+                border = BorderStroke(1.dp, if (isComparingOriginal) AmberAccent else StudioBorder),
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .pointerInput(currentFilter, selectedClip) {
+                    detectTapGestures(
+                      onPress = {
+                        isComparingOriginal = true
+                        val savedFilter = currentFilter
+                        viewModel.timelineEngine.updateFilter(FilterSettings(type = FilterType.NONE, intensity = 1.0f), selectedClip?.id)
+                        tryAwaitRelease()
+                        isComparingOriginal = false
+                        viewModel.timelineEngine.updateFilter(savedFilter, selectedClip?.id)
+                      }
+                    )
+                  }
+                  .testTag("filter_compare_button")
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                  Icon(
+                    Icons.Default.Compare,
+                    contentDescription = "Hold to Compare",
+                    tint = if (isComparingOriginal) AmberAccent else TextSecondary,
+                    modifier = Modifier.size(14.dp)
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = if (isComparingOriginal) "Original" else "Compare",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = if (isComparingOriginal) AmberAccent else TextSecondary
+                    )
+                  )
+                }
+              }
+
+              // Apply to all clips button
+              TextButton(
+                onClick = {
+                  viewModel.timelineEngine.applyFilterToAllClips(currentFilter)
+                },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                modifier = Modifier.testTag("filter_apply_all_button")
+              ) {
+                Icon(Icons.Default.DoneAll, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Apply All", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+              }
             }
           }
         }
@@ -994,190 +1046,11 @@ fun EffectsToolPanel(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
-  val timeline by viewModel.timelineEngine.timeline.collectAsState()
-  val selectedElement by viewModel.timelineEngine.selectedElement.collectAsState()
-  val selectedEffectId = (selectedElement as? SelectedTrackElement.Effect)?.clipId
-  val activeEffectClip = timeline.effectClips.find { it.id == selectedEffectId } ?: timeline.effectClips.lastOrNull()
-
-  var selectedCategory by remember { mutableStateOf("All") }
-  val categories = listOf("All", "Basic", "Motion", "Light", "Distortion")
-
-  val filteredEffects = remember(selectedCategory) {
-    if (selectedCategory == "All") EffectType.values().toList()
-    else EffectType.values().filter { it.category == selectedCategory }
-  }
-
-  Column(
+  com.example.ui.components.effects.EffectsStudioPanel(
+    viewModel = viewModel,
+    onDismiss = { viewModel.setActiveToolbarTab(null) },
     modifier = modifier
-      .fillMaxWidth()
-      .background(StudioSurface)
-      .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text(
-        text = "Visual Effects Library",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-      )
-      IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
-        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-      }
-    }
-
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      items(categories) { cat ->
-        FilterChip(
-          selected = selectedCategory == cat,
-          onClick = { selectedCategory = cat },
-          label = { Text(cat) },
-          colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = CyanAccent,
-            selectedLabelColor = Color.Black,
-            containerColor = StudioSurfaceVariant,
-            labelColor = TextPrimary
-          )
-        )
-      }
-    }
-
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-      items(filteredEffects) { effect ->
-        Card(
-          modifier = Modifier
-            .size(width = 110.dp, height = 80.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable {
-              val newClip = viewModel.timelineEngine.addEffectClip(effect)
-              viewModel.timelineEngine.selectElement(SelectedTrackElement.Effect(newClip.id))
-            },
-          colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-          border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, CyanAccent.copy(alpha = 0.5f))))
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .padding(8.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(24.dp))
-            Text(
-              text = effect.displayName,
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 11.sp),
-              maxLines = 1
-            )
-          }
-        }
-      }
-    }
-
-    // Active Effect Inspector
-    if (activeEffectClip != null) {
-      Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
-        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, PurpleAccent.copy(alpha = 0.5f))))
-      ) {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-          verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-              Box(
-                modifier = Modifier
-                  .size(10.dp)
-                  .clip(CircleShape)
-                  .background(PurpleAccent)
-              )
-              Text(
-                text = "${activeEffectClip.effectType.displayName} Effect",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-              )
-              Text(
-                text = "(${activeEffectClip.effectType.category})",
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-              )
-            }
-            IconButton(
-              onClick = { viewModel.timelineEngine.deleteEffectClip(activeEffectClip.id) },
-              modifier = Modifier.size(28.dp)
-            ) {
-              Icon(Icons.Default.Delete, contentDescription = "Delete effect", tint = RedAccent, modifier = Modifier.size(18.dp))
-            }
-          }
-
-          // Intensity Slider
-          Column {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-              Text("Effect Intensity", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-              Text("${(activeEffectClip.intensity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold))
-            }
-            Slider(
-              value = activeEffectClip.intensity,
-              valueRange = 0.0f..1.0f,
-              onValueChange = {
-                viewModel.timelineEngine.updateEffectIntensity(activeEffectClip.id, it)
-              },
-              colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
-            )
-          }
-
-          // Duration Controls
-          Column {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-              Text("Timeline Duration", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-              Text(String.format(java.util.Locale.US, "%.1fs", activeEffectClip.durationMs / 1000f), style = MaterialTheme.typography.bodySmall.copy(color = AmberAccent, fontWeight = FontWeight.Bold))
-            }
-            Slider(
-              value = (activeEffectClip.durationMs / 1000f).coerceIn(0.5f, 15f),
-              valueRange = 0.5f..15f,
-              onValueChange = {
-                viewModel.timelineEngine.updateEffectClip(activeEffectClip.copy(durationMs = (it * 1000).toLong()))
-              },
-              colors = SliderDefaults.colors(thumbColor = AmberAccent, activeTrackColor = AmberAccent)
-            )
-          }
-
-          // Keyframe Support Row
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text(
-              text = "Keyframes: ${activeEffectClip.keyframes.size}",
-              style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              Button(
-                onClick = {
-                  viewModel.timelineEngine.selectElement(SelectedTrackElement.Effect(activeEffectClip.id))
-                  viewModel.timelineEngine.addEffectKeyframe(activeEffectClip.id)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White),
-                shape = RoundedCornerShape(8.dp)
-              ) {
-                Icon(Icons.Default.Diamond, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add Keyframe", fontSize = 11.sp)
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  )
 }
 
 @Composable
@@ -2589,104 +2462,383 @@ fun CaptionsToolPanel(
 ) {
   val timeline by viewModel.timelineEngine.timeline.collectAsState()
   val currentPos by viewModel.timelineEngine.currentPositionMs.collectAsState()
+  val isAIBusy by viewModel.isAIBusy.collectAsState()
+  val aiStatusMessage by viewModel.aiStatusMessage.collectAsState()
   val textClips = timeline.textClips
+
+  val context = LocalContext.current
+  var selectedLanguage by remember { mutableStateOf("English") }
+  val languages = listOf("English", "Spanish", "French", "German", "Japanese", "Portuguese", "Hindi", "Korean", "Chinese", "Italian")
+  var showLanguageMenu by remember { mutableStateOf(false) }
+
+  var activeTab by remember { mutableStateOf(0) } // 0: Auto-Captions & Editor, 1: Styling & Presets
 
   Column(
     modifier = modifier
       .fillMaxWidth()
+      .heightIn(max = 540.dp)
       .background(StudioSurface)
-      .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
+      .padding(16.dp)
   ) {
+    // Header
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.ClosedCaption, contentDescription = null, tint = CyanAccent)
-        Text(
-          text = "Auto Captions & Subtitles",
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-        )
+        Box(
+          modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Brush.linearGradient(listOf(CyanAccent, PurpleAccent))),
+          contentAlignment = Alignment.Center
+        ) {
+          Icon(Icons.Default.ClosedCaption, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+        }
+        Column {
+          Text(
+            text = "Gemini AI Subtitle Studio",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+          )
+          Text(
+            text = if (viewModel.aiTools.isAIConfigured) "Gemini 3.5 Flash Active" else "Offline Mode",
+            style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp)
+          )
+        }
       }
       IconButton(onClick = { viewModel.setActiveToolbarTab(null) }) {
         Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
       }
     }
 
-    Text(
-      text = "Generate synchronized subtitle captions automatically from dialogue or create manual caption cards.",
-      style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-    )
+    Spacer(modifier = Modifier.height(10.dp))
 
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(10.dp)
+    // Navigation Tabs
+    TabRow(
+      selectedTabIndex = activeTab,
+      containerColor = StudioSurfaceVariant,
+      contentColor = CyanAccent,
+      modifier = Modifier
+        .clip(RoundedCornerShape(10.dp))
+        .height(38.dp)
     ) {
-      Button(
-        onClick = { viewModel.runAIAutoCaptions() },
-        modifier = Modifier
-          .weight(1f)
-          .height(44.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-        shape = RoundedCornerShape(10.dp)
-      ) {
-        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("AI Auto-Captions", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-      }
+      Tab(
+        selected = activeTab == 0,
+        onClick = { activeTab = 0 },
+        text = { Text("Captions & Editor (${textClips.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+      )
+      Tab(
+        selected = activeTab == 1,
+        onClick = { activeTab = 1 },
+        text = { Text("Styling & Presets", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+      )
+    }
 
-      OutlinedButton(
-        onClick = {
-          viewModel.timelineEngine.addTextClip(
-            text = "Subtitle Caption",
-            timelineStartMs = currentPos,
-            durationMs = 2500L
-          )
-        },
-        modifier = Modifier
-          .weight(1f)
-          .height(44.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(StudioBorder, CyanAccent))),
-        shape = RoundedCornerShape(10.dp)
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // AI Status bar if busy
+    if (isAIBusy) {
+      Card(
+        colors = CardDefaults.cardColors(containerColor = CyanAccent.copy(alpha = 0.15f)),
+        border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
       ) {
-        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = CyanAccent)
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Add Manual Subtitle", fontSize = 12.sp)
+        Row(
+          modifier = Modifier.padding(10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = CyanAccent)
+          Text(
+            text = aiStatusMessage.ifBlank { "Gemini API analyzing audio track & generating captions..." },
+            style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary, fontWeight = FontWeight.SemiBold)
+          )
+        }
       }
     }
 
-    if (textClips.isNotEmpty()) {
-      Text(
-        text = "Subtitles on Timeline (${textClips.size})",
-        style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
-      )
-      LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    if (activeTab == 0) {
+      // TAB 0: AI Auto-Caption Generation & Caption Editor
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        items(textClips) { clip ->
-          Card(
+        // Language Selector & Generate Actions
+        Card(
+          colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "Audio Language",
+                style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary, fontWeight = FontWeight.SemiBold)
+              )
+              Box {
+                OutlinedButton(
+                  onClick = { showLanguageMenu = true },
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                  modifier = Modifier.height(32.dp)
+                ) {
+                  Text(selectedLanguage, fontSize = 12.sp, color = CyanAccent)
+                  Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = CyanAccent)
+                }
+                DropdownMenu(
+                  expanded = showLanguageMenu,
+                  onDismissRequest = { showLanguageMenu = false }
+                ) {
+                  languages.forEach { lang ->
+                    DropdownMenuItem(
+                      text = { Text(lang) },
+                      onClick = {
+                        selectedLanguage = lang
+                        showLanguageMenu = false
+                      }
+                    )
+                  }
+                }
+              }
+            }
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Button(
+                onClick = { viewModel.runAIAutoCaptions(selectedLanguage) },
+                enabled = !isAIBusy,
+                modifier = Modifier
+                  .weight(1.2f)
+                  .height(42.dp)
+                  .testTag("generate_captions_button"),
+                colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                shape = RoundedCornerShape(8.dp)
+              ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Generate Captions", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+              }
+
+              OutlinedButton(
+                onClick = { viewModel.runAITranslateCaptions(selectedLanguage) },
+                enabled = !isAIBusy && textClips.isNotEmpty(),
+                modifier = Modifier
+                  .weight(1f)
+                  .height(42.dp)
+                  .testTag("translate_captions_button"),
+                shape = RoundedCornerShape(8.dp)
+              ) {
+                Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(16.dp), tint = PurpleAccent)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Translate", fontSize = 11.sp, color = TextPrimary)
+              }
+            }
+          }
+        }
+
+        // Action Header
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "Synchronized Captions (${textClips.size})",
+            style = MaterialTheme.typography.labelLarge.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+          )
+
+          TextButton(
+            onClick = {
+              viewModel.timelineEngine.addTextClip(
+                text = "New Subtitle Caption",
+                timelineStartMs = currentPos,
+                durationMs = 2500L
+              )
+            },
+            modifier = Modifier.testTag("add_manual_subtitle_button")
+          ) {
+            Icon(Icons.Default.Add, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Add Subtitle", color = CyanAccent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          }
+        }
+
+        if (textClips.isEmpty()) {
+          Box(
             modifier = Modifier
-              .widthIn(min = 100.dp, max = 160.dp)
-              .clip(RoundedCornerShape(8.dp))
-              .clickable {
+              .fillMaxWidth()
+              .height(110.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(StudioSurfaceVariant),
+            contentAlignment = Alignment.Center
+          ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Icon(Icons.Default.Subtitles, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(32.dp))
+              Spacer(modifier = Modifier.height(6.dp))
+              Text("No captions on timeline yet.", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+              Text("Tap 'Generate Captions' above to transcribe audio with Gemini API.", style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent))
+            }
+          }
+        } else {
+          textClips.sortedBy { it.timelineStartMs }.forEachIndexed { index, clip ->
+            CaptionClipCard(
+              clip = clip,
+              index = index,
+              onTextChange = { newText ->
+                val words = newText.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                val newWordTimings = if (words.isNotEmpty() && clip.durationMs > 0) {
+                  val wDur = clip.durationMs / words.size
+                  words.mapIndexed { wIdx, w -> WordTiming(w, wIdx * wDur, wDur) }
+                } else emptyList()
+
+                viewModel.timelineEngine.updateTextClip(
+                  clip.copy(text = newText, words = newWordTimings)
+                )
+              },
+              onSeekTo = {
                 viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(clip.id))
                 viewModel.timelineEngine.seekTo(clip.timelineStartMs)
               },
-            colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant)
-          ) {
-            Column(modifier = Modifier.padding(8.dp)) {
-              Text(
-                text = clip.text,
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
-                maxLines = 1
-              )
-              Text(
-                text = formatDuration(clip.timelineStartMs),
-                style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontSize = 10.sp)
+              onAdjustTiming = { deltaStartMs, deltaDurMs ->
+                viewModel.timelineEngine.updateTextClip(
+                  clip.copy(
+                    timelineStartMs = (clip.timelineStartMs + deltaStartMs).coerceAtLeast(0L),
+                    durationMs = (clip.durationMs + deltaDurMs).coerceAtLeast(500L)
+                  )
+                )
+              },
+              onDelete = {
+                viewModel.timelineEngine.deleteClips(setOf(clip.id))
+              }
+            )
+          }
+        }
+      }
+    } else {
+      // TAB 1: Styling & Presets
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        Text(
+          text = "Subtitle Visual Style Presets",
+          style = MaterialTheme.typography.labelLarge.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+        )
+
+        val presets = listOf(
+          CaptionStylePreset("Highlight Active Word", "HighlightWord", "🌟 Word Glow", Color(0xFF00E5FF), Color(0xAA000000)),
+          CaptionStylePreset("Karaoke Gold", "Karaoke", "🎤 Yellow Bouncy", Color(0xFFFFD54F), Color(0xCC000000)),
+          CaptionStylePreset("Cyberpunk Neon", "Animated", "⚡ Cyan Neon Box", Color(0xFF00E5FF), Color(0xDD2A004E)),
+          CaptionStylePreset("Cinematic Box", "Bold", "🎬 Dark Banner", Color(0xFFFFFFFF), Color(0xDD111111)),
+          CaptionStylePreset("Minimalist Clean", "Clean", "🎨 Soft Shadow", Color(0xFFFFFFFF), Color.Transparent),
+          CaptionStylePreset("Pop Impact", "Pop", "🔥 High-Contrast", Color(0xFF000000), Color(0xFFFFC107))
+        )
+
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          items(presets) { preset ->
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = StudioSurfaceVariant,
+              border = BorderStroke(1.dp, StudioBorder),
+              modifier = Modifier
+                .width(135.dp)
+                .clickable {
+                  val updatedClips = timeline.textClips.map { clip ->
+                    clip.copy(
+                      subtitleStyle = preset.styleKey,
+                      textColor = preset.textColor.toArgb().toLong(),
+                      backgroundColor = preset.bgColor.toArgb().toLong(),
+                      hasBackground = preset.bgColor != Color.Transparent
+                    )
+                  }
+                  viewModel.timelineEngine.loadTimeline(timeline.copy(textClips = updatedClips))
+                  Toast.makeText(context, "Applied ${preset.name} style to all captions!", Toast.LENGTH_SHORT).show()
+                }
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text(preset.displayName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TextPrimary)
+                Spacer(modifier = Modifier.height(6.dp))
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(preset.bgColor),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text("SAMPLE", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = preset.textColor)
+                }
+              }
+            }
+          }
+        }
+
+        Divider(color = StudioBorder)
+
+        Text(
+          text = "Batch Formatting (Applies to all captions)",
+          style = MaterialTheme.typography.labelLarge.copy(color = TextPrimary, fontWeight = FontWeight.Bold)
+        )
+
+        var fontSp by remember { mutableStateOf(22f) }
+        Column {
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Font Size", fontSize = 12.sp, color = TextSecondary)
+            Text("${fontSp.toInt()} sp", fontSize = 12.sp, color = CyanAccent, fontWeight = FontWeight.Bold)
+          }
+          Slider(
+            value = fontSp,
+            onValueChange = { fontSp = it },
+            valueRange = 14f..36f,
+            onValueChangeFinished = {
+              val updated = timeline.textClips.map { it.copy(fontSizeSp = fontSp) }
+              viewModel.timelineEngine.loadTimeline(timeline.copy(textClips = updated))
+            },
+            colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
+          )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text("Caption Screen Position", fontSize = 12.sp, color = TextSecondary)
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Top" to -0.35f, "Middle" to 0.0f, "Bottom" to 0.35f).forEach { (label, posY) ->
+              OutlinedButton(
+                onClick = {
+                  val updated = timeline.textClips.map { it.copy(posY = posY) }
+                  viewModel.timelineEngine.loadTimeline(timeline.copy(textClips = updated))
+                },
+                modifier = Modifier.weight(1f).height(34.dp),
+                contentPadding = PaddingValues(0.dp)
+              ) {
+                Text(label, fontSize = 11.sp, color = TextPrimary)
+              }
+            }
+          }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text("Text Highlight Color", fontSize = 12.sp, color = TextSecondary)
+          Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf(Color.White, Color(0xFF00E5FF), Color(0xFFFFD54F), Color(0xFFFF4081), Color(0xFF7C4DFF)).forEach { color ->
+              Box(
+                modifier = Modifier
+                  .size(32.dp)
+                  .clip(CircleShape)
+                  .background(color)
+                  .clickable {
+                    val updated = timeline.textClips.map { it.copy(textColor = color.toArgb().toLong()) }
+                    viewModel.timelineEngine.loadTimeline(timeline.copy(textClips = updated))
+                  }
+                  .border(1.dp, StudioBorder, CircleShape)
               )
             }
           }
@@ -2695,6 +2847,130 @@ fun CaptionsToolPanel(
     }
   }
 }
+
+@Composable
+private fun CaptionClipCard(
+  clip: TextClip,
+  index: Int,
+  onTextChange: (String) -> Unit,
+  onSeekTo: () -> Unit,
+  onAdjustTiming: (Long, Long) -> Unit,
+  onDelete: () -> Unit
+) {
+  var editedText by remember(clip.text) { mutableStateOf(clip.text) }
+
+  Card(
+    colors = CardDefaults.cardColors(containerColor = StudioSurfaceVariant),
+    border = BorderStroke(0.5.dp, StudioBorder),
+    modifier = Modifier.fillMaxWidth().testTag("caption_card_$index")
+  ) {
+    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          Box(
+            modifier = Modifier
+              .size(20.dp)
+              .clip(CircleShape)
+              .background(CyanAccent),
+            contentAlignment = Alignment.Center
+          ) {
+            Text("${index + 1}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+          }
+          Text(
+            text = "${formatDuration(clip.timelineStartMs)} → ${formatDuration(clip.timelineStartMs + clip.durationMs)} (${clip.durationMs / 1000f}s)",
+            style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
+          )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          IconButton(onClick = onSeekTo, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.PlayArrow, contentDescription = "Preview", tint = TextPrimary, modifier = Modifier.size(16.dp))
+          }
+          IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+          }
+        }
+      }
+
+      OutlinedTextField(
+        value = editedText,
+        onValueChange = {
+          editedText = it
+          onTextChange(it)
+        },
+        modifier = Modifier.fillMaxWidth().testTag("caption_text_input_$index"),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, fontWeight = FontWeight.SemiBold),
+        singleLine = false,
+        maxLines = 2,
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedBorderColor = CyanAccent,
+          unfocusedBorderColor = StudioBorder,
+          focusedContainerColor = StudioSurface,
+          unfocusedContainerColor = StudioSurface
+        )
+      )
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+          Text("Start:", fontSize = 10.sp, color = TextSecondary)
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = StudioSurface,
+            modifier = Modifier.clickable { onAdjustTiming(-200L, 0L) }
+          ) {
+            Text("-0.2s", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+          }
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = StudioSurface,
+            modifier = Modifier.clickable { onAdjustTiming(200L, 0L) }
+          ) {
+            Text("+0.2s", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+          }
+
+          Spacer(modifier = Modifier.width(6.dp))
+
+          Text("Dur:", fontSize = 10.sp, color = TextSecondary)
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = StudioSurface,
+            modifier = Modifier.clickable { onAdjustTiming(0L, -200L) }
+          ) {
+            Text("-0.2s", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+          }
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = StudioSurface,
+            modifier = Modifier.clickable { onAdjustTiming(0L, 200L) }
+          ) {
+            Text("+0.2s", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+          }
+        }
+
+        Text(
+          text = "${clip.words.size} words synced",
+          style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp)
+        )
+      }
+    }
+  }
+}
+
+private data class CaptionStylePreset(
+  val name: String,
+  val styleKey: String,
+  val displayName: String,
+  val textColor: Color,
+  val bgColor: Color
+)
 
 @Composable
 private fun EditorActionTile(

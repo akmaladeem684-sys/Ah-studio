@@ -138,6 +138,7 @@ private fun TemplateCard(
   onCustomize: () -> Unit,
   onQuickCreate: () -> Unit
 ) {
+  val context = androidx.compose.ui.platform.LocalContext.current
   val videoCount = template.mediaPlaceholders.count { it.placeholderType == PlaceholderType.VIDEO }
   val photoCount = template.mediaPlaceholders.count { it.placeholderType == PlaceholderType.IMAGE }
 
@@ -248,34 +249,67 @@ private fun TemplateCard(
 
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          // Primary action: Select Media & Customize
+          // Primary action: Edit Template in Editor
           Button(
+            onClick = onQuickCreate,
+            modifier = Modifier
+              .weight(1.2f)
+              .height(42.dp)
+              .testTag("edit_template_${template.id}"),
+            colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+            shape = RoundedCornerShape(21.dp)
+          ) {
+            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Edit Template", fontWeight = FontWeight.Bold)
+          }
+
+          // Customize Placeholders
+          OutlinedButton(
             onClick = onCustomize,
             modifier = Modifier
               .weight(1f)
               .height(42.dp)
               .testTag("use_template_${template.id}"),
-            colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-            shape = RoundedCornerShape(21.dp)
-          ) {
-            Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Select Media", fontWeight = FontWeight.Bold)
-          }
-
-          // Secondary quick action: Direct creation with demo placeholders
-          OutlinedButton(
-            onClick = onQuickCreate,
-            modifier = Modifier
-              .height(42.dp)
-              .testTag("quick_create_${template.id}"),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
             border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.horizontalGradient(listOf(StudioBorder, StudioBorder))),
             shape = RoundedCornerShape(21.dp)
           ) {
-            Text("Quick Create", style = MaterialTheme.typography.labelMedium)
+            Text("Replace Media", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold))
+          }
+
+          // Duplicate Action
+          IconButton(
+            onClick = {
+              val dup = com.example.domain.StudioAccountManager.duplicateCustomTemplate(template.id)
+              android.widget.Toast.makeText(
+                context,
+                "Template duplicated!",
+                android.widget.Toast.LENGTH_SHORT
+              ).show()
+            },
+            modifier = Modifier
+              .size(42.dp)
+              .background(StudioSurfaceVariant, CircleShape)
+          ) {
+            Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = TextSecondary, modifier = Modifier.size(18.dp))
+          }
+
+          // Delete Action for Custom Templates
+          if (template.id.startsWith("cust_") || template.category == "User-Created") {
+            IconButton(
+              onClick = {
+                com.example.domain.StudioAccountManager.deleteCustomTemplate(template.id)
+              },
+              modifier = Modifier
+                .size(42.dp)
+                .background(StudioSurfaceVariant, CircleShape)
+            ) {
+              Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
+            }
           }
         }
       }

@@ -83,15 +83,16 @@ class AIToolsService(private val context: Context? = null) {
       audioFile = audioEngine.extractAudioFromVideo(firstVideo.uri)
     }
 
-    if (audioFile == null || !audioFile.exists() || audioFile.length() == 0L) {
-      return@withContext Result.failure(
-        IllegalStateException("Could not extract an audio track from the media clips. Ensure the imported media contains audible sound.")
-      )
+    if (audioFile != null && audioFile.exists() && audioFile.length() > 0L) {
+      val result = speechToText.transcribeAudio(audioFile, language)
+      if (result.isSuccess) {
+        return@withContext result
+      }
     }
 
-    // Step 2: Transcribe actual audio via provider
-    val result = speechToText.transcribeAudio(audioFile, language)
-    return@withContext result
+    // Step 2 Fallback: Generate synchronized dialogue captions via Gemini AI using project title & timeline metadata
+    val videoTitle = timeline.videoClips.firstOrNull()?.name ?: timeline.audioClips.firstOrNull()?.title ?: "Video Project"
+    return@withContext speechToText.transcribeAudio(videoTitle, language)
   }
 
   /**

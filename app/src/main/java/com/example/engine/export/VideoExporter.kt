@@ -540,6 +540,31 @@ class VideoExporter(private val context: Context) {
     val resLabel = config.resolution.label.lowercase()
     val outputFile = File(outputDir, "${sanitizedName}_${resLabel}_${System.currentTimeMillis()}.mp4")
 
+    // Use Chunked Export for long projects (>15 seconds) or 4K to prevent OOM
+    if (totalDurationMs > 15_000L || config.resolution == Resolution.RES_4K || config.resolution == Resolution.RES_VERTICAL_4K) {
+      Log.i(tag, "Project length $totalDurationMs ms / 4K resolution detected. Delegating to ChunkedExportEngine...")
+      val chunkedEngine = ChunkedExportEngine(context)
+      val chunkedSuccess = chunkedEngine.exportInChunks(timeline, config, outputFile, this@VideoExporter) { progress, status ->
+        val frames = ((totalDurationMs / 1000.0) * config.frameRate.fps).toInt()
+        val curFrame = (progress * frames).toInt()
+        _exportState.value = ExportState.Rendering(
+          progressPercent = progress,
+          currentFrame = curFrame,
+          totalFrames = frames,
+          status = status,
+          resolution = config.resolution,
+          renderEngine = "Chunked Hardware Export Engine"
+        )
+      }
+      if (chunkedSuccess) {
+        val sizeBytes = outputFile.length()
+        _exportState.value = ExportState.Success(outputFile, totalDurationMs, sizeBytes)
+        return@withContext outputFile
+      } else {
+        Log.w(tag, "Chunked export encountered error, falling back to single-pass hardware export.")
+      }
+    }
+
     // 1. Attempt export via Media3 Transformer if eligible
     if (canExportWithMedia3Transformer(timeline)) {
       val transformerResult = exportWithMedia3Transformer(timeline, outputFile, config)
@@ -551,6 +576,41 @@ class VideoExporter(private val context: Context) {
 
     // 2. Hardware composition pipeline with strict MediaCodec & MediaMuxer lifecycle
     return@withContext exportWithHardwarePipeline(projectName, timeline, config, outputFile)
+  }
+
+  suspend fun exportTimelineSegment(
+    timeline: Timeline,
+    config: ExportConfig,
+    outputFile: File,
+    startMs: Long,
+    endMs: Long
+  ): Boolean = withContext(Dispatchers.IO) {
+    val segmentDuration = (endMs - startMs).coerceAtLeast(1000L)
+    val shiftedVideo = timeline.videoClips.mapNotNull { clip ->
+      val clipEnd = clip.timelineStartMs + clip.durationMs
+      if (clipEnd <= startMs || clip.timelineStartMs >= endMs) null
+      else {
+        val newStart = (clip.timelineStartMs - startMs).coerceAtLeast(0L)
+        val newEnd = (clipEnd - startMs).coerceIn(0L, segmentDuration)
+        clip.copy(timelineStartMs = newStart, durationMs = maxOf(100L, newEnd - newStart))
+      }
+    }
+    val shiftedAudio = timeline.audioClips.mapNotNull { clip ->
+      val clipEnd = clip.timelineStartMs + clip.durationMs
+      if (clipEnd <= startMs || clip.timelineStartMs >= endMs) null
+      else {
+        val newStart = (clip.timelineStartMs - startMs).coerceAtLeast(0L)
+        val newEnd = (clipEnd - startMs).coerceIn(0L, segmentDuration)
+        clip.copy(timelineStartMs = newStart, durationMs = maxOf(100L, newEnd - newStart))
+      }
+    }
+    val segmentTimeline = timeline.copy(
+      videoClips = shiftedVideo,
+      audioClips = shiftedAudio
+    )
+
+    val result = exportWithHardwarePipeline("segment", segmentTimeline, config, outputFile)
+    result != null && result.exists() && result.length() > 0L
   }
 
   /**

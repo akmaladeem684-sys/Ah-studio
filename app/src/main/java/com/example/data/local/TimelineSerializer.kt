@@ -5,18 +5,37 @@ import com.example.domain.model.ProjectPackage
 import com.example.domain.model.ProjectSettings
 import com.example.domain.model.SourceMetadata
 import com.example.domain.model.Timeline
+import com.squareup.moshi.FromJson
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.ToJson
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.json.JSONObject
 
+class PairJsonAdapter {
+  @ToJson
+  fun toJson(pair: Pair<Float, Float>): List<Float> {
+    return listOf(pair.first, pair.second)
+  }
+
+  @FromJson
+  fun fromJson(list: List<Float>): Pair<Float, Float> {
+    return if (list.size >= 2) Pair(list[0], list[1]) else Pair(0f, 0f)
+  }
+}
+
 object TimelineSerializer {
   private val moshi: Moshi = Moshi.Builder()
+    .add(PairJsonAdapter())
     .add(KotlinJsonAdapterFactory())
     .build()
 
   private val timelineAdapter = moshi.adapter(Timeline::class.java)
   private val projectPackageAdapter = moshi.adapter(ProjectPackage::class.java)
   private val projectSettingsAdapter = moshi.adapter(ProjectSettings::class.java)
+
+  fun serializeTimeline(timeline: Timeline): String {
+    return timelineAdapter.toJson(timeline)
+  }
 
   /**
    * Constructs a complete, self-contained ProjectPackage extracted from the timeline and settings.

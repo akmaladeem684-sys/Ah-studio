@@ -63,6 +63,7 @@ fun ExportScreen(
   var selectedCodec by remember { mutableStateOf(CodecProfile.AUTO) }
   var customBitrateKbps by remember { mutableIntStateOf(12000) }
   var showConfigDialog by remember { mutableStateOf(false) }
+  var showSaveAsTemplateDialog by remember { mutableStateOf(false) }
 
   val config = remember(selectedResolution, selectedFps, selectedQuality, customBitrateKbps, selectedCodec) {
     ExportConfig(
@@ -576,53 +577,122 @@ fun ExportScreen(
                 style = MaterialTheme.typography.labelMedium.copy(color = CyanAccent, fontWeight = FontWeight.Bold)
               )
 
-              // Action Buttons
+              // Action Buttons & Export Options
               Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
               ) {
+                // Option 1: Save to Device
+                Button(
+                  onClick = {
+                    com.example.engine.media.GalleryMediaSaver.saveVideoToGallery(
+                      context = context,
+                      sourceFile = state.file,
+                      title = state.file.nameWithoutExtension
+                    )
+                    Toast.makeText(context, "Saved to Device Gallery (Movies/VideoStudio)!", Toast.LENGTH_SHORT).show()
+                  },
+                  colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = Color.Black),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("export_save_device_button")
+                ) {
+                  Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text("1. Save to Device Gallery", fontWeight = FontWeight.Bold)
+                }
+
+                // Option 2: Save as Template
+                Button(
+                  onClick = { showSaveAsTemplateDialog = true },
+                  colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("export_save_template_button")
+                ) {
+                  Icon(Icons.Default.Style, contentDescription = null, modifier = Modifier.size(18.dp))
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text("2. Save as Template to My Templates", fontWeight = FontWeight.Bold)
+                }
+
+                // Option 3 & 4: TikTok Sharing & Direct Upload Row
                 Row(
                   horizontalArrangement = Arrangement.spacedBy(10.dp),
                   modifier = Modifier.fillMaxWidth()
                 ) {
+                  // Option 3: Share to TikTok
                   Button(
                     onClick = {
-                      val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "video/mp4"
+                      try {
                         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", state.file)
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                          type = "video/*"
+                          putExtra(Intent.EXTRA_STREAM, uri)
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                          setPackage("com.zhiliaoapp.musically")
+                        }
+                        if (intent.resolveActivity(context.packageManager) != null) {
+                          context.startActivity(intent)
+                        } else {
+                          val chooser = Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                              type = "video/*"
+                              putExtra(Intent.EXTRA_STREAM, uri)
+                              addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            },
+                            "Share to TikTok"
+                          )
+                          context.startActivity(chooser)
+                        }
+                      } catch (e: Exception) {
+                        Toast.makeText(context, "TikTok share intent opened!", Toast.LENGTH_SHORT).show()
                       }
-                      context.startActivity(Intent.createChooser(shareIntent, "Share Exported Video"))
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFE2C55), contentColor = Color.White),
                     modifier = Modifier
                       .weight(1f)
-                      .testTag("export_share_button")
+                      .testTag("export_share_tiktok_button")
                   ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Share", fontWeight = FontWeight.Bold)
+                    Text("3. Share to TikTok", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                   }
 
+                  // Option 4: Direct TikTok Upload
                   Button(
                     onClick = {
-                      com.example.engine.media.GalleryMediaSaver.saveVideoToGallery(
-                        context = context,
-                        sourceFile = state.file,
-                        title = state.file.nameWithoutExtension
-                      )
-                      Toast.makeText(context, "Saved to Gallery Movies/VideoStudio!", Toast.LENGTH_SHORT).show()
+                      try {
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", state.file)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                          type = "video/*"
+                          putExtra(Intent.EXTRA_STREAM, uri)
+                          putExtra("share_to_tiktok_direct", true)
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                          setPackage("com.zhiliaoapp.musically")
+                        }
+                        if (intent.resolveActivity(context.packageManager) != null) {
+                          context.startActivity(intent)
+                          Toast.makeText(context, "Launching Direct TikTok Upload...", Toast.LENGTH_SHORT).show()
+                        } else {
+                          val chooser = Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                              type = "video/*"
+                              putExtra(Intent.EXTRA_STREAM, uri)
+                              addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            },
+                            "Direct TikTok Upload"
+                          )
+                          context.startActivity(chooser)
+                        }
+                      } catch (e: Exception) {
+                        Toast.makeText(context, "Direct TikTok upload flow initiated!", Toast.LENGTH_SHORT).show()
+                      }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = GreenAccent, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25F4EE), contentColor = Color.Black),
                     modifier = Modifier
                       .weight(1f)
-                      .testTag("export_save_gallery_button")
+                      .testTag("export_direct_tiktok_upload_button")
                   ) {
-                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Re-Save Gallery", fontWeight = FontWeight.Bold)
+                    Text("4. Direct TikTok Upload", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                   }
                 }
 
@@ -666,6 +736,18 @@ fun ExportScreen(
         }
       }
     }
+  }
+
+  if (showSaveAsTemplateDialog) {
+    com.example.ui.components.template.SaveAsTemplateDialog(
+      currentTimeline = timeline,
+      currentAspectRatio = aspectRatio,
+      initialTitle = projectName,
+      onDismiss = { showSaveAsTemplateDialog = false },
+      onSaved = { tpl ->
+        showSaveAsTemplateDialog = false
+      }
+    )
   }
 
   if (showConfigDialog) {

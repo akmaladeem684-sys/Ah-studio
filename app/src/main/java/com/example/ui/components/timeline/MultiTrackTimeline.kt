@@ -48,6 +48,7 @@ import com.example.domain.model.TrackType
 import com.example.domain.model.Transition
 import com.example.domain.model.TransitionType
 import com.example.domain.model.VideoClip
+import com.example.domain.model.TextClip
 import com.example.engine.SelectedTrackElement
 import com.example.ui.components.formatDurationShort
 import com.example.ui.theme.*
@@ -152,6 +153,7 @@ fun MultiTrackTimeline(
     ).coerceAtLeast(1000L)
   }
   val trackContentWidthDp = (maxTimelineMs / msPerPixel).dp + 180.dp
+  val textTracks = remember(timeline.textClips) { getOrderedTextTracks(timeline.textClips) }
 
   // Reorder dragging state on the Video track
   var draggedVideoIndex by remember { mutableStateOf<Int?>(null) }
@@ -299,9 +301,12 @@ fun MultiTrackTimeline(
                   verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                   // ==========================================
-                  // 1. MAIN VIDEO TRACK (Filmstrip + Add Ending + White Add Media Button)
+                  // 1. MAIN VIDEO TRACK (Filmstrip + Permanent Right-Side Add Media '+' Button)
                   // ==========================================
                   val videoTrackHeight = 64.dp
+                  val maxVideoEndMs = timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                  val videoSequenceWidthDp = (maxVideoEndMs / msPerPixel).dp
+
                   Box(
                     modifier = Modifier
                       .fillMaxWidth()
@@ -313,6 +318,97 @@ fun MultiTrackTimeline(
                         .fillMaxHeight()
                         .offset(x = centerPaddingDp)
                     ) {
+                      // Continuous Glowing Outer Border Frame around Video Clips Sequence
+                      if (timeline.videoClips.isNotEmpty()) {
+                        Box(
+                          modifier = Modifier
+                            .width(videoSequenceWidthDp + 58.dp)
+                            .height(videoTrackHeight)
+                            .background(Color(0xFF080F1D), RoundedCornerShape(8.dp))
+                            .border(BorderStroke(1.5.dp, Color(0xFF0091FF)), RoundedCornerShape(8.dp))
+                        )
+                      }
+
+                      // Locked Start Boundary Point (🔒 START at 0ms)
+                      Box(
+                        modifier = Modifier
+                          .offset(x = 0.dp)
+                          .width(2.5.dp)
+                          .height(videoTrackHeight)
+                          .background(Color(0xFF0091FF))
+                          .testTag("video_track_start_lock_line")
+                      )
+                      Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFF0077FF),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                          .offset(x = (-12).dp, y = (-10).dp)
+                          .testTag("video_track_start_lock_badge")
+                      ) {
+                        Row(
+                          modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                          Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Locked Start Point",
+                            tint = Color.White,
+                            modifier = Modifier.size(10.dp)
+                          )
+                          Text(
+                            text = "START",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                              color = Color.White,
+                              fontSize = 9.sp,
+                              fontWeight = FontWeight.Bold
+                            )
+                          )
+                        }
+                      }
+
+                      // Locked End Boundary Point (🔒 END at sequence end)
+                      if (timeline.videoClips.isNotEmpty()) {
+                        Box(
+                          modifier = Modifier
+                            .offset(x = videoSequenceWidthDp)
+                            .width(2.5.dp)
+                            .height(videoTrackHeight)
+                            .background(Color(0xFF0091FF))
+                            .testTag("video_track_end_lock_line")
+                        )
+                        Surface(
+                          shape = RoundedCornerShape(4.dp),
+                          color = Color(0xFF0077FF),
+                          shadowElevation = 2.dp,
+                          modifier = Modifier
+                            .offset(x = videoSequenceWidthDp - 8.dp, y = (-10).dp)
+                            .testTag("video_track_end_lock_badge")
+                        ) {
+                          Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                          ) {
+                            Icon(
+                              imageVector = Icons.Default.Lock,
+                              contentDescription = "Locked End Point",
+                              tint = Color.White,
+                              modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                              text = "END",
+                              style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                              )
+                            )
+                          }
+                        }
+                      }
+
                       // Video Clips positioned absolutely by timelineStartMs
                       timeline.videoClips.forEachIndexed { index, clip ->
                         val isSelected = (selectedElement as? SelectedTrackElement.Video)?.clipId == clip.id
@@ -338,6 +434,7 @@ fun MultiTrackTimeline(
                           speed = clip.speed,
                           isReversed = clip.isReversed,
                           isFreeze = !clip.isVideo,
+                          filterName = if (clip.filter?.type != null && clip.filter.type != com.example.domain.model.FilterType.NONE) clip.filter.type.displayName else null,
                           keyframes = clip.keyframes,
                           selectedKeyframeIds = selectedKeyframeIds,
                           onSelectKeyframe = onSelectKeyframe,
@@ -403,90 +500,82 @@ fun MultiTrackTimeline(
                         }
                       }
 
-                      // Add Media / Add Ending controls at the end of the video track
-                      val maxVideoEndMs = timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-                      val addMediaOffset = if (timeline.videoClips.isEmpty()) 0.dp else (maxVideoEndMs / msPerPixel).dp + 8.dp
-
-                      // Locked Video Track End Boundary Line
-                      if (timeline.videoClips.isNotEmpty()) {
-                        val vEndOffset = (maxVideoEndMs / msPerPixel).dp
+                      // Permanent '+' Add Media Tool Button at Video Track Right Side (As per user image design)
+                      if (timeline.videoClips.isEmpty()) {
+                        Surface(
+                          shape = RoundedCornerShape(8.dp),
+                          color = Color(0xFF091426),
+                          border = BorderStroke(1.5.dp, Color(0xFF0091FF)),
+                          modifier = Modifier
+                            .width(160.dp)
+                            .height(videoTrackHeight)
+                            .clickable { onAddMedia?.invoke() }
+                            .testTag("add_first_media_btn")
+                        ) {
+                          Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                          ) {
+                            Box(
+                              modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF0088FF)),
+                              contentAlignment = Alignment.Center
+                            ) {
+                              Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add Media",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                              )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                              text = "Add Media",
+                              style = MaterialTheme.typography.bodySmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                              )
+                            )
+                          }
+                        }
+                      } else {
+                        // Positioned permanently on the right side of the video track row
                         Box(
                           modifier = Modifier
-                            .offset(x = vEndOffset - 1.dp)
-                            .width(2.dp)
+                            .offset(x = videoSequenceWidthDp)
+                            .width(58.dp)
                             .height(videoTrackHeight)
-                            .background(Color(0xFF00C853).copy(alpha = 0.9f))
-                        )
-                      }
-
-                      Box(
-                        modifier = Modifier
-                          .offset(x = addMediaOffset)
-                          .align(Alignment.CenterStart)
-                      ) {
-                        if (timeline.videoClips.isEmpty()) {
-                          Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF161E2E),
-                            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.6f)),
+                            .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                            .background(Color(0xFF081222))
+                            .border(
+                              BorderStroke(1.5.dp, Color(0xFF0091FF)),
+                              RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)
+                            )
+                            .clickable { onAddMedia?.invoke() }
+                            .testTag("add_media_video_track_btn"),
+                          contentAlignment = Alignment.Center
+                        ) {
+                          Box(
                             modifier = Modifier
-                              .width(136.dp)
-                              .height(videoTrackHeight)
-                              .clickable { onAddMedia?.invoke() }
-                              .testTag("add_first_media_btn")
+                              .size(42.dp)
+                              .clip(CircleShape)
+                              .background(
+                                Brush.radialGradient(
+                                  colors = listOf(Color(0xFF00A2FF), Color(0xFF0077FF))
+                                )
+                              ),
+                            contentAlignment = Alignment.Center
                           ) {
-                            Row(
-                              modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                              verticalAlignment = Alignment.CenterVertically,
-                              horizontalArrangement = Arrangement.Center
-                            ) {
-                              Box(
-                                modifier = Modifier.size(24.dp).clip(CircleShape).background(CyanAccent),
-                                contentAlignment = Alignment.Center
-                              ) {
-                                Icon(Icons.Default.Add, contentDescription = "Add Media", tint = Color.Black, modifier = Modifier.size(16.dp))
-                              }
-                              Spacer(modifier = Modifier.width(8.dp))
-                              Text("Add Media", style = MaterialTheme.typography.bodySmall.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp))
-                            }
-                          }
-                        } else {
-                          Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                              shape = RoundedCornerShape(6.dp),
-                              color = Color(0xFF1E222D),
-                              border = BorderStroke(1.dp, Color(0xFF2D3344)),
-                              modifier = Modifier
-                                .width(110.dp)
-                                .height(videoTrackHeight)
-                                .clickable { onAddMedia?.invoke() }
-                                .testTag("add_ending_btn")
-                            ) {
-                              Row(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                              ) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add ending", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.85f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
-                              }
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            Surface(
-                              shape = RoundedCornerShape(6.dp),
-                              color = Color.White,
-                              modifier = Modifier
-                                .size(38.dp)
-                                .clickable { onAddMedia?.invoke() }
-                                .testTag("add_media_square_btn")
-                            ) {
-                              Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Add, contentDescription = "Add Media", tint = Color.Black, modifier = Modifier.size(22.dp))
-                              }
-                            }
+                            Icon(
+                              imageVector = Icons.Default.Add,
+                              contentDescription = "Add New Media",
+                              tint = Color.White,
+                              modifier = Modifier.size(26.dp)
+                            )
                           }
                         }
                       }
@@ -529,6 +618,7 @@ fun MultiTrackTimeline(
                             isMultiSelected = isMulti,
                             isLocked = false,
                             speed = clip.speed,
+                            filterName = if (clip.filter?.type != null && clip.filter.type != com.example.domain.model.FilterType.NONE) clip.filter.type.displayName else null,
                             isVideoClip = clip.isVideo,
                             uri = clip.uri,
                             isVideo = clip.isVideo,
@@ -684,78 +774,82 @@ fun MultiTrackTimeline(
                   }
 
                   // ==========================================
-                  // 4. TEXT TRACK (+ Add text button card / text cards)
+                  // 4. TEXT TRACKS (Separate track lane for each text track)
                   // ==========================================
-                  if (timeline.textClips.isNotEmpty()) {
+                  if (textTracks.isNotEmpty()) {
                     val textTrackHeight = 36.dp
-                    Box(
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .height(textTrackHeight)
-                        .testTag("text_track_lane")
-                    ) {
+                    val maxTextEndMs = timeline.textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                    val addTextOffset = (maxTextEndMs / msPerPixel).dp + 8.dp
+
+                    textTracks.forEachIndexed { trackIdx, trackClips ->
                       Box(
                         modifier = Modifier
-                          .fillMaxHeight()
-                          .offset(x = centerPaddingDp)
+                          .fillMaxWidth()
+                          .height(textTrackHeight)
+                          .testTag(if (trackIdx == 0) "text_track_lane" else "text_track_lane_$trackIdx")
                       ) {
-                        timeline.textClips.forEach { clip ->
-                          val isSelected = (selectedElement as? SelectedTrackElement.Text)?.clipId == clip.id
-                          val isMulti = clip.id in selectedClipIds
-
-                          TimelineClipView(
-                            clipId = clip.id,
-                            title = clip.text.ifBlank { "Text" },
-                            timelineStartMs = clip.timelineStartMs,
-                            durationMs = clip.durationMs,
-                            trackColor = TextTrackColor,
-                            heightDp = textTrackHeight,
-                            msPerPixel = msPerPixel,
-                            isSelected = isSelected,
-                            isMultiSelected = isMulti,
-                            isLocked = false,
-                            onSelect = {
-                              if (isMultiSelectMode) onToggleClipSelection(clip.id)
-                              else onSelectElement(SelectedTrackElement.Text(clip.id))
-                            },
-                            onLongClick = { onToggleClipSelection(clip.id) },
-                            onMoveClip = { delta -> onMoveClip(clip.id, delta) },
-                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
-                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
-                            onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
-                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
-                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
-                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
-                          )
-                        }
-
-                        val maxTextEndMs = timeline.textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-                        val addTextOffset = (maxTextEndMs / msPerPixel).dp + 8.dp
-
                         Box(
                           modifier = Modifier
-                            .offset(x = addTextOffset)
-                            .align(Alignment.CenterStart)
+                            .fillMaxHeight()
+                            .offset(x = centerPaddingDp)
                         ) {
-                          Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E222D),
-                            border = BorderStroke(1.dp, Color(0xFF2D3344)),
-                            modifier = Modifier
-                              .width(120.dp)
-                              .height(34.dp)
-                              .clickable { onAddText?.invoke() }
-                              .testTag("add_text_pill_btn")
-                          ) {
-                            Row(
-                              modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                              verticalAlignment = Alignment.CenterVertically
+                          trackClips.forEach { clip ->
+                            val isSelected = (selectedElement as? SelectedTrackElement.Text)?.clipId == clip.id
+                            val isMulti = clip.id in selectedClipIds
+
+                            TimelineClipView(
+                              clipId = clip.id,
+                              title = clip.text.ifBlank { "Text" },
+                              timelineStartMs = clip.timelineStartMs,
+                              durationMs = clip.durationMs,
+                              trackColor = TextTrackColor,
+                              heightDp = textTrackHeight,
+                              msPerPixel = msPerPixel,
+                              isSelected = isSelected,
+                              isMultiSelected = isMulti,
+                              isLocked = false,
+                              onSelect = {
+                                if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                                else onSelectElement(SelectedTrackElement.Text(clip.id))
+                              },
+                              onLongClick = { onToggleClipSelection(clip.id) },
+                              onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                              onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                              onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
+                              onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                              onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                              onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                              onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                              onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                              onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
+                            )
+                          }
+
+                          if (trackIdx == textTracks.lastIndex) {
+                            Box(
+                              modifier = Modifier
+                                .offset(x = addTextOffset)
+                                .align(Alignment.CenterStart)
                             ) {
-                              Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
-                              Spacer(modifier = Modifier.width(6.dp))
-                              Text("Add text", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                              Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF1E222D),
+                                border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                                modifier = Modifier
+                                  .width(120.dp)
+                                  .height(34.dp)
+                                  .clickable { onAddText?.invoke() }
+                                  .testTag("add_text_pill_btn")
+                              ) {
+                                Row(
+                                  modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                                  verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                  Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                                  Spacer(modifier = Modifier.width(6.dp))
+                                  Text("Add text", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                                }
+                              }
                             }
                           }
                         }
@@ -1284,6 +1378,7 @@ private fun TimelineLeftUtilityColumn(
   onEditCover: (() -> Unit)?,
   modifier: Modifier = Modifier
 ) {
+  val textTracks = remember(timeline.textClips) { getOrderedTextTracks(timeline.textClips) }
   Column(
     modifier = modifier
       .width(88.dp)
@@ -1412,24 +1507,26 @@ private fun TimelineLeftUtilityColumn(
       }
     }
 
-    // Row 4: Text Track Icon (36.dp)
-    if (timeline.textClips.isNotEmpty()) {
-      Box(
-        modifier = Modifier
-          .size(36.dp)
-          .clip(RoundedCornerShape(6.dp))
-          .background(Color(0xFF1B1F2A))
-          .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
-        contentAlignment = Alignment.Center
-      ) {
-        Text(
-          text = "T",
-          style = MaterialTheme.typography.titleMedium.copy(
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextTrackColor
+    // Row 4: Text Track Icon(s) (36.dp each)
+    if (textTracks.isNotEmpty()) {
+      textTracks.forEachIndexed { trackIdx, _ ->
+        Box(
+          modifier = Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color(0xFF1B1F2A))
+            .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
+          contentAlignment = Alignment.Center
+        ) {
+          Text(
+            text = if (textTracks.size > 1) "T${trackIdx + 1}" else "T",
+            style = MaterialTheme.typography.titleMedium.copy(
+              fontSize = 14.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextTrackColor
+            )
           )
-        )
+        }
       }
     }
 
@@ -1471,5 +1568,26 @@ private fun TimelineLeftUtilityColumn(
       }
     }
   }
+}
+
+private fun getOrderedTextTracks(textClips: List<TextClip>): List<List<TextClip>> {
+  if (textClips.isEmpty()) return emptyList()
+
+  val trackMap = mutableMapOf<Int, MutableList<TextClip>>()
+  val sortedClips = textClips.sortedBy { it.timelineStartMs }
+
+  for (clip in sortedClips) {
+    var assignedTrack = clip.trackIndex
+    while (trackMap[assignedTrack]?.any { existing ->
+        val endExisting = existing.timelineStartMs + existing.durationMs
+        val endNew = clip.timelineStartMs + clip.durationMs
+        existing.timelineStartMs < endNew && clip.timelineStartMs < endExisting
+      } == true) {
+      assignedTrack++
+    }
+    trackMap.getOrPut(assignedTrack) { mutableListOf() }.add(clip)
+  }
+
+  return trackMap.entries.sortedBy { it.key }.map { it.value }
 }
 

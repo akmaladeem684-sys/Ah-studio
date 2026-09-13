@@ -77,8 +77,18 @@ object GpuShaders {
       uniform int uTransitionType;
       uniform float uTransitionProgress;
       
-      // Blend Mode
-      uniform int uBlendMode; // 0=Normal, 1=Screen, 2=Multiply, 3=Overlay, 4=Lighten, 5=Add
+      // Blend Mode (0=Normal, 1=Multiply, 2=Screen, 3=Overlay, 4=Darken, 5=Lighten, 6=Color Dodge, 7=Soft Light, 8=Hard Light, 9=Difference, 10=Add)
+      uniform int uBlendMode;
+      
+      // Masking
+      uniform int uMaskEnabled;
+      uniform int uMaskShape; // 0=None, 1=Rectangle, 2=Circle, 3=Linear, 4=Mirror, 5=Star, 6=Heart
+      uniform vec2 uMaskPos;   // (-1f to 1f)
+      uniform vec2 uMaskSize;  // (0f to 2f)
+      uniform float uMaskRotation; // deg
+      uniform float uMaskFeather;  // 0f to 1f
+      uniform float uMaskOpacity;  // 0f to 1f
+      uniform int uMaskInverted;   // 0 or 1
       
       // Pseudo random generator for grain
       float rand(vec2 co) {
@@ -125,6 +135,41 @@ object GpuShaders {
           float g = color.g;
           float b = texture2D(uTexture, vTextureCoord - vec2(splitDist, 0.0)).b;
           color.rgb = vec3(r, g, b);
+        }
+        
+        // GPU Mask Calculation
+        if (uMaskEnabled == 1 && uMaskShape > 0) {
+          vec2 centered = vTextureCoord - vec2(0.5) - uMaskPos * vec2(0.5, -0.5);
+          float rad = uMaskRotation * 0.0174532925; // deg to rad
+          float cosR = cos(rad);
+          float sinR = sin(rad);
+          vec2 mUv = vec2(cosR * centered.x - sinR * centered.y, sinR * centered.x + cosR * centered.y);
+          
+          float halfW = max(0.01, uMaskSize.x * 0.5);
+          float halfH = max(0.01, uMaskSize.y * 0.5);
+          float feather = max(0.001, uMaskFeather * 0.25);
+          float maskAlpha = 1.0;
+          
+          if (uMaskShape == 1) { // RECTANGLE
+            float edgeX = smoothstep(halfW + feather, halfW - feather, abs(mUv.x));
+            float edgeY = smoothstep(halfH + feather, halfH - feather, abs(mUv.y));
+            maskAlpha = edgeX * edgeY;
+          } else if (uMaskShape == 2) { // CIRCLE / RADIAL
+            float dist = length(mUv / vec2(halfW, halfH));
+            maskAlpha = smoothstep(1.0 + feather, 1.0 - feather, dist);
+          } else if (uMaskShape == 3) { // LINEAR
+            maskAlpha = smoothstep(-feather, feather, mUv.x);
+          } else if (uMaskShape == 4) { // MIRROR
+            maskAlpha = smoothstep(-feather, feather, abs(mUv.x));
+          } else {
+            float dist = length(mUv / vec2(halfW, halfH));
+            maskAlpha = smoothstep(1.0 + feather, 1.0 - feather, dist);
+          }
+          
+          if (uMaskInverted == 1) {
+            maskAlpha = 1.0 - maskAlpha;
+          }
+          color.a *= maskAlpha * uMaskOpacity;
         }
         
         // 1. Chroma Key removal (Similarity, Smoothness, Spill suppression, Edge control, Backgrounds)
@@ -276,6 +321,25 @@ object GpuShaders {
         vec4 from = texture2D(uTextureFrom, clamp(pFromZoom, 0.0, 1.0));
         vec4 to = texture2D(uTextureTo, clamp(pToZoom, 0.0, 1.0));
         gl_FragColor = mix(from, to, smoothstep(0.3, 0.7, pr));
+      } else if (uType == 7) { // SPIN
+        float angle = pr * 6.283185;
+        float s = sin(angle);
+        float c = cos(angle);
+        vec2 centered = p - 0.5;
+        vec2 rotated = vec2(c * centered.x - s * centered.y, s * centered.x + c * centered.y) + 0.5;
+        vec4 from = texture2D(uTextureFrom, clamp(rotated, 0.0, 1.0));
+        vec4 to = texture2D(uTextureTo, clamp(p, 0.0, 1.0));
+        gl_FragColor = mix(from, to, smoothstep(0.4, 0.6, pr));
+      } else if (uType == 8) { // BLUR
+        float blurAmt = sin(pr * 3.14159) * 0.04;
+        vec4 sumFrom = vec4(0.0);
+        vec4 sumTo = vec4(0.0);
+        for (int i = -3; i <= 3; i++) {
+          vec2 off = vec2(float(i) * blurAmt, 0.0);
+          sumFrom += texture2D(uTextureFrom, clamp(p + off, 0.0, 1.0));
+          sumTo += texture2D(uTextureTo, clamp(p + off, 0.0, 1.0));
+        }
+        gl_FragColor = mix(sumFrom / 7.0, sumTo / 7.0, pr);
       } else if (uType == 9) { // FLASH
         vec4 from = texture2D(uTextureFrom, p);
         vec4 to = texture2D(uTextureTo, p);
@@ -292,6 +356,30 @@ object GpuShaders {
         vec4 from = texture2D(uTextureFrom, clamp(p + offset, 0.0, 1.0));
         vec4 to = texture2D(uTextureTo, clamp(p - offset, 0.0, 1.0));
         gl_FragColor = mix(from, to, pr);
+      } else if (uType == 11) { // WHIP PAN
+        float blurAmt = sin(pr * 3.14159) * 0.08;
+        vec2 pFrom = p - vec2(pr * 1.5, 0.0);
+        vec2 pTo = p + vec2((1.0 - pr) * 1.5, 0.0);
+        vec4 from = texture2D(uTextureFrom, clamp(pFrom, 0.0, 1.0));
+        vec4 to = texture2D(uTextureTo, clamp(pTo, 0.0, 1.0));
+        gl_FragColor = mix(from, to, pr);
+      } else if (uType == 12) { // ZOOM BLUR
+        vec2 center = vec2(0.5);
+        float scale = 1.0 + sin(pr * 3.14159) * 0.6;
+        vec2 pZoom = center + (p - center) / scale;
+        vec4 from = texture2D(uTextureFrom, clamp(pZoom, 0.0, 1.0));
+        vec4 to = texture2D(uTextureTo, clamp(p, 0.0, 1.0));
+        gl_FragColor = mix(from, to, pr);
+      } else if (uType == 13) { // GLITCH WIPE
+        float noise = rand(vec2(p.y * 20.0, pr));
+        float threshold = pr + (noise - 0.5) * 0.2;
+        gl_FragColor = p.x < threshold ? texture2D(uTextureTo, p) : texture2D(uTextureFrom, p);
+      } else if (uType == 14) { // LIGHT LEAK
+        vec4 from = texture2D(uTextureFrom, p);
+        vec4 to = texture2D(uTextureTo, p);
+        float leak = sin(pr * 3.14159) * 0.9;
+        vec3 leakColor = vec3(1.0, 0.65, 0.3) * leak;
+        gl_FragColor = vec4(mix(from.rgb, to.rgb, pr) + leakColor, 1.0);
       } else { // Default blend
         vec4 from = texture2D(uTextureFrom, p);
         vec4 to = texture2D(uTextureTo, p);

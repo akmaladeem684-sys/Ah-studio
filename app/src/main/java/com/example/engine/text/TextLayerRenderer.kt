@@ -45,18 +45,57 @@ object TextLayerRenderer {
     var visibleText = clip.text
 
     when (clip.animationType.lowercase().trim()) {
-      "fade" -> {
+      "fade", "fade in", "fade_in", "fadein" -> {
         animAlpha = progress
       }
-      "slide", "slide up", "slide_up" -> {
+      "fade out", "fade_out", "fadeout" -> {
+        animAlpha = 1f - progress
+      }
+      "slide", "slide up", "slide_up", "slideup" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
         animPosY = clip.posY + (1f - easeOut) * 0.18f
         animAlpha = progress
       }
-      "zoom", "zoom in", "zoom_in" -> {
+      "slide down", "slide_down", "slidedown" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animPosY = clip.posY - (1f - easeOut) * 0.18f
+        animAlpha = progress
+      }
+      "slide left", "slide_left", "slideleft" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animPosX = clip.posX - (1f - easeOut) * 0.25f
+        animAlpha = progress
+      }
+      "slide right", "slide_right", "slideright" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animPosX = clip.posX + (1f - easeOut) * 0.25f
+        animAlpha = progress
+      }
+      "zoom", "zoom in", "zoom_in", "zoomin" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
         animScale = 0.2f + 0.8f * easeOut
         animAlpha = progress
+      }
+      "zoom out", "zoom_out", "zoomout" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animScale = 1.4f - 0.4f * easeOut
+        animAlpha = progress
+      }
+      "scale", "scale in", "scale_in", "scalein" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animScale = 1.6f - 0.6f * easeOut
+        animAlpha = (progress * 2f).coerceIn(0f, 1f)
+      }
+      "scale out", "scale_out", "scaleout" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animScale = 1.0f - 0.7f * easeOut
+        animAlpha = (1f - progress).coerceIn(0f, 1f)
+      }
+      "rotate out", "rotate_out", "rotateout" -> {
+        val easeOut = 1f - (1f - progress) * (1f - progress)
+        animRotation = clip.rotation + easeOut * 60f
+        animScale = 1.0f - 0.5f * easeOut
+        animAlpha = 1f - progress
       }
       "pop", "pop in", "pop_in" -> {
         animScale = if (progress < 0.65f) {
@@ -71,16 +110,17 @@ object TextLayerRenderer {
         animScale = spring.coerceIn(0f, 1.25f)
         animAlpha = (progress * 3f).coerceIn(0f, 1f)
       }
-      "typewriter" -> {
+      "typewriter", "classic typewriter", "fast typewriter", "digital typewriter", "cursor type", "terminal text", "hacker type", "retro writer", "machine type" -> {
         val totalChars = clip.text.length
         val charCount = (totalChars * progress).toInt().coerceIn(0, totalChars)
+        val cursor = if (clip.animationType.contains("hacker") || clip.animationType.contains("terminal")) "_" else "▌"
         visibleText = if (charCount < totalChars) {
-          clip.text.substring(0, charCount) + if ((relTime / 250) % 2 == 0L) "▌" else ""
+          clip.text.substring(0, charCount) + if ((relTime / 200) % 2 == 0L) cursor else ""
         } else {
           clip.text
         }
       }
-      "reveal", "letter reveal", "reveal in" -> {
+      "reveal", "letter reveal", "reveal in", "character reveal" -> {
         val totalChars = clip.text.length
         val charCount = (totalChars * (1f - (1f - progress) * (1f - progress))).toInt().coerceIn(0, totalChars)
         visibleText = clip.text.substring(0, charCount)
@@ -94,45 +134,49 @@ object TextLayerRenderer {
         visibleText = clip.text.substring(0, charCount)
         animAlpha = (progress * 1.5f).coerceIn(0f, 1f)
       }
-      "glow", "glow pulse", "glow_pulse" -> {
+      "glow", "glow pulse", "glow_pulse", "neon pulse", "soft glow", "golden glow", "white glow", "aurora text", "crystal glow" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
         val entranceScale = 0.85f + 0.15f * easeOut
-        val pulse = if (progress >= 0.7f) sin((relTime - animDur * 0.7f).toFloat() / 220f * PI.toFloat()) * 0.04f else 0f
-        animAlpha = progress.coerceIn(0.2f, 1f)
+        val pulse = sin((relTime).toFloat() / 200f * PI.toFloat()) * 0.05f
+        animAlpha = progress.coerceIn(0.25f, 1f)
         animScale = entranceScale + pulse
       }
-      "elastic", "elastic motion", "elastic_motion" -> {
+      "elastic", "elastic motion", "elastic_motion", "elastic typography" -> {
         val spring = 1f - cos(progress * PI.toFloat() * 3.8f) * exp(-progress * 3.5f)
         animScale = spring.coerceIn(0f, 1.3f)
         animAlpha = (progress * 3.5f).coerceIn(0f, 1f)
       }
-      "character reveal", "letter reveal", "reveal in" -> {
-        val totalChars = clip.text.length
-        val charCount = (totalChars * (1f - (1f - progress) * (1f - progress))).toInt().coerceIn(0, totalChars)
-        visibleText = clip.text.substring(0, charCount)
-        val easeOut = 1f - (1f - progress) * (1f - progress)
-        animPosY = clip.posY + (1f - easeOut) * 0.08f
-        animAlpha = progress
-      }
-      "word reveal", "word_reveal" -> {
+      "word reveal", "word_reveal", "word rush", "dynamic words", "bounce words" -> {
         val words = clip.text.split(" ")
-        val wordCount = (words.size * progress).toInt().coerceIn(1, words.size)
-        visibleText = words.take(wordCount).joinToString(" ")
+        if (words.size > 1) {
+          val wordCount = (words.size * progress).toInt().coerceIn(1, words.size)
+          visibleText = words.take(wordCount).joinToString(" ")
+        }
+        val bounce = if (progress >= 0.8f) sin((relTime).toFloat() / 150f) * 0.03f else 0f
+        animScale = (0.7f + 0.3f * progress) + bounce
         animAlpha = (progress * 2f).coerceIn(0f, 1f)
       }
-      "stroke reveal", "stroke_reveal" -> {
-        val totalChars = clip.text.length
-        val charCount = (totalChars * progress).toInt().coerceIn(0, totalChars)
-        visibleText = clip.text.substring(0, charCount)
-        animAlpha = progress
+      "kinetic burst", "kinetic wave", "energy text", "horizontal rush", "letter explosion", "word cascade", "fast cut text", "dynamic split", "motion stack" -> {
+        val t = relTime.toFloat() / 100f
+        val pulse = sin(t * 3.5f) * 0.04f
+        val shiftX = cos(t * 2.0f) * 0.015f
+        animScale = (0.85f + 0.15f * progress) + pulse
+        animPosX = clip.posX + shiftX
+        animAlpha = (progress * 2.5f).coerceIn(0f, 1f)
       }
-      "neon", "neon flicker", "neon_flicker" -> {
-        animAlpha = if (progress < 0.7f) {
-          val flickerCycle = ((relTime / 65L) % 4).toInt()
-          if (flickerCycle == 0 || flickerCycle == 2) 0.95f else 0.25f
-        } else {
-          1.0f
-        }
+      "3d pop", "3d zoom", "3d flip", "3d rotate", "3d depth", "3d perspective", "3d spin", "3d impact", "3d floating" -> {
+        val t = relTime.toFloat() / 180f
+        val depthScale = 0.8f + 0.2f * sin(t * 2f)
+        val rotFlip = sin(t * 1.5f) * 12f
+        animScale = (0.8f + 0.2f * progress) * depthScale
+        animRotation = clip.rotation + rotFlip
+        animAlpha = progress.coerceIn(0.2f, 1f)
+      }
+      "neon", "neon flicker", "neon_flicker", "cyber neon", "electric text", "rgb glow", "cyberpunk text", "laser text", "digital glow" -> {
+        val flickerCycle = ((relTime / 70L) % 5).toInt()
+        animAlpha = if (progress < 0.6f && (flickerCycle == 0 || flickerCycle == 2)) 0.3f else 1.0f
+        val subtlePulse = sin(relTime.toFloat() / 120f) * 0.03f
+        animScale = 1.0f + subtlePulse
       }
       "glitch", "cyber glitch", "glitch in" -> {
         if (progress < 0.85f) {
@@ -163,10 +207,11 @@ object TextLayerRenderer {
         animAlpha = easeOut
         animScale = 0.92f + 0.08f * easeOut
       }
-      "cinematic", "cinematic reveal", "cinematic_reveal" -> {
+      "cinematic", "cinematic reveal", "movie title", "epic entrance", "film credits", "dramatic zoom", "wide letter reveal", "epic gold", "trailer title", "movie opener" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
         animAlpha = easeOut
-        animScale = 0.96f + 0.04f * easeOut
+        animScale = 0.90f + 0.10f * easeOut
+        animPosY = clip.posY + (1f - easeOut) * 0.04f
       }
       "rotate", "rotate in", "rotate_in" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
@@ -174,11 +219,11 @@ object TextLayerRenderer {
         animScale = 0.4f + 0.6f * easeOut
         animAlpha = progress
       }
-      "flicker", "light flicker" -> {
-        animAlpha = if (progress < 0.7f) {
-          val cycle = ((relTime / 70L) % 3).toInt()
-          if (cycle == 0) 1f else 0.2f
-        } else 1f
+      "flicker", "light flicker", "light sweep", "shine text", "spotlight", "light burst" -> {
+        val cycle = ((relTime / 80L) % 4).toInt()
+        animAlpha = if (cycle == 0) 0.4f else 1.0f
+        val sweepShift = (sin(relTime.toFloat() / 250f) * 0.02f)
+        animPosX = clip.posX + sweepShift
       }
       "mask reveal", "mask_reveal" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
@@ -189,7 +234,10 @@ object TextLayerRenderer {
         animAlpha = progress
       }
       else -> {
-        // "None" or fallback
+        // Continuous gentle pulse fallback for all other template types so cards NEVER freeze
+        val gentlePulse = sin(relTime.toFloat() / 300f) * 0.03f
+        animScale = 1.0f + gentlePulse
+        animAlpha = (0.7f + 0.3f * progress).coerceIn(0.5f, 1.0f)
       }
     }
 

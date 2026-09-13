@@ -59,6 +59,7 @@ import androidx.media3.ui.PlayerView
 import androidx.compose.ui.graphics.asImageBitmap
 import com.example.engine.media.VideoThumbnailManager
 import com.example.ui.components.text.*
+import com.example.ui.components.navigation.*
 import coil.compose.AsyncImage
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -86,6 +87,7 @@ import com.example.ui.components.trim.VideoTrimmingToolPanel
 import com.example.ui.components.formatDuration
 import com.example.ui.components.formatDurationShort
 import com.example.ui.components.timeline.*
+import com.example.ui.components.diagnostics.DiagnosticOverlay
 import com.example.ui.components.timeline.LayersDrawer
 import com.example.ui.theme.*
 import kotlin.math.sin
@@ -138,6 +140,7 @@ fun EditorScreen(
   var showExportConfigDialog by remember { mutableStateOf(false) }
   var showRelinkMediaDialog by remember { mutableStateOf(false) }
   var isFullscreenPreview by remember { mutableStateOf(false) }
+  var showDiagnosticOverlay by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
   var draggedTransitionType by remember { mutableStateOf<TransitionType?>(null) }
   var activeTextSubTool by remember { mutableStateOf(TextSubTool.ADD_TEXT) }
@@ -228,6 +231,8 @@ fun EditorScreen(
           exportState = exportState,
           canUndo = canUndo,
           canRedo = canRedo,
+          isDiagnosticActive = showDiagnosticOverlay,
+          onToggleDiagnostics = { showDiagnosticOverlay = !showDiagnosticOverlay },
           onUndoClick = { viewModel.timelineEngine.undo() },
           onRedoClick = { viewModel.timelineEngine.redo() },
           onBackClick = {
@@ -263,7 +268,26 @@ fun EditorScreen(
               onDismiss = { viewModel.setActiveToolbarTab(null) }
             )
             EditorToolbarTab.ADJUST -> AdjustToolPanel(viewModel)
-            EditorToolbarTab.SPEED -> SpeedToolPanel(viewModel)
+            EditorToolbarTab.SPEED -> com.example.ui.components.SpeedCurveToolPanel(
+              viewModel = viewModel,
+              onClose = { viewModel.setActiveToolbarTab(null) }
+            )
+            EditorToolbarTab.MASK -> com.example.ui.components.MaskAndBlendToolPanel(
+              viewModel = viewModel,
+              onClose = { viewModel.setActiveToolbarTab(null) }
+            )
+            EditorToolbarTab.AI -> com.example.ui.components.AiSuiteToolPanel(
+              viewModel = viewModel,
+              onClose = { viewModel.setActiveToolbarTab(null) }
+            )
+            EditorToolbarTab.AI_MATTING -> com.example.ui.components.AiMattingToolPanel(
+              viewModel = viewModel,
+              onClose = { viewModel.setActiveToolbarTab(null) }
+            )
+            EditorToolbarTab.ASSET_STORE -> com.example.ui.components.AssetStoreToolPanel(
+              viewModel = viewModel,
+              onClose = { viewModel.setActiveToolbarTab(null) }
+            )
             EditorToolbarTab.FILTERS -> FiltersToolPanel(viewModel)
             EditorToolbarTab.EFFECTS -> EffectsToolPanel(viewModel)
             EditorToolbarTab.TRANSITIONS -> TransitionsPanel(
@@ -296,7 +320,10 @@ fun EditorScreen(
                 )
               }
             }
-            EditorToolbarTab.AUDIO -> AudioToolPanel(viewModel)
+            EditorToolbarTab.AUDIO -> com.example.ui.components.AdvancedAudioToolPanel(
+              viewModel = viewModel,
+              onClose = { viewModel.setActiveToolbarTab(null) }
+            )
             EditorToolbarTab.VOLUME -> VolumeToolPanel(viewModel)
             EditorToolbarTab.STICKERS -> StickersToolPanel(viewModel)
             EditorToolbarTab.CHROMA -> ChromaKeyPanel(viewModel)
@@ -326,6 +353,10 @@ fun EditorScreen(
                 activeTextSubTool = TextSubTool.ADD_TEXT
               }
               viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
+            },
+            onNavigateHome = {
+              viewModel.setActiveToolbarTab(null)
+              viewModel.timelineEngine.selectElement(SelectedTrackElement.None)
             }
           )
         }
@@ -412,6 +443,22 @@ fun EditorScreen(
             .fillMaxSize()
             .testTag("video_preview")
         )
+
+        // Real-Time Hardware Diagnostic Overlay
+        androidx.compose.animation.AnimatedVisibility(
+          visible = showDiagnosticOverlay,
+          enter = fadeIn() + slideInVertically { -it },
+          exit = fadeOut() + slideOutVertically { -it },
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(12.dp)
+        ) {
+          DiagnosticOverlay(
+            timeline = timeline,
+            isPlaying = isPlaying,
+            onClose = { showDiagnosticOverlay = false }
+          )
+        }
       }
 
       // 2. PLAYBACK CONTROLS BAR (Moved below video preview, scaled-up play button)
@@ -863,6 +910,8 @@ private fun EditorTopBar(
   exportState: ExportState,
   canUndo: Boolean = false,
   canRedo: Boolean = false,
+  isDiagnosticActive: Boolean = false,
+  onToggleDiagnostics: () -> Unit = {},
   onUndoClick: () -> Unit = {},
   onRedoClick: () -> Unit = {},
   onBackClick: () -> Unit,
@@ -876,7 +925,7 @@ private fun EditorTopBar(
       .padding(horizontal = 12.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
-    // Left: Close (X) + Undo + Redo
+    // Left: Close (X) + Undo + Redo + Diagnostics Speed HUD
     IconButton(
       onClick = onBackClick,
       modifier = Modifier
@@ -919,6 +968,20 @@ private fun EditorTopBar(
         imageVector = Icons.AutoMirrored.Filled.Redo,
         contentDescription = "Redo",
         tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.35f),
+        modifier = Modifier.size(20.dp)
+      )
+    }
+
+    IconButton(
+      onClick = onToggleDiagnostics,
+      modifier = Modifier
+        .size(38.dp)
+        .testTag("top_diagnostics_btn")
+    ) {
+      Icon(
+        imageVector = Icons.Default.Speed,
+        contentDescription = "Diagnostic Overlay",
+        tint = if (isDiagnosticActive) CyanAccent else Color.White.copy(alpha = 0.8f),
         modifier = Modifier.size(20.dp)
       )
     }
@@ -1272,35 +1335,94 @@ fun VideoPreviewSurface(
           }
         }
 
-        // Active Visual Effects Overlay (Glitch, Glow, RGB Split, Flash)
-        if (activeEffects.isNotEmpty()) {
+        // Active Visual Effects Overlay (Video, Body, Photo, AI Effects)
+        if (activeEffects.isNotEmpty() && !com.example.ui.components.effects.isBeforeAfterComparing) {
           activeEffects.forEach { effect ->
-            when (effect.effectType) {
-              EffectType.GLOW -> {
+            val alpha = (0.25f * effect.intensity).coerceIn(0.05f, 0.85f)
+            when (effect.effectType.category) {
+              "Body Effects" -> {
                 Box(
                   modifier = Modifier
                     .fillMaxSize()
-                    .background(CyanAccent.copy(alpha = 0.15f * effect.intensity))
+                    .background(
+                      Brush.radialGradient(
+                        colors = listOf(Color(0xFF00E5FF).copy(alpha = alpha), Color(0xFFEC4899).copy(alpha = alpha * 0.5f), Color.Transparent)
+                      )
+                    )
                 )
               }
-              EffectType.FLASH -> {
-                val isFlash = (currentPosMs % 400L) < 200L
-                if (isFlash) {
-                  Box(
-                    modifier = Modifier
-                      .fillMaxSize()
-                      .background(Color.White.copy(alpha = 0.4f * effect.intensity))
-                  )
+              "Photo Effects" -> {
+                Box(
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                      Brush.verticalGradient(
+                        colors = listOf(Color(0xFFF59E0B).copy(alpha = alpha * 0.6f), Color(0xFF8B5CF6).copy(alpha = alpha * 0.6f))
+                      )
+                    )
+                )
+              }
+              "AI Effects" -> {
+                Box(
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                      Brush.horizontalGradient(
+                        colors = listOf(Color(0xFFA855F7).copy(alpha = alpha), Color(0xFF00E5FF).copy(alpha = alpha))
+                      )
+                    )
+                )
+              }
+              else -> { // Video Effects
+                when (effect.effectType) {
+                  EffectType.GLOW, EffectType.HALO_GLOW -> {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxSize()
+                        .background(CyanAccent.copy(alpha = alpha))
+                    )
+                  }
+                  EffectType.FLASH, EffectType.STROBE -> {
+                    val isFlash = (currentPosMs % 300L) < 150L
+                    if (isFlash) {
+                      Box(
+                        modifier = Modifier
+                          .fillMaxSize()
+                          .background(Color.White.copy(alpha = alpha * 1.5f))
+                      )
+                    }
+                  }
+                  EffectType.RGB_SPLIT, EffectType.GLITCH, EffectType.VHS_VINTAGE -> {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                          Brush.horizontalGradient(
+                            listOf(Color.Red.copy(alpha = alpha * 0.8f), Color.Blue.copy(alpha = alpha * 0.8f))
+                          )
+                        )
+                    )
+                  }
+                  EffectType.VIGNETTE -> {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                          Brush.radialGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = alpha * 2.0f))
+                          )
+                        )
+                    )
+                  }
+                  else -> {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF38BDF8).copy(alpha = alpha * 0.3f))
+                    )
+                  }
                 }
               }
-              EffectType.RGB_SPLIT, EffectType.GLITCH -> {
-                Box(
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .background(Brush.horizontalGradient(listOf(Color.Red.copy(alpha = 0.1f), Color.Blue.copy(alpha = 0.1f))))
-                )
-              }
-              else -> {}
             }
           }
         }
@@ -1956,346 +2078,255 @@ private fun FilmstripThumbnailCell(
   }
 }
 
-// BOTTOM TOOLBAR: Modern 6-column card navigation layout with smooth horizontal side-scroll
+// BOTTOM TOOLBAR: Modern futuristic pill navigation matching CapCut editor screenshot
 @Composable
 private fun EditorBottomToolbar(
   activeTab: EditorToolbarTab?,
-  onTabSelected: (EditorToolbarTab) -> Unit
+  onTabSelected: (EditorToolbarTab) -> Unit,
+  onNavigateHome: () -> Unit
 ) {
-  BoxWithConstraints(
-    modifier = Modifier
-      .fillMaxWidth()
-      .background(Color(0xFF0C0E15))
-      .drawBehind {
-        // Subtle top border line matching dark video-editor UI
-        drawLine(
-          color = Color(0xFF1E2230),
-          start = Offset(0f, 0f),
-          end = Offset(size.width, 0f),
-          strokeWidth = 1.dp.toPx()
-        )
-      }
-  ) {
-    val totalWidth = maxWidth
-    val horizontalPadding = 8.dp
-    val itemSpacing = 6.dp
-    // Calculate width dynamically so exactly 6 items fit across the visible screen
-    val calculatedWidth = (totalWidth - (horizontalPadding * 2) - (itemSpacing * 5)) / 6f
-    val itemWidth = calculatedWidth.coerceAtLeast(52.dp)
-
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .horizontalScroll(rememberScrollState())
-        .padding(horizontal = horizontalPadding, vertical = 8.dp)
-        .navigationBarsPadding()
-        .testTag("toolbar_scroll"),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(itemSpacing)
-    ) {
-      // 1. Smart Split (Edit) ✂️
-      EditorToolbarItem(
-        icon = Icons.Default.ContentCut,
-        label = "Smart Split",
-        isSelected = activeTab == EditorToolbarTab.EDIT,
-        itemWidth = itemWidth,
-        testTag = "edit_btn",
-        onClick = { onTabSelected(EditorToolbarTab.EDIT) }
-      )
-
-      // 2. Animations 🎬
-      EditorToolbarItem(
-        icon = Icons.Default.Animation,
-        label = "Animations",
-        isSelected = activeTab == EditorToolbarTab.ANIMATIONS,
-        itemWidth = itemWidth,
-        testTag = "animations_btn",
-        onClick = { onTabSelected(EditorToolbarTab.ANIMATIONS) }
-      )
-
-      // 3. Audio Beat (Audio) 🎵
-      EditorToolbarItem(
-        icon = Icons.Default.GraphicEq,
-        label = "Audio Beat",
-        isSelected = activeTab == EditorToolbarTab.AUDIO,
-        itemWidth = itemWidth,
-        testTag = "audio_btn",
-        onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
-      )
-
-      // 4. Speed Curve (Speed) ⚡
-      EditorToolbarItem(
-        icon = Icons.Default.Speed,
-        label = "Speed Curve",
-        isSelected = activeTab == EditorToolbarTab.SPEED,
-        itemWidth = itemWidth,
-        testTag = "speed_btn",
-        onClick = { onTabSelected(EditorToolbarTab.SPEED) }
-      )
-
-      // 5. AI Effects (Effects) ✨
-      EditorToolbarItem(
-        icon = Icons.Default.AutoAwesome,
-        label = "AI Effects",
-        isSelected = activeTab == EditorToolbarTab.EFFECTS,
-        itemWidth = itemWidth,
-        testTag = "effects_btn",
-        onClick = { onTabSelected(EditorToolbarTab.EFFECTS) }
-      )
-
-      // 5. Text T
-      EditorToolbarItem(
-        icon = Icons.Default.TextFields,
-        label = "Text",
-        isSelected = activeTab == EditorToolbarTab.TEXT,
-        itemWidth = itemWidth,
-        testTag = "text_btn",
-        onClick = { onTabSelected(EditorToolbarTab.TEXT) }
-      )
-
-      // 6. Stickers ⭕
-      EditorToolbarItem(
-        icon = Icons.Default.EmojiEmotions,
-        label = "Stickers",
-        isSelected = activeTab == EditorToolbarTab.STICKERS,
-        itemWidth = itemWidth,
-        testTag = "stickers_btn",
-        onClick = { onTabSelected(EditorToolbarTab.STICKERS) }
-      )
-
-      // 7. Overlay 📦
-      EditorToolbarItem(
-        icon = Icons.Default.Layers,
-        label = "Overlay",
-        isSelected = activeTab == EditorToolbarTab.OVERLAY,
-        itemWidth = itemWidth,
-        testTag = "overlay_btn",
-        onClick = { onTabSelected(EditorToolbarTab.OVERLAY) }
-      )
-
-      // 8. Filters 🎨
-      EditorToolbarItem(
-        icon = Icons.Default.ColorLens,
-        label = "Filters",
-        isSelected = activeTab == EditorToolbarTab.FILTERS,
-        itemWidth = itemWidth,
-        testTag = "filters_btn",
-        onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
-      )
-
-      // 9. Adjust ◯
-      EditorToolbarItem(
-        icon = Icons.Default.Tune,
-        label = "Adjust",
-        isSelected = activeTab == EditorToolbarTab.ADJUST,
-        itemWidth = itemWidth,
-        testTag = "adjust_btn",
-        onClick = { onTabSelected(EditorToolbarTab.ADJUST) }
-      )
-
-      // 10. Trim ✂️
-      EditorToolbarItem(
-        icon = Icons.Default.Crop,
-        label = "Trim",
-        isSelected = activeTab == EditorToolbarTab.TRIM,
-        itemWidth = itemWidth,
-        testTag = "trim_btn",
-        onClick = { onTabSelected(EditorToolbarTab.TRIM) }
-      )
-
-      // 11. Captions CC
-      EditorToolbarItem(
-        icon = Icons.Default.ClosedCaption,
-        label = "Captions",
-        isSelected = activeTab == EditorToolbarTab.CAPTIONS,
-        itemWidth = itemWidth,
-        testTag = "captions_btn",
-        onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
-      )
-
-      // 12. Transitions 🔄
-      EditorToolbarItem(
-        icon = Icons.Default.Transform,
-        label = "Transitions",
-        isSelected = activeTab == EditorToolbarTab.TRANSITIONS,
-        itemWidth = itemWidth,
-        testTag = "transitions_btn",
-        onClick = { onTabSelected(EditorToolbarTab.TRANSITIONS) }
-      )
-
-      // 13. Volume 🔊
-      EditorToolbarItem(
-        icon = Icons.Default.VolumeUp,
-        label = "Volume",
-        isSelected = activeTab == EditorToolbarTab.VOLUME,
-        itemWidth = itemWidth,
-        testTag = "volume_btn",
-        onClick = { onTabSelected(EditorToolbarTab.VOLUME) }
-      )
-
-      // 14. Generate media ⊕ (AI tag)
-      EditorToolbarItem(
-        icon = Icons.Default.VideoLibrary,
-        label = "AI Media",
-        isSelected = activeTab == EditorToolbarTab.AI,
-        itemWidth = itemWidth,
-        testTag = "generate_media_btn",
-        badgeText = "AI",
-        onClick = { onTabSelected(EditorToolbarTab.AI) }
-      )
-
-      // 15. AI avatar 👤
-      EditorToolbarItem(
-        icon = Icons.Default.AccountBox,
-        label = "AI Avatar",
-        isSelected = activeTab == EditorToolbarTab.AI_AVATAR,
-        itemWidth = itemWidth,
-        testTag = "ai_avatar_btn",
-        badgeIcon = Icons.Default.Diamond,
-        onClick = { onTabSelected(EditorToolbarTab.AI_AVATAR) }
-      )
-
-      // 16. Canvas / Aspect ratio □
-      EditorToolbarItem(
-        icon = Icons.Default.CropSquare,
-        label = "Canvas",
-        isSelected = activeTab == EditorToolbarTab.CANVAS,
-        itemWidth = itemWidth,
-        testTag = "aspect_ratio_btn",
-        onClick = { onTabSelected(EditorToolbarTab.CANVAS) }
-      )
-
-      // 17. Background ▨
-      EditorToolbarItem(
-        icon = Icons.Default.Texture,
-        label = "Background",
-        isSelected = activeTab == EditorToolbarTab.BACKGROUND,
-        itemWidth = itemWidth,
-        testTag = "background_btn",
-        onClick = { onTabSelected(EditorToolbarTab.BACKGROUND) }
-      )
-
-      // 18. Chroma Key 🟩
-      EditorToolbarItem(
-        icon = Icons.Default.FilterFrames,
-        label = "Chroma",
-        isSelected = activeTab == EditorToolbarTab.CHROMA,
-        itemWidth = itemWidth,
-        testTag = "chroma_btn",
-        onClick = { onTabSelected(EditorToolbarTab.CHROMA) }
-      )
-
-      // 19. Keyframe 💎
-      EditorToolbarItem(
-        icon = Icons.Default.Diamond,
-        label = "Keyframe",
-        isSelected = activeTab == EditorToolbarTab.KEYFRAME,
-        itemWidth = itemWidth,
-        testTag = "keyframe_btn",
-        onClick = { onTabSelected(EditorToolbarTab.KEYFRAME) }
-      )
-
-      // 20. Media / Add ➕
-      EditorToolbarItem(
-        icon = Icons.Default.AddPhotoAlternate,
-        label = "Media",
-        isSelected = activeTab == EditorToolbarTab.MEDIA,
-        itemWidth = itemWidth,
-        testTag = "add_btn",
-        onClick = { onTabSelected(EditorToolbarTab.MEDIA) }
-      )
-    }
-  }
-}
-
-@Composable
-private fun EditorToolbarItem(
-  icon: ImageVector,
-  label: String,
-  isSelected: Boolean,
-  itemWidth: androidx.compose.ui.unit.Dp,
-  testTag: String,
-  badgeText: String? = null,
-  badgeIcon: ImageVector? = null,
-  onClick: () -> Unit
-) {
-  val activeBorderColor = Color(0xFFE5A93C) // Warm golden amber as in screenshot
-  val inactiveBorderColor = Color(0xFF222636) // Dark modern slate border
-  val activeBgColor = Color(0xFF1B1D27) // Subtle dark warm tint
-  val inactiveBgColor = Color(0xFF131620) // Deep dark card background
-  val activeIconColor = Color(0xFFE5A93C)
-  val inactiveIconColor = Color(0xFF8E95A5)
-  val activeTextColor = Color.White
-  val inactiveTextColor = Color(0xFF8E95A5)
-
-  Surface(
-    modifier = Modifier
-      .width(itemWidth)
-      .height(68.dp)
-      .clip(RoundedCornerShape(14.dp))
-      .clickable(onClick = onClick)
-      .testTag(testTag),
-    shape = RoundedCornerShape(14.dp),
-    color = if (isSelected) activeBgColor else inactiveBgColor,
-    border = BorderStroke(
-      width = if (isSelected) 1.75.dp else 1.dp,
-      color = if (isSelected) activeBorderColor else inactiveBorderColor
+  val navItems = listOf(
+    FuturisticNavItemData(
+      id = "text",
+      label = "Add Text",
+      icon = Icons.Default.TextFields,
+      theme = NavItemThemes.AddText,
+      isSelected = activeTab == EditorToolbarTab.TEXT,
+      testTag = "text_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
     ),
-    tonalElevation = if (isSelected) 4.dp else 0.dp
-  ) {
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(horizontal = 2.dp, vertical = 6.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.Center
-    ) {
-      Box(contentAlignment = Alignment.TopEnd) {
-        Icon(
-          imageVector = icon,
-          contentDescription = label,
-          tint = if (isSelected) activeIconColor else inactiveIconColor,
-          modifier = Modifier.size(24.dp)
-        )
-        if (badgeText != null) {
-          Surface(
-            color = activeBorderColor,
-            shape = RoundedCornerShape(3.dp),
-            modifier = Modifier.offset(x = 8.dp, y = (-4).dp)
-          ) {
-            Text(
-              text = badgeText,
-              color = Color.Black,
-              fontSize = 7.5.sp,
-              fontWeight = FontWeight.Black,
-              modifier = Modifier.padding(horizontal = 2.5.dp, vertical = 0.5.dp)
-            )
-          }
-        } else if (badgeIcon != null) {
-          Icon(
-            imageVector = badgeIcon,
-            contentDescription = null,
-            tint = PurpleAccent,
-            modifier = Modifier
-              .size(9.dp)
-              .offset(x = 6.dp, y = (-3).dp)
-          )
-        }
-      }
-      Spacer(modifier = Modifier.height(5.dp))
-      Text(
-        text = label,
-        style = MaterialTheme.typography.labelSmall.copy(
-          fontSize = 10.5.sp,
-          color = if (isSelected) activeTextColor else inactiveTextColor,
-          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-          textAlign = TextAlign.Center
-        ),
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis
-      )
-    }
-  }
+    FuturisticNavItemData(
+      id = "captions",
+      label = "Auto Captions",
+      icon = Icons.Default.ClosedCaption,
+      theme = NavItemThemes.Captions,
+      isSelected = activeTab == EditorToolbarTab.CAPTIONS,
+      testTag = "captions_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
+    ),
+    FuturisticNavItemData(
+      id = "stickers",
+      label = "Stickers",
+      icon = Icons.Default.EmojiEmotions,
+      theme = NavItemThemes.Stickers,
+      isSelected = activeTab == EditorToolbarTab.STICKERS,
+      testTag = "stickers_btn",
+      onClick = { onTabSelected(EditorToolbarTab.STICKERS) }
+    ),
+    FuturisticNavItemData(
+      id = "draw",
+      label = "Draw",
+      icon = Icons.Default.Brush,
+      theme = NavItemThemes.DrawTheme,
+      isSelected = false,
+      testTag = "draw_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
+    ),
+    FuturisticNavItemData(
+      id = "text_template",
+      label = "Text Template",
+      icon = Icons.Default.AutoAwesome,
+      theme = NavItemThemes.TextTemplateTheme,
+      isSelected = false,
+      testTag = "text_template_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
+    ),
+    FuturisticNavItemData(
+      id = "effects",
+      label = "Effects",
+      icon = Icons.Default.AutoAwesome,
+      theme = NavItemThemes.Effects,
+      isSelected = activeTab == EditorToolbarTab.EFFECTS,
+      testTag = "effects_btn",
+      onClick = { onTabSelected(EditorToolbarTab.EFFECTS) }
+    ),
+    FuturisticNavItemData(
+      id = "filters",
+      label = "Filters",
+      icon = Icons.Default.ColorLens,
+      theme = NavItemThemes.Filters,
+      isSelected = activeTab == EditorToolbarTab.FILTERS,
+      testTag = "filters_btn",
+      onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
+    ),
+    FuturisticNavItemData(
+      id = "edit",
+      label = "Smart Split",
+      icon = Icons.Default.ContentCut,
+      theme = NavItemThemes.Edit,
+      isSelected = activeTab == EditorToolbarTab.EDIT,
+      testTag = "edit_btn",
+      onClick = { onTabSelected(EditorToolbarTab.EDIT) }
+    ),
+    FuturisticNavItemData(
+      id = "audio",
+      label = "Audio Beat",
+      icon = Icons.Default.GraphicEq,
+      theme = NavItemThemes.Audio,
+      isSelected = activeTab == EditorToolbarTab.AUDIO,
+      testTag = "audio_btn",
+      onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
+    ),
+    FuturisticNavItemData(
+      id = "speed",
+      label = "Speed Curve",
+      icon = Icons.Default.Speed,
+      theme = NavItemThemes.Speed,
+      isSelected = activeTab == EditorToolbarTab.SPEED,
+      testTag = "speed_btn",
+      onClick = { onTabSelected(EditorToolbarTab.SPEED) }
+    ),
+    FuturisticNavItemData(
+      id = "mask",
+      label = "Mask & Blend",
+      icon = Icons.Default.Layers,
+      theme = NavItemThemes.Overlay,
+      isSelected = activeTab == EditorToolbarTab.MASK,
+      testTag = "mask_btn",
+      onClick = { onTabSelected(EditorToolbarTab.MASK) }
+    ),
+    FuturisticNavItemData(
+      id = "ai_matting",
+      label = "AI Cutout",
+      icon = Icons.Default.AutoAwesome,
+      theme = NavItemThemes.AI,
+      isSelected = activeTab == EditorToolbarTab.AI_MATTING,
+      testTag = "ai_matting_btn",
+      onClick = { onTabSelected(EditorToolbarTab.AI_MATTING) }
+    ),
+    FuturisticNavItemData(
+      id = "asset_store",
+      label = "Asset Store",
+      icon = Icons.Default.Download,
+      theme = NavItemThemes.Effects,
+      isSelected = activeTab == EditorToolbarTab.ASSET_STORE,
+      testTag = "asset_store_btn",
+      onClick = { onTabSelected(EditorToolbarTab.ASSET_STORE) }
+    ),
+    FuturisticNavItemData(
+      id = "animations",
+      label = "Animations",
+      icon = Icons.Default.Animation,
+      theme = NavItemThemes.Animations,
+      isSelected = activeTab == EditorToolbarTab.ANIMATIONS,
+      testTag = "animations_btn",
+      onClick = { onTabSelected(EditorToolbarTab.ANIMATIONS) }
+    ),
+    FuturisticNavItemData(
+      id = "overlay",
+      label = "Overlay",
+      icon = Icons.Default.Layers,
+      theme = NavItemThemes.Overlay,
+      isSelected = activeTab == EditorToolbarTab.OVERLAY,
+      testTag = "overlay_btn",
+      onClick = { onTabSelected(EditorToolbarTab.OVERLAY) }
+    ),
+    FuturisticNavItemData(
+      id = "transitions",
+      label = "Transitions",
+      icon = Icons.Default.Transform,
+      theme = NavItemThemes.Transitions,
+      isSelected = activeTab == EditorToolbarTab.TRANSITIONS,
+      testTag = "transitions_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TRANSITIONS) }
+    ),
+    FuturisticNavItemData(
+      id = "adjust",
+      label = "Adjust",
+      icon = Icons.Default.Tune,
+      theme = NavItemThemes.DefaultSlate,
+      isSelected = activeTab == EditorToolbarTab.ADJUST,
+      testTag = "adjust_btn",
+      onClick = { onTabSelected(EditorToolbarTab.ADJUST) }
+    ),
+    FuturisticNavItemData(
+      id = "trim",
+      label = "Trim",
+      icon = Icons.Default.Crop,
+      theme = NavItemThemes.DefaultSlate,
+      isSelected = activeTab == EditorToolbarTab.TRIM,
+      testTag = "trim_btn",
+      onClick = { onTabSelected(EditorToolbarTab.TRIM) }
+    ),
+    FuturisticNavItemData(
+      id = "volume",
+      label = "Volume",
+      icon = Icons.Default.VolumeUp,
+      theme = NavItemThemes.DefaultSlate,
+      isSelected = activeTab == EditorToolbarTab.VOLUME,
+      testTag = "volume_btn",
+      onClick = { onTabSelected(EditorToolbarTab.VOLUME) }
+    ),
+    FuturisticNavItemData(
+      id = "ai_media",
+      label = "AI Media",
+      icon = Icons.Default.VideoLibrary,
+      theme = NavItemThemes.AddText,
+      isSelected = activeTab == EditorToolbarTab.AI,
+      testTag = "generate_media_btn",
+      onClick = { onTabSelected(EditorToolbarTab.AI) }
+    ),
+    FuturisticNavItemData(
+      id = "ai_avatar",
+      label = "AI Avatar",
+      icon = Icons.Default.AccountBox,
+      theme = NavItemThemes.Captions,
+      isSelected = activeTab == EditorToolbarTab.AI_AVATAR,
+      testTag = "ai_avatar_btn",
+      onClick = { onTabSelected(EditorToolbarTab.AI_AVATAR) }
+    ),
+    FuturisticNavItemData(
+      id = "canvas",
+      label = "Canvas",
+      icon = Icons.Default.CropSquare,
+      theme = NavItemThemes.DefaultSlate,
+      isSelected = activeTab == EditorToolbarTab.CANVAS,
+      testTag = "aspect_ratio_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CANVAS) }
+    ),
+    FuturisticNavItemData(
+      id = "background",
+      label = "Background",
+      icon = Icons.Default.Texture,
+      theme = NavItemThemes.DefaultSlate,
+      isSelected = activeTab == EditorToolbarTab.BACKGROUND,
+      testTag = "background_btn",
+      onClick = { onTabSelected(EditorToolbarTab.BACKGROUND) }
+    ),
+    FuturisticNavItemData(
+      id = "chroma",
+      label = "Chroma",
+      icon = Icons.Default.FilterFrames,
+      theme = NavItemThemes.Stickers,
+      isSelected = activeTab == EditorToolbarTab.CHROMA,
+      testTag = "chroma_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CHROMA) }
+    ),
+    FuturisticNavItemData(
+      id = "keyframe",
+      label = "Keyframe",
+      icon = Icons.Default.Diamond,
+      theme = NavItemThemes.TextTemplateTheme,
+      isSelected = activeTab == EditorToolbarTab.KEYFRAME,
+      testTag = "keyframe_btn",
+      onClick = { onTabSelected(EditorToolbarTab.KEYFRAME) }
+    ),
+    FuturisticNavItemData(
+      id = "media",
+      label = "Media",
+      icon = Icons.Default.AddPhotoAlternate,
+      theme = NavItemThemes.AddText,
+      isSelected = activeTab == EditorToolbarTab.MEDIA,
+      testTag = "add_btn",
+      onClick = { onTabSelected(EditorToolbarTab.MEDIA) }
+    )
+  )
+
+  FuturisticBottomNavBarContainer(
+    onBackClick = onNavigateHome,
+    items = navItems,
+    showDividers = true
+  )
 }
 
 private fun formatDurationShort(timeMs: Long): String {

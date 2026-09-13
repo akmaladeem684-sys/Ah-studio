@@ -341,6 +341,18 @@ object PluginManager {
     }
   }
 
+  fun registerDynamicPlugin(context: Context, plugin: InstalledPlugin) {
+    val existing = _installedPlugins.value.filter { it.manifest.id != plugin.manifest.id }
+    _installedPlugins.value = existing + plugin
+
+    val module = StandardPluginModule(plugin)
+    module.onInitialize(context)
+    if (plugin.isEnabled) module.onEnable()
+    activeModules[plugin.manifest.id] = module
+
+    saveRegistry(context)
+  }
+
   fun togglePluginEnabled(context: Context, pluginId: String, enabled: Boolean) {
     val newList = _installedPlugins.value.map {
       if (it.manifest.id == pluginId) it.copy(isEnabled = enabled) else it

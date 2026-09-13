@@ -97,6 +97,7 @@ fun TimelineClipView(
   onStartReorderDrag: (() -> Unit)? = null,
   onReorderDrag: ((Float) -> Unit)? = null,
   onEndReorderDrag: (() -> Unit)? = null,
+  filterName: String? = null,
   modifier: Modifier = Modifier
 ) {
   val msPerDp = msPerPixel
@@ -466,6 +467,26 @@ fun TimelineClipView(
               Text(
                 text = "❄",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, color = CyanAccent)
+              )
+            }
+          }
+
+          if (!filterName.isNullOrBlank()) {
+            Spacer(modifier = Modifier.width(3.dp))
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(3.dp))
+                .background(PurpleAccent.copy(alpha = 0.85f))
+                .border(0.5.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(3.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp)
+            ) {
+              Text(
+                text = "🎨 $filterName",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  fontSize = 8.sp,
+                  color = Color.White,
+                  fontWeight = FontWeight.Bold
+                )
               )
             }
           }

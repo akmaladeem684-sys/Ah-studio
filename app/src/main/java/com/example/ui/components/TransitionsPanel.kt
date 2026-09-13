@@ -197,6 +197,34 @@ val TRANSITION_ITEMS = listOf(
     description = "Cyberpunk digital glitch cut",
     gradient = listOf(Color(0xFF06B6D4), Color(0xFFEC4899)),
     icon = Icons.Default.AutoAwesome
+  ),
+  TransitionItemData(
+    type = TransitionType.WHIP_PAN,
+    category = TransitionCategory.MOVEMENT,
+    description = "High-speed camera whip pan swipe",
+    gradient = listOf(Color(0xFF3B82F6), Color(0xFF10B981)),
+    icon = Icons.Default.Transform
+  ),
+  TransitionItemData(
+    type = TransitionType.ZOOM_BLUR,
+    category = TransitionCategory.DYNAMIC,
+    description = "Explosive directional zoom blur burst",
+    gradient = listOf(Color(0xFFF43F5E), Color(0xFF8B5CF6)),
+    icon = Icons.Default.AutoAwesome
+  ),
+  TransitionItemData(
+    type = TransitionType.GLITCH_WIPE,
+    category = TransitionCategory.DYNAMIC,
+    description = "Digital noise displacement wipe",
+    gradient = listOf(Color(0xFF14B8A6), Color(0xFFF59E0B)),
+    icon = Icons.Default.AutoAwesome
+  ),
+  TransitionItemData(
+    type = TransitionType.LIGHT_LEAK,
+    category = TransitionCategory.DISSOLVES,
+    description = "Vintage anamorphic warm light leak burst",
+    gradient = listOf(Color(0xFFF97316), Color(0xFFFACC15)),
+    icon = Icons.Default.FlashOn
   )
 )
 

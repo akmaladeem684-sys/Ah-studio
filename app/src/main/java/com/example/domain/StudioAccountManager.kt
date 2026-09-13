@@ -4,11 +4,7 @@ import com.example.data.presets.MediaPlaceholder
 import com.example.data.presets.PlaceholderType
 import com.example.data.presets.TextPlaceholder
 import com.example.data.presets.VideoTemplate
-import com.example.domain.model.AspectRatio
-import com.example.domain.model.FrameRate
-import com.example.domain.model.Resolution
-import com.example.domain.model.Timeline
-import com.example.domain.model.VideoClip
+import com.example.domain.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,30 +45,7 @@ object StudioAccountManager {
   val savedTemplateIds: StateFlow<Set<String>> = _savedTemplateIds.asStateFlow()
 
   private val _customTemplates = MutableStateFlow<List<VideoTemplate>>(
-    listOf(
-      VideoTemplate(
-        id = "cust_tpl_vlog_intro",
-        title = "My Daily Vlog Opener",
-        category = "User-Created",
-        description = "Personalized cinematic travel opener with atmospheric text animations and custom color grade.",
-        aspectRatio = AspectRatio.RATIO_16_9,
-        resolution = Resolution.RES_1080P,
-        fps = FrameRate.FPS_30,
-        durationMs = 6000L,
-        thumbnailGradientStart = 0xFF10B981,
-        thumbnailGradientEnd = 0xFF3B82F6,
-        iconEmoji = "✨",
-        audioTitle = "Ambient Morning Chill",
-        mediaPlaceholders = listOf(
-          MediaPlaceholder("v1", "Travel Scene 1", PlaceholderType.VIDEO, 3000L, "cust_v1"),
-          MediaPlaceholder("v2", "Travel Scene 2", PlaceholderType.VIDEO, 3000L, "cust_v2")
-        ),
-        textPlaceholders = listOf(
-          TextPlaceholder("t1", "Vlog Title", "cust_t1", "DAILY ESCAPE")
-        ),
-        createTimeline = { _, _ -> Timeline() }
-      )
-    )
+    listOf(createInitialCustomTemplate())
   )
   val customTemplates: StateFlow<List<VideoTemplate>> = _customTemplates.asStateFlow()
 
@@ -114,44 +87,132 @@ object StudioAccountManager {
     _savedTemplateIds.value = current
   }
 
-  fun createAndSaveCustomTemplate(
+  fun saveProjectAsTemplate(
     title: String,
     category: String,
     description: String,
-    durationSec: Int,
+    timeline: Timeline,
     aspectRatio: AspectRatio
   ): VideoTemplate {
     val newId = "cust_tpl_${UUID.randomUUID().toString().take(8)}"
-    val newTemplate = VideoTemplate(
+    val dur = timeline.totalDurationMs.coerceAtLeast(3000L)
+    val template = VideoTemplate(
       id = newId,
-      title = title,
+      title = title.ifBlank { "Untitled Template" },
       category = if (category.isBlank()) "User-Created" else category,
-      description = description.ifBlank { "Custom user template created in AH Video Studio" },
+      description = description.ifBlank { "Custom template created in AH Video Studio" },
       aspectRatio = aspectRatio,
       resolution = Resolution.RES_1080P,
       fps = FrameRate.FPS_30,
-      durationMs = durationSec * 1000L,
-      thumbnailGradientStart = 0xFF8B5CF6,
-      thumbnailGradientEnd = 0xFFEC4899,
-      iconEmoji = "🎨",
-      audioTitle = "Custom Audio Track",
-      mediaPlaceholders = listOf(
-        MediaPlaceholder("slot1", "Main Video Clip", PlaceholderType.VIDEO, (durationSec * 1000L) / 2, "slot1_clip"),
-        MediaPlaceholder("slot2", "Secondary Clip", PlaceholderType.VIDEO, (durationSec * 1000L) / 2, "slot2_clip")
-      ),
-      textPlaceholders = listOf(
-        TextPlaceholder("txt1", "Main Header", "txt1_clip", title.uppercase())
-      ),
-      createTimeline = { _, _ -> Timeline() }
+      durationMs = dur,
+      thumbnailGradientStart = 0xFF3B82F6,
+      thumbnailGradientEnd = 0xFF8B5CF6,
+      iconEmoji = "🎬",
+      audioTitle = "Project Soundtrack",
+      savedTimeline = timeline.copy(),
+      createTimeline = { _, _ -> timeline.copy() }
     )
 
-    _customTemplates.value = listOf(newTemplate) + _customTemplates.value
-    // Auto save template to saved IDs
+    _customTemplates.value = listOf(template) + _customTemplates.value
     val currentSaved = _savedTemplateIds.value.toMutableSet()
     currentSaved.add(newId)
     _savedTemplateIds.value = currentSaved
+    return template
+  }
 
-    return newTemplate
+  fun duplicateCustomTemplate(templateId: String): VideoTemplate? {
+    val target = _customTemplates.value.find { it.id == templateId }
+      ?: com.example.data.presets.TemplatesCatalog.templates.find { it.id == templateId }
+      ?: return null
+
+    val copyId = "cust_tpl_${UUID.randomUUID().toString().take(8)}"
+    val duplicated = target.copy(
+      id = copyId,
+      title = "${target.title} (Copy)",
+      category = if (target.category.isBlank()) "User-Created" else target.category,
+      savedTimeline = target.savedTimeline ?: target.createDefaultTimeline()
+    )
+
+    _customTemplates.value = listOf(duplicated) + _customTemplates.value
+    val currentSaved = _savedTemplateIds.value.toMutableSet()
+    currentSaved.add(copyId)
+    _savedTemplateIds.value = currentSaved
+    return duplicated
+  }
+
+  fun deleteCustomTemplate(templateId: String) {
+    _customTemplates.value = _customTemplates.value.filterNot { it.id == templateId }
+    val currentSaved = _savedTemplateIds.value.toMutableSet()
+    currentSaved.remove(templateId)
+    _savedTemplateIds.value = currentSaved
+  }
+
+  private fun createInitialCustomTemplate(): VideoTemplate {
+    val sampleTimeline = Timeline(
+      videoClips = listOf(
+        VideoClip(
+          id = "cust_v1",
+          name = "Cinematic Travel Hook.mp4",
+          uri = "sample_travel_hook",
+          timelineStartMs = 0L,
+          durationMs = 3000L,
+          sourceStartMs = 0L,
+          sourceEndMs = 3000L,
+          speed = 1.0f,
+          volume = 0.9f
+        ),
+        VideoClip(
+          id = "cust_v2",
+          name = "Sunset Cityscape.mp4",
+          uri = "sample_sunset_city",
+          timelineStartMs = 3000L,
+          durationMs = 3000L,
+          sourceStartMs = 0L,
+          sourceEndMs = 3000L,
+          speed = 1.1f,
+          volume = 0.9f
+        )
+      ),
+      textClips = listOf(
+        TextClip(
+          id = "cust_t1",
+          text = "DAILY VLOG OPENER",
+          timelineStartMs = 500L,
+          durationMs = 3500L,
+          fontFamily = "Montserrat-Bold",
+          fontSizeSp = 40f,
+          textColor = 0xFF00E5FF
+        )
+      ),
+      audioClips = listOf(
+        AudioClip(
+          id = "cust_a1",
+          title = "Ambient Morning Chill.mp3",
+          uri = "sample_ambient_chill",
+          timelineStartMs = 0L,
+          durationMs = 6000L,
+          volume = 0.8f
+        )
+      ),
+      filter = FilterSettings(FilterType.CINEMATIC, 0.85f)
+    )
+
+    return VideoTemplate(
+      id = "cust_tpl_vlog_intro",
+      title = "My Daily Vlog Opener",
+      category = "User-Created",
+      description = "Personalized cinematic travel opener with atmospheric text animations and custom color grade.",
+      aspectRatio = AspectRatio.RATIO_16_9,
+      resolution = Resolution.RES_1080P,
+      fps = FrameRate.FPS_30,
+      durationMs = 6000L,
+      thumbnailGradientStart = 0xFF10B981,
+      thumbnailGradientEnd = 0xFF3B82F6,
+      iconEmoji = "✨",
+      audioTitle = "Ambient Morning Chill",
+      savedTimeline = sampleTimeline,
+      createTimeline = { _, _ -> sampleTimeline }
+    )
   }
 
   fun toggleSocialConnection(platformName: String) {

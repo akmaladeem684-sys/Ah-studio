@@ -2840,6 +2840,92 @@ class TimelineEngine {
     return true
   }
 
+  // --- Masking, Blending, Speed Curves & Audio Effects ---
+
+  fun setClipMask(clipId: String? = null, mask: MaskSettings): Boolean {
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: return false
+    recordHistory()
+    var updated = false
+    val newVideos = _timeline.value.videoClips.map {
+      if (it.id == targetId) { updated = true; it.copy(mask = mask) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(videoClips = newVideos)
+      return true
+    }
+    val newOverlays = _timeline.value.overlayClips.map {
+      if (it.id == targetId) { updated = true; it.copy(mask = mask) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(overlayClips = newOverlays)
+      return true
+    }
+    return false
+  }
+
+  fun setClipBlendMode(clipId: String? = null, blendMode: String): Boolean {
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: return false
+    recordHistory()
+    var updated = false
+    val newVideos = _timeline.value.videoClips.map {
+      if (it.id == targetId) { updated = true; it.copy(blendMode = blendMode) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(videoClips = newVideos)
+      return true
+    }
+    val newOverlays = _timeline.value.overlayClips.map {
+      if (it.id == targetId) { updated = true; it.copy(blendMode = blendMode) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(overlayClips = newOverlays)
+      return true
+    }
+    return false
+  }
+
+  fun setClipSpeedCurve(clipId: String? = null, speedCurve: SpeedCurve): Boolean {
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: return false
+    recordHistory()
+    var updated = false
+    val newVideos = _timeline.value.videoClips.map {
+      if (it.id == targetId) { updated = true; it.copy(speedCurve = speedCurve) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(videoClips = newVideos)
+      return true
+    }
+    val newAudios = _timeline.value.audioClips.map {
+      if (it.id == targetId) { updated = true; it.copy(speedCurve = speedCurve) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(audioClips = newAudios)
+      return true
+    }
+    return false
+  }
+
+  fun setClipAudioEffects(clipId: String? = null, audioEffects: AudioEffectsSettings): Boolean {
+    val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: return false
+    recordHistory()
+    var updated = false
+    val newVideos = _timeline.value.videoClips.map {
+      if (it.id == targetId) { updated = true; it.copy(audioEffects = audioEffects) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(videoClips = newVideos)
+      return true
+    }
+    val newAudios = _timeline.value.audioClips.map {
+      if (it.id == targetId) { updated = true; it.copy(audioEffects = audioEffects) } else it
+    }
+    if (updated) {
+      _timeline.value = _timeline.value.copy(audioClips = newAudios)
+      return true
+    }
+    return false
+  }
+
   fun toggleClipMute(clipId: String? = null): Boolean {
     val targetId = clipId ?: _selectedClipIds.value.firstOrNull() ?: findClipUnderPlayhead() ?: _timeline.value.videoClips.firstOrNull()?.id ?: return false
     recordHistory()
@@ -2950,10 +3036,13 @@ class TimelineEngine {
     durationMs: Long = 3000L
   ) {
     recordHistory()
+    val maxTrack = _timeline.value.textClips.maxOfOrNull { it.trackIndex } ?: -1
+    val newTrackIndex = maxTrack + 1
     val newText = TextClip(
       text = text,
       timelineStartMs = timelineStartMs,
       durationMs = durationMs,
+      trackIndex = newTrackIndex,
       fontSizeSp = 24f,
       fontWeight = 800,
       textColor = 0xFFFFFFFF,
@@ -2970,10 +3059,16 @@ class TimelineEngine {
 
   fun addTextClipObject(newClip: TextClip) {
     recordHistory()
+    val maxTrack = _timeline.value.textClips.maxOfOrNull { it.trackIndex } ?: -1
+    val clipWithTrack = if (_timeline.value.textClips.any { it.trackIndex == newClip.trackIndex }) {
+      newClip.copy(trackIndex = maxTrack + 1)
+    } else {
+      newClip
+    }
     val list = _timeline.value.textClips.toMutableList()
-    list.add(newClip)
+    list.add(clipWithTrack)
     _timeline.value = _timeline.value.copy(textClips = list)
-    _selectedElement.value = SelectedTrackElement.Text(newClip.id)
+    _selectedElement.value = SelectedTrackElement.Text(clipWithTrack.id)
   }
 
   fun updateTextClip(updated: TextClip) {

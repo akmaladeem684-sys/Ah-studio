@@ -333,19 +333,56 @@ fun HomeTemplatesTabView(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Button(
-                  onClick = {
-                    viewModel.applyTemplate(tpl)
-                  },
-                  colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
-                  shape = RoundedCornerShape(8.dp),
-                  contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp),
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .height(30.dp)
-                    .testTag("use_template_btn_${tpl.id}")
+                // Action Row: Primary "Edit Template" button + Overflow / Action Menu
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text("Use Template", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                  Button(
+                    onClick = {
+                      viewModel.applyTemplate(tpl)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color.Black),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp, horizontal = 6.dp),
+                    modifier = Modifier
+                      .weight(1f)
+                      .height(32.dp)
+                      .testTag("use_template_btn_${tpl.id}")
+                  ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Edit Template", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                  }
+
+                  // Duplicate Action
+                  IconButton(
+                    onClick = {
+                      val dup = StudioAccountManager.duplicateCustomTemplate(tpl.id)
+                      Toast.makeText(context, "Template duplicated as \"${dup?.title ?: "Copy"}\"!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                      .size(32.dp)
+                      .background(StudioSurfaceVariant, RoundedCornerShape(8.dp))
+                  ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = TextSecondary, modifier = Modifier.size(14.dp))
+                  }
+
+                  // Delete Action (For custom templates or saved templates)
+                  if (tpl.id.startsWith("cust_") || tpl.category == "User-Created") {
+                    IconButton(
+                      onClick = {
+                        StudioAccountManager.deleteCustomTemplate(tpl.id)
+                        Toast.makeText(context, "Template deleted.", Toast.LENGTH_SHORT).show()
+                      },
+                      modifier = Modifier
+                        .size(32.dp)
+                        .background(StudioSurfaceVariant, RoundedCornerShape(8.dp))
+                    ) {
+                      Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                    }
+                  }
                 }
               }
             }
@@ -360,11 +397,11 @@ fun HomeTemplatesTabView(
     CreateTemplateModalDialog(
       onDismiss = { showCreateTemplateDialog = false },
       onCreate = { title, category, description, durationSec, aspect ->
-        val newTpl = StudioAccountManager.createAndSaveCustomTemplate(
+        val newTpl = StudioAccountManager.saveProjectAsTemplate(
           title = title,
           category = category,
           description = description,
-          durationSec = durationSec,
+          timeline = viewModel.timelineEngine.timeline.value,
           aspectRatio = aspect
         )
         Toast.makeText(context, "Custom Template \"${newTpl.title}\" saved successfully!", Toast.LENGTH_SHORT).show()

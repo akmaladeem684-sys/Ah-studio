@@ -1,15 +1,15 @@
 package com.example.ui.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val StudioColorScheme = lightColorScheme(
+private val StudioColorScheme = darkColorScheme(
   primary = CyanAccent,
-  onPrimary = Color.White,
-  primaryContainer = SkyBlueContainer,
-  onPrimaryContainer = CyanAccentDark,
+  onPrimary = Color.Black,
+  primaryContainer = StudioSurfaceVariant,
+  onPrimaryContainer = CyanAccent,
   secondary = PurpleAccent,
   onSecondary = Color.White,
   secondaryContainer = StudioSurfaceVariant,
