@@ -21,11 +21,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # Gradle 8.7 use karein jo Android Gradle Plugin ke sath 100% compatible hai
-      - name: Setup Gradle 8.7
+      # AGP ki demand ke mutabiq Gradle 8.9 setup karein
+      - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.9'
 
       - name: Configure Android NDK
         run: |
