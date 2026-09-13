@@ -146,7 +146,7 @@ fun EditorScreen(
   var showDiagnosticOverlay by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
   var draggedTransitionType by remember { mutableStateOf<TransitionType?>(null) }
-  var activeTextSubTool by remember { mutableStateOf(TextSubTool.ADD_TEXT) }
+  var activeTextSubTool by remember { mutableStateOf(TextSubTool.TEXT_TEMPLATES) }
 
   val replaceMediaPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.PickVisualMedia()
@@ -249,20 +249,15 @@ fun EditorScreen(
         )
       },
     bottomBar = {
-      // Bottom Navigation Bar (constant fixed height, never pushes or shrinks editor content)
-      if (activeTab == EditorToolbarTab.TEXT) {
-        TextToolsSubBar(
-          activeSubTool = activeTextSubTool,
-          onSelectSubTool = { activeTextSubTool = it },
-          onBackToMainMenu = { viewModel.setActiveToolbarTab(null) }
-        )
-      } else {
+      // Bottom Navigation Bar hides when a tool panel is active and is restored when closed
+      AnimatedVisibility(
+        visible = activeTab == null,
+        enter = fadeIn() + slideInVertically { it },
+        exit = fadeOut() + slideOutVertically { it }
+      ) {
         EditorBottomToolbar(
           activeTab = activeTab,
           onTabSelected = { tab ->
-            if (tab == EditorToolbarTab.TEXT) {
-              activeTextSubTool = TextSubTool.ADD_TEXT
-            }
             viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
           },
           onNavigateHome = {
@@ -279,11 +274,34 @@ fun EditorScreen(
         .fillMaxSize()
         .padding(padding)
     ) {
+      val configuration = LocalConfiguration.current
+      val screenHeight = configuration.screenHeightDp.dp
+      val screenWidth = configuration.screenWidthDp.dp
       val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-      // Fixed, stable video preview height that never changes regardless of tool panels opening or tracks added
-      val fixedPreviewHeight = remember(maxHeight, isLandscape) {
-        if (isLandscape) (maxHeight * 0.65f).coerceIn(200.dp, 360.dp)
-        else (maxHeight * 0.52f).coerceIn(320.dp, 480.dp)
+      
+      // Fully responsive preview height adapted to screen size classes (small phones, standard phones, tablets)
+      val fixedPreviewHeight = remember(screenHeight, screenWidth, isLandscape) {
+        if (isLandscape) {
+          when {
+            screenHeight < 500.dp -> (screenHeight * 0.55f).coerceIn(200.dp, 280.dp)
+            screenHeight < 700.dp -> (screenHeight * 0.60f).coerceIn(260.dp, 360.dp)
+            else -> (screenHeight * 0.65f).coerceIn(320.dp, 480.dp)
+          }
+        } else {
+          when {
+            screenHeight < 650.dp -> (screenHeight * 0.42f).coerceIn(220.dp, 320.dp) // Small phones
+            screenHeight < 850.dp -> (screenHeight * 0.50f).coerceIn(320.dp, 440.dp) // Standard phones
+            else -> (screenHeight * 0.55f).coerceIn(400.dp, 560.dp) // Large phones / tablets
+          }
+        }
+      }
+
+      val responsiveSpacerHeight = remember(screenHeight) {
+        when {
+          screenHeight < 650.dp -> 6.dp
+          screenHeight < 850.dp -> 16.dp
+          else -> 24.dp
+        }
       }
 
       Column(
@@ -351,7 +369,7 @@ fun EditorScreen(
           onDuplicateClip = { viewModel.timelineEngine.duplicateClips(setOf(it)) },
           onEditText = { clip ->
             viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(clip.id))
-            activeTextSubTool = TextSubTool.ADD_TEXT
+            activeTextSubTool = TextSubTool.TEXT_TEMPLATES
             viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
           },
           player = viewModel.playbackEngine.player,
@@ -459,37 +477,6 @@ fun EditorScreen(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          // Dedicated Layers Studio Button
-          Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = if (isLayersOpen) CyanAccent else Color(0xFF1E283E),
-            border = BorderStroke(1.dp, if (isLayersOpen) Color.White else StudioBorder),
-            modifier = Modifier
-              .clickable { isLayersOpen = !isLayersOpen }
-              .testTag("open_layers_manager_btn")
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-              Icon(
-                imageVector = Icons.Default.Layers,
-                contentDescription = "Layers Manager",
-                tint = if (isLayersOpen) Color.Black else CyanAccent,
-                modifier = Modifier.size(15.dp)
-              )
-              Text(
-                text = "Layers",
-                style = MaterialTheme.typography.labelSmall.copy(
-                  color = if (isLayersOpen) Color.Black else Color.White,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 11.5.sp
-                )
-              )
-            }
-          }
-
           // Above media track: Add Media button (White plus, Blue color)
           Surface(
             shape = RoundedCornerShape(14.dp),
@@ -525,6 +512,9 @@ fun EditorScreen(
           }
         }
       }
+
+      // Responsive spacing between video preview and timeline
+      Spacer(modifier = Modifier.height(responsiveSpacerHeight))
 
       var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
 
@@ -607,7 +597,7 @@ fun EditorScreen(
           viewModel.setActiveToolbarTab(EditorToolbarTab.AUDIO)
         },
         onAddText = {
-          activeTextSubTool = TextSubTool.ADD_TEXT
+          activeTextSubTool = TextSubTool.TEXT_TEMPLATES
           viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
         },
         onAddOverlay = {
@@ -874,29 +864,36 @@ fun EditorScreen(
                 onStartDragTransition = { draggedTransitionType = it }
               )
               EditorToolbarTab.TEXT -> {
-                when (activeTextSubTool) {
-                  TextSubTool.ADD_TEXT -> TextStudioPanel(
-                    viewModel = viewModel,
-                    onDismiss = { viewModel.setActiveToolbarTab(null) }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                  TextToolsSubBar(
+                    activeSubTool = activeTextSubTool,
+                    onSelectSubTool = { activeTextSubTool = it },
+                    onBackToMainMenu = { viewModel.setActiveToolbarTab(null) }
                   )
-                  TextSubTool.AUTO_CAPTIONS -> CaptionsToolPanel(viewModel)
-                  TextSubTool.STICKERS -> StickersToolPanel(viewModel)
-                  TextSubTool.DRAW -> DrawToolPanel(
-                    viewModel = viewModel,
-                    onDismiss = { viewModel.setActiveToolbarTab(null) }
-                  )
-                  TextSubTool.TEXT_TEMPLATES -> TextTemplatesBrowserPanel(
-                    viewModel = viewModel,
-                    onDismiss = { viewModel.setActiveToolbarTab(null) }
-                  )
-                  TextSubTool.TEXT_TO_AUDIO -> TextToAudioToolPanel(
-                    viewModel = viewModel,
-                    onDismiss = { viewModel.setActiveToolbarTab(null) }
-                  )
-                  TextSubTool.AUTO_LYRICS -> AutoLyricsToolPanel(
-                    viewModel = viewModel,
-                    onDismiss = { viewModel.setActiveToolbarTab(null) }
-                  )
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .weight(1f, fill = false)
+                  ) {
+                    when (activeTextSubTool) {
+                      TextSubTool.TEXT_TEMPLATES -> TextTemplatesBrowserPanel(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.setActiveToolbarTab(null) }
+                      )
+                      TextSubTool.TEXT_TO_AUDIO -> TextToAudioToolPanel(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.setActiveToolbarTab(null) }
+                      )
+                      TextSubTool.AUTO_LYRICS -> AutoLyricsToolPanel(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.setActiveToolbarTab(null) }
+                      )
+                      null -> TextTemplatesBrowserPanel(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.setActiveToolbarTab(null) }
+                      )
+                    }
+                  }
                 }
               }
               EditorToolbarTab.AUDIO -> com.example.ui.components.AdvancedAudioToolPanel(
@@ -2309,47 +2306,11 @@ private fun EditorBottomToolbar(
   val navItems = listOf(
     FuturisticNavItemData(
       id = "text",
-      label = "Add Text",
+      label = "Text",
       icon = Icons.Default.TextFields,
       theme = NavItemThemes.AddText,
       isSelected = activeTab == EditorToolbarTab.TEXT,
       testTag = "text_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
-    ),
-    FuturisticNavItemData(
-      id = "captions",
-      label = "Auto Captions",
-      icon = Icons.Default.ClosedCaption,
-      theme = NavItemThemes.Captions,
-      isSelected = activeTab == EditorToolbarTab.CAPTIONS,
-      testTag = "captions_btn",
-      onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
-    ),
-    FuturisticNavItemData(
-      id = "stickers",
-      label = "Stickers",
-      icon = Icons.Default.EmojiEmotions,
-      theme = NavItemThemes.Stickers,
-      isSelected = activeTab == EditorToolbarTab.STICKERS,
-      testTag = "stickers_btn",
-      onClick = { onTabSelected(EditorToolbarTab.STICKERS) }
-    ),
-    FuturisticNavItemData(
-      id = "draw",
-      label = "Draw",
-      icon = Icons.Default.Brush,
-      theme = NavItemThemes.DrawTheme,
-      isSelected = false,
-      testTag = "draw_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TEXT) }
-    ),
-    FuturisticNavItemData(
-      id = "text_template",
-      label = "Text Template",
-      icon = Icons.Default.AutoAwesome,
-      theme = NavItemThemes.TextTemplateTheme,
-      isSelected = false,
-      testTag = "text_template_btn",
       onClick = { onTabSelected(EditorToolbarTab.TEXT) }
     ),
     FuturisticNavItemData(

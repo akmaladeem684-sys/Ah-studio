@@ -1,6 +1,7 @@
 package com.example.ui.components.text
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,20 +18,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.domain.model.TextClip
 import com.example.ui.StudioViewModel
 import com.example.ui.theme.*
-import java.util.UUID
 
 data class InkStylePreset(
   val id: String,
@@ -147,7 +144,7 @@ fun InkTextToolPanel(
           fontStyle = selectedPreset.fontStyle,
           fontFamily = FontFamily.Cursive
         ),
-        cursorBrush = SolidColor(StudioAccent),
+        cursorBrush = SolidColor(CyanAccent),
         modifier = Modifier.fillMaxWidth(),
         decorationBox = { innerTextField ->
           if (inkText.isEmpty()) {
@@ -233,23 +230,12 @@ fun InkTextToolPanel(
       Button(
         onClick = {
           if (inkText.isNotBlank()) {
-            val currentPos = viewModel.playbackEngine.currentPositionMs.value
-            val newClip = TextClip(
-              id = UUID.randomUUID().toString(),
+            val currentPos = viewModel.timelineEngine.currentPositionMs.value
+            viewModel.timelineEngine.addTextClip(
               text = inkText,
               timelineStartMs = currentPos,
-              durationMs = 3000L,
-              color = selectedColor,
-              outlineColor = selectedPreset.outlineColor,
-              outlineWidth = strokeWidth,
-              shadowColor = selectedPreset.shadowColor,
-              shadowBlur = 8f,
-              fontFamily = "Cursive",
-              fontSizeSp = 42f,
-              fontWeight = FontWeight.Bold.weight,
-              fontStyle = if (selectedPreset.fontStyle == FontStyle.Italic) 1 else 0
+              durationMs = 3000L
             )
-            viewModel.timelineEngine.addTextClip(newClip)
             onDismiss()
           }
         },
