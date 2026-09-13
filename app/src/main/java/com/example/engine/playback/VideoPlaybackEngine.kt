@@ -1,6 +1,7 @@
 package com.example.engine.playback
 
 import android.content.Context
+import android.graphics.ColorMatrix
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -12,19 +13,30 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.domain.model.Timeline
 import com.example.domain.model.VideoClip
+import com.example.engine.composition.ColorFilterGenerator
 import com.example.engine.media.MediaRelinkManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicLong
 
+/**
+ * Ultra-smooth, production-ready Video Playback & Timeline Scrubbing Engine.
+ * Built for 60 FPS preview target with request coalescing, background frame pre-fetching,
+ * hardware filter pipeline, and memory safety.
+ */
 @OptIn(UnstableApi::class)
 class VideoPlaybackEngine(
   private val context: Context,
   private val onTimelinePositionChanged: (Long) -> Unit,
-  private val onPlaybackEnded: () -> Unit
+  private val onPlaybackEnded: () -> Unit,
+  private val proxyEngine: ProxyMediaEngine? = null
 ) {
-  private val tag = "VideoPlaybackEngine"
+  companion object {
+    private const val TAG = "VideoPlaybackEngine"
+    private const val FRAME_INTERVAL_60FPS_MS = 16L
+  }
 
   val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
     playWhenReady = false
@@ -49,8 +61,15 @@ class VideoPlaybackEngine(
   private var loadedUri: String? = null
   private var isSyncingFromPlayer = false
 
+  // Scrubbing & Request Coalescing
+  private var isScrubbingMode = false
+  private val pendingSeekPosUs = AtomicLong(-1L)
+  private var coalescedSeekJob: Job? = null
+
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
   private var progressSyncJob: Job? = null
+
+  private var lastAppliedFilterMatrix: FloatArray? = null
 
   init {
     player.addListener(object : Player.Listener {
@@ -65,13 +84,12 @@ class VideoPlaybackEngine(
 
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) {
-          // If we reached the end of the current clip
           handleClipEnded()
         }
       }
 
       override fun onPlayerError(error: PlaybackException) {
-        Log.w(tag, "ExoPlayer playback warning (recovering safely): ${error.message}")
+        Log.w(TAG, "ExoPlayer playback warning (recovering safely): ${error.message}")
         _playerError.value = null
         try {
           player.stop()
@@ -90,15 +108,12 @@ class VideoPlaybackEngine(
     return MediaRelinkManager.isRealPlayableMedia(context, uriString)
   }
 
-  private var lastAppliedFilterMatrix: FloatArray? = null
-
   /**
    * Connects the color filter matrix directly to Media3 ExoPlayer's video effects pipeline.
-   * Modifies rendered video frames via hardware GPU shader in real time.
    */
-  fun applyVideoFilter(colorMatrix: android.graphics.ColorMatrix?) {
+  fun applyVideoFilter(colorMatrix: ColorMatrix?) {
     try {
-      if (colorMatrix == null || com.example.engine.composition.ColorFilterGenerator.isIdentityMatrix(colorMatrix)) {
+      if (colorMatrix == null || ColorFilterGenerator.isIdentityMatrix(colorMatrix)) {
         if (lastAppliedFilterMatrix != null) {
           lastAppliedFilterMatrix = null
           player.setVideoEffects(emptyList())
@@ -109,7 +124,7 @@ class VideoPlaybackEngine(
         return
       }
 
-      val glMatrix = com.example.engine.composition.ColorFilterGenerator.colorMatrixToGlMatrix(colorMatrix)
+      val glMatrix = ColorFilterGenerator.colorMatrixToGlMatrix(colorMatrix)
       if (lastAppliedFilterMatrix != null && lastAppliedFilterMatrix!!.contentEquals(glMatrix)) {
         return
       }
@@ -124,14 +139,14 @@ class VideoPlaybackEngine(
         player.seekTo(player.currentPosition)
       }
     } catch (e: Exception) {
-      Log.w(tag, "Failed to apply video effects to ExoPlayer: ${e.message}", e)
+      Log.w(TAG, "Failed to apply video effects to ExoPlayer: ${e.message}", e)
     }
   }
 
   fun updateTimeline(timeline: Timeline) {
     this.currentTimeline = timeline
     val clip = findClipAt(currentPosMs)
-    val matrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+    val matrix = ColorFilterGenerator.createCombinedMatrix(
       timeline.adjustments,
       timeline.filter,
       clip?.filter
@@ -140,9 +155,58 @@ class VideoPlaybackEngine(
     syncWithPosition(currentPosMs, forceReload = false)
   }
 
+  /**
+   * Seeks to a specific timeline position. Supports request coalescing during rapid scrubbing.
+   */
   fun seekTo(timelinePosMs: Long) {
-    currentPosMs = timelinePosMs.coerceIn(0L, currentTimeline.totalDurationMs)
-    syncWithPosition(currentPosMs, forceReload = false)
+    seekTo(timelinePosMs, isScrubbing = false)
+  }
+
+  /**
+   * Overloaded seekTo with scrubbing mode support.
+   */
+  fun seekTo(timelinePosMs: Long, isScrubbing: Boolean) {
+    this.isScrubbingMode = isScrubbing
+    val boundedPos = timelinePosMs.coerceIn(0L, currentTimeline.totalDurationMs)
+    currentPosMs = boundedPos
+
+    val active = findClipAt(boundedPos)
+    _activeClip.value = active
+
+    if (active != null && active.isVideo) {
+      val sourcePosMs = active.timelineToSourceMs(boundedPos)
+
+      if (isScrubbing) {
+        // Coalesce rapid seek calls to maintain 60 FPS target
+        pendingSeekPosUs.set(sourcePosMs)
+        scheduleCoalescedSeek(active, sourcePosMs)
+      } else {
+        // Direct immediate seek for non-scrubbing events (jump / touch release)
+        coalescedSeekJob?.cancel()
+        syncWithPosition(boundedPos, forceReload = false)
+      }
+    } else {
+      player.pause()
+    }
+  }
+
+  private fun scheduleCoalescedSeek(clip: VideoClip, targetSourcePosMs: Long) {
+    if (coalescedSeekJob?.isActive == true) {
+      return
+    }
+
+    coalescedSeekJob = scope.launch {
+      delay(FRAME_INTERVAL_60FPS_MS) // 16ms window to throttle rapid touch drag events
+      val latestPos = pendingSeekPosUs.getAndSet(-1L)
+      if (latestPos >= 0L) {
+        ensureClipLoaded(clip)
+        if (player.playbackState != Player.STATE_IDLE) {
+          player.seekTo(latestPos)
+        }
+        // Asynchronously prefetch surrounding proxy frames in background
+        proxyEngine?.prefetchFramesAround(clip, latestPos, 1500L)
+      }
+    }
   }
 
   fun play() {
@@ -161,7 +225,6 @@ class VideoPlaybackEngine(
       player.seekTo(sourcePosMs)
       player.play()
     } else {
-      // If photo/image clip, synthetic clip, or empty, drive playback using timer
       player.pause()
       startSyntheticPlaybackLoop()
     }
@@ -192,10 +255,6 @@ class VideoPlaybackEngine(
 
   val isTrimPreview: Boolean get() = isTrimPreviewMode
 
-  /**
-   * Configures Media3 ExoPlayer with MediaItem.ClippingConfiguration for previewing
-   * selected in/out trim points with precision hardware playback and looping.
-   */
   fun previewTrimRange(clip: VideoClip, startMs: Long, endMs: Long, loop: Boolean = true) {
     isTrimPreviewMode = true
     trimPreviewClip = clip
@@ -240,7 +299,7 @@ class VideoPlaybackEngine(
       player.play()
       loadedClipId = "trim_${clip.id}"
     } catch (e: Exception) {
-      Log.w(tag, "Failed to preview trim with Media3 ClippingConfiguration", e)
+      Log.w(TAG, "Failed to preview trim with Media3 ClippingConfiguration", e)
     }
   }
 
@@ -318,7 +377,7 @@ class VideoPlaybackEngine(
     val clip = findClipAt(posMs)
     _activeClip.value = clip
 
-    val matrix = com.example.engine.composition.ColorFilterGenerator.createCombinedMatrix(
+    val matrix = ColorFilterGenerator.createCombinedMatrix(
       currentTimeline.adjustments,
       currentTimeline.filter,
       clip?.filter
@@ -326,7 +385,8 @@ class VideoPlaybackEngine(
     applyVideoFilter(matrix)
 
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
-      val needsReload = forceReload || loadedUri != clip.uri || player.mediaItemCount == 0
+      val effectiveUri = proxyEngine?.getProxyUri(clip) ?: clip.uri
+      val needsReload = forceReload || loadedUri != effectiveUri || player.mediaItemCount == 0
       if (needsReload) {
         ensureClipLoaded(clip)
       } else {
@@ -336,7 +396,6 @@ class VideoPlaybackEngine(
       if (!isSyncingFromPlayer) {
         player.seekTo(sourcePosMs)
       }
-      // Apply clip speed and volume
       player.playbackParameters = PlaybackParameters(clip.speed)
       player.volume = if (clip.isMuted) 0f else clip.volume
 
@@ -349,7 +408,8 @@ class VideoPlaybackEngine(
   }
 
   private fun ensureClipLoaded(clip: VideoClip) {
-    if (!isPlayableInPlayer(clip.uri)) {
+    val effectiveUri = proxyEngine?.getProxyUri(clip) ?: clip.uri
+    if (!isPlayableInPlayer(effectiveUri)) {
       try {
         player.stop()
         player.clearMediaItems()
@@ -360,14 +420,14 @@ class VideoPlaybackEngine(
     }
 
     try {
-      val parsedUri = Uri.parse(clip.uri)
+      val parsedUri = Uri.parse(effectiveUri)
       val normalizedUri = if (parsedUri.scheme == "asset") {
         var path = parsedUri.path ?: ""
         if (path.startsWith("/")) path = path.substring(1)
         if (path.isEmpty()) path = parsedUri.authority ?: ""
         Uri.parse("asset:///$path")
       } else if (parsedUri.scheme == null || parsedUri.scheme == "file") {
-        val path = parsedUri.path ?: clip.uri
+        val path = parsedUri.path ?: effectiveUri
         val f = java.io.File(path)
         if (f.exists()) Uri.fromFile(f) else parsedUri
       } else {
@@ -379,9 +439,9 @@ class VideoPlaybackEngine(
       player.volume = if (clip.isMuted) 0f else clip.volume
       player.prepare()
       loadedClipId = clip.id
-      loadedUri = clip.uri
+      loadedUri = effectiveUri
     } catch (e: Exception) {
-      Log.w(tag, "Failed to load clip URI: ${clip.uri}", e)
+      Log.w(TAG, "Failed to load clip URI: $effectiveUri", e)
       try {
         player.stop()
         player.clearMediaItems()
@@ -437,7 +497,7 @@ class VideoPlaybackEngine(
             }
           }
         }
-        delay(25L) // Smooth 40Hz sync
+        delay(FRAME_INTERVAL_60FPS_MS) // Smooth 60 FPS target sync
       }
     }
   }
@@ -446,9 +506,8 @@ class VideoPlaybackEngine(
     progressSyncJob?.cancel()
     _isPlaying.value = true
     progressSyncJob = scope.launch {
-      val frameIntervalMs = 33L
       while (isActive && _isPlaying.value) {
-        val next = currentPosMs + frameIntervalMs
+        val next = currentPosMs + FRAME_INTERVAL_60FPS_MS
         if (next >= currentTimeline.totalDurationMs) {
           pause()
           seekTo(0L)
@@ -467,12 +526,13 @@ class VideoPlaybackEngine(
             }
           }
         }
-        delay(frameIntervalMs)
+        delay(FRAME_INTERVAL_60FPS_MS)
       }
     }
   }
 
   fun release() {
+    coalescedSeekJob?.cancel()
     progressSyncJob?.cancel()
     scope.cancel()
     player.release()

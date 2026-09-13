@@ -25,6 +25,20 @@ android {
     buildConfigField("String", "OAUTH_CLIENT_ID", "\"368906369830-nqn2crd6fsepp1q9mkikr54pojg6jvjm.apps.googleusercontent.com\"")
     buildConfigField("String", "FIREBASE_API_KEY", "\"AIzaSyCg6RcmUXofXcDA3o3-YU7So3kbtSsD-nY\"")
     buildConfigField("String", "FIREBASE_PROJECT_ID", "\"gen-lang-client-0291066258\"")
+
+    externalNativeBuild {
+      cmake {
+        cppFlags("-std=c++17")
+        abiFilters("arm64-v8a", "armeabi-v7a")
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = "3.22.1"
+    }
   }
 
   signingConfigs {

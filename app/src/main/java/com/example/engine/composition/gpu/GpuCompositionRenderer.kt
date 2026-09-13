@@ -20,10 +20,9 @@ import java.nio.FloatBuffer
 import kotlin.math.max
 
 /**
- * GPU-accelerated composition pipeline.
- * Performs real-time hardware texture rendering, GPU scaling, rotation, cropping,
- * opacity, blending, filters, color adjustments, transitions, text layers,
- * image overlays, stickers, keyframes, and chroma key via OpenGL ES.
+ * High-performance GPU composition pipeline powered by native C++ OpenGL ES 3.0 engine.
+ * Renders real-time video clips, PIP overlays, text layers, stickers, visual effects,
+ * color adjustments, and transitions deterministically with 25+ simultaneous layers.
  */
 class GpuCompositionRenderer(private val context: Context) {
   companion object {
@@ -51,28 +50,31 @@ class GpuCompositionRenderer(private val context: Context) {
       position(0)
     }
 
-  // OpenGL Programs
+  // OpenGL Programs for OES conversion & post-process effects
   private var program2D = 0
   private var programOes = 0
   private var programTransition = 0
   private var programEffect = 0
 
-  // Cached Text & Sticker textures: Key -> GlTextureInfo(textureId, width, height, hash)
+  // Framebuffers for OES conversion & multi-pass effect rendering
+  private val fboMain2D = GlFramebuffer()
+  private val fboOverlayMap = mutableMapOf<String, GlFramebuffer>()
+  private val fboA = GlFramebuffer()
+  private val fboB = GlFramebuffer()
+
+  // Cached Text & Sticker textures: Key -> CachedTexture(texId, width, height, hash)
   private data class CachedTexture(val texId: Int, val width: Int, val height: Int, val hash: Int)
   private val textTextureCache = mutableMapOf<String, CachedTexture>()
   private val stickerTextureCache = mutableMapOf<String, CachedTexture>()
   private val imageTextureCache = mutableMapOf<String, CachedTexture>()
 
-  // Framebuffers for multi-pass / transition rendering
-  private val fboA = GlFramebuffer()
-  private val fboB = GlFramebuffer()
-
-  // Matrix buffers
+  // Reusable Matrix buffers
   private val mvpMatrix = FloatArray(16)
   private val texMatrix = FloatArray(16)
-  private val identityMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
 
   private var isInitialized = false
+  private var currentViewportWidth = 0
+  private var currentViewportHeight = 0
 
   fun initGl() {
     if (isInitialized) return
@@ -86,9 +88,9 @@ class GpuCompositionRenderer(private val context: Context) {
   }
 
   /**
-   * Main GPU rendering method:
-   * Composites main clip, PIP overlays, text layers, stickers, transitions, color adjustments,
-   * chroma key, and multi-pass visual effects directly via OpenGL ES.
+   * Main GPU composition entry point:
+   * Converts OES video frames, prepares text/sticker/overlay textures, converts layer models into
+   * native C++ layer representations, and renders the composed frame via NativeRenderBridge.
    */
   fun render(
     frame: ComposedFrame,
@@ -102,31 +104,24 @@ class GpuCompositionRenderer(private val context: Context) {
     timelineFilter: FilterSettings = FilterSettings(),
     chromaKey: ChromaKeySettings = ChromaKeySettings()
   ) {
+    if (viewportWidth <= 0 || viewportHeight <= 0) return
+
     if (!isInitialized) {
       initGl()
     }
 
-    val hasEffects = frame.activeEffects.isNotEmpty()
-    if (hasEffects) {
-      fboA.setup(viewportWidth, viewportHeight)
-      fboA.bind()
+    // Initialize or resize native C++ OpenGL ES 3.0 renderer
+    if (viewportWidth != currentViewportWidth || viewportHeight != currentViewportHeight) {
+      currentViewportWidth = viewportWidth
+      currentViewportHeight = viewportHeight
+      NativeRenderBridge.init(viewportWidth, viewportHeight)
     }
 
-    GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-    if (chromaKey.enabled && chromaKey.backgroundType == "Transparent") {
-      GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
-    } else {
-      GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
-    }
-    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+    val nativeLayers = mutableListOf<NativeLayer>()
 
-    // Enable standard alpha blending
-    GLES20.glEnable(GLES20.GL_BLEND)
-    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-
-    // 1. Render Main Video Clip
+    // 1. Process Main Base Video Clip
     if (mainTextureId > 0) {
-      renderMainClip(
+      val main2dTexId = processMainVideoTo2D(
         frame = frame,
         textureId = mainTextureId,
         isOes = isMainOes,
@@ -137,77 +132,191 @@ class GpuCompositionRenderer(private val context: Context) {
         filter = timelineFilter,
         chromaKey = chromaKey
       )
+
+      if (main2dTexId > 0) {
+        val baseLayer = NativeLayer(
+          id = frame.activeClip?.id?.hashCode()?.toLong() ?: 1L,
+          textureId = main2dTexId,
+          type = NativeLayerType.BASE_VIDEO,
+          isVisible = true,
+          zOrder = 0,
+          opacity = 1.0f,
+          blendMode = NativeBlendMode.NORMAL,
+          useCustomMatrix = false
+        )
+        nativeLayers.add(baseLayer)
+      }
     }
 
-    // 2. Render PIP Overlays with Keyframes & Chroma Key
+    // 2. Process PIP Overlays
+    var overlayZ = 1
     for (overlay in frame.activeOverlays) {
       val overlayTexId = overlayTextures[overlay.clip.id]
       if (overlayTexId != null && overlayTexId > 0) {
-        renderOverlayClip(
+        val ov2dTexId = processOverlayVideoTo2D(
           overlay = overlay,
           textureId = overlayTexId,
           viewportWidth = viewportWidth,
           viewportHeight = viewportHeight,
           chromaKey = chromaKey
         )
+
+        if (ov2dTexId > 0) {
+          val ovW = overlay.clip.width.let { if (it > 0) it else viewportWidth }
+          val ovH = overlay.clip.height.let { if (it > 0) it else viewportHeight }
+          val ovAspect = ovW.toFloat() / max(1, ovH)
+          val vpAspect = viewportWidth.toFloat() / max(1, viewportHeight)
+
+          val baseScaleY = overlay.scaleY * 0.5f
+          val baseScaleX = baseScaleY * (ovAspect / vpAspect)
+
+          val ovMatrix = FloatArray(16)
+          Matrix.setIdentityM(ovMatrix, 0)
+          Matrix.translateM(ovMatrix, 0, overlay.posX, -overlay.posY, 0f)
+          Matrix.rotateM(ovMatrix, 0, -overlay.rotation, 0f, 0f, 1f)
+          Matrix.scaleM(ovMatrix, 0, baseScaleX, baseScaleY, 1f)
+
+          val overlayLayer = NativeLayer(
+            id = overlay.clip.id.hashCode().toLong(),
+            textureId = ov2dTexId,
+            type = NativeLayerType.VIDEO,
+            isVisible = true,
+            zOrder = overlayZ++,
+            opacity = overlay.opacity,
+            blendMode = mapBlendMode(overlay.blendMode),
+            useCustomMatrix = true,
+            transformMatrix = ovMatrix
+          )
+          nativeLayers.add(overlayLayer)
+        }
       }
     }
 
-    // 3. Render GPU Text Layers
-    for (text in frame.activeTexts) {
-      renderTextClip(text, viewportWidth, viewportHeight)
-    }
-
-    // 4. Render GPU Stickers
+    // 3. Process Sticker Layers
+    var stickerZ = 10
     for (sticker in frame.activeStickers) {
-      renderStickerClip(sticker, viewportWidth, viewportHeight)
+      val cached = getOrCreateStickerTexture(sticker.clip, viewportWidth, viewportHeight)
+      if (cached != null && cached.texId > 0) {
+        val aspect = viewportWidth.toFloat() / max(1, viewportHeight)
+        val stickerAspect = cached.width.toFloat() / max(1, cached.height)
+        val scaleY = (cached.height.toFloat() / viewportHeight) * 2f * sticker.scale
+        val scaleX = scaleY * stickerAspect / aspect
+
+        val stkMatrix = FloatArray(16)
+        Matrix.setIdentityM(stkMatrix, 0)
+        Matrix.translateM(stkMatrix, 0, sticker.posX, -sticker.posY, 0f)
+        Matrix.rotateM(stkMatrix, 0, -sticker.rotation, 0f, 0f, 1f)
+        Matrix.scaleM(stkMatrix, 0, scaleX, scaleY, 1f)
+
+        val stickerLayer = NativeLayer(
+          id = sticker.clip.id.hashCode().toLong(),
+          textureId = cached.texId,
+          type = NativeLayerType.IMAGE_STICKER,
+          isVisible = true,
+          zOrder = stickerZ++,
+          opacity = sticker.opacity,
+          blendMode = NativeBlendMode.PREMULTIPLIED,
+          useCustomMatrix = true,
+          transformMatrix = stkMatrix
+        )
+        nativeLayers.add(stickerLayer)
+      }
     }
 
-    // 5. Apply Active GPU Visual Effects (Multi-pass ping-pong)
+    // 4. Process Text Layers (Deterministically placed with high Z-Order to prevent hidden text)
+    var textZ = 50
+    for (text in frame.activeTexts) {
+      val cached = getOrCreateTextTexture(text.clip, text.currentPosMs, viewportWidth, viewportHeight)
+      if (cached != null && cached.texId > 0) {
+        val aspect = viewportWidth.toFloat() / max(1, viewportHeight)
+        val txtAspect = cached.width.toFloat() / max(1, cached.height)
+        val scaleY = (cached.height.toFloat() / viewportHeight) * 2f * text.scale
+        val scaleX = scaleY * txtAspect / aspect
+
+        val txtMatrix = FloatArray(16)
+        Matrix.setIdentityM(txtMatrix, 0)
+        Matrix.translateM(txtMatrix, 0, text.posX, -text.posY, 0f)
+        Matrix.rotateM(txtMatrix, 0, -text.rotation, 0f, 0f, 1f)
+        Matrix.scaleM(txtMatrix, 0, scaleX, scaleY, 1f)
+
+        val textLayer = NativeLayer(
+          id = text.clip.id.hashCode().toLong(),
+          textureId = cached.texId,
+          type = NativeLayerType.TEXT,
+          isVisible = true,
+          zOrder = textZ++,
+          opacity = text.opacity,
+          blendMode = NativeBlendMode.PREMULTIPLIED,
+          useCustomMatrix = true,
+          transformMatrix = txtMatrix
+        )
+        nativeLayers.add(textLayer)
+      }
+    }
+
+    // 5. Render via Native C++ OpenGL ES 3.0 Engine
+    val hasEffects = frame.activeEffects.isNotEmpty()
     if (hasEffects) {
-      fboA.unbind()
-      fboB.setup(viewportWidth, viewportHeight)
+      NativeRenderBridge.beginOffscreen()
+    } else {
+      GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+      if (chromaKey.enabled && chromaKey.backgroundType == "Transparent") {
+        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+      } else {
+        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f)
+      }
+      GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+    }
 
-      var currentInputTex = fboA.getTextureId()
-      var currentOutputFbo = fboB
+    NativeRenderBridge.renderFrame(nativeLayers)
 
-      for (i in frame.activeEffects.indices) {
-        val effect = frame.activeEffects[i]
-        val isLast = (i == frame.activeEffects.size - 1)
+    // 6. Apply Active Visual Effects (Multi-pass ping-ponging)
+    if (hasEffects) {
+      val offscreenTex = NativeRenderBridge.endOffscreen()
+      if (offscreenTex > 0) {
+        fboA.setup(viewportWidth, viewportHeight)
+        fboB.setup(viewportWidth, viewportHeight)
 
-        if (isLast) {
-          // Render directly to destination framebuffer
-          GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-          GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-          applyEffect(
-            effectType = effect.effectType,
-            intensity = effect.intensity,
-            timeSec = effect.timeInEffectMs / 1000f,
-            inputTexId = currentInputTex,
-            viewportWidth = viewportWidth,
-            viewportHeight = viewportHeight
-          )
-        } else {
-          currentOutputFbo.bind()
-          GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-          GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-          applyEffect(
-            effectType = effect.effectType,
-            intensity = effect.intensity,
-            timeSec = effect.timeInEffectMs / 1000f,
-            inputTexId = currentInputTex,
-            viewportWidth = viewportWidth,
-            viewportHeight = viewportHeight
-          )
-          currentOutputFbo.unbind()
-          currentInputTex = currentOutputFbo.getTextureId()
-          currentOutputFbo = if (currentOutputFbo == fboB) fboA else fboB
+        var currentInputTex = offscreenTex
+        var currentOutputFbo = fboB
+
+        for (i in frame.activeEffects.indices) {
+          val effect = frame.activeEffects[i]
+          val isLast = (i == frame.activeEffects.size - 1)
+
+          if (isLast) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+            applyEffect(
+              effectType = effect.effectType,
+              intensity = effect.intensity,
+              timeSec = effect.timeInEffectMs / 1000f,
+              inputTexId = currentInputTex,
+              viewportWidth = viewportWidth,
+              viewportHeight = viewportHeight
+            )
+          } else {
+            currentOutputFbo.bind()
+            GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            applyEffect(
+              effectType = effect.effectType,
+              intensity = effect.intensity,
+              timeSec = effect.timeInEffectMs / 1000f,
+              inputTexId = currentInputTex,
+              viewportWidth = viewportWidth,
+              viewportHeight = viewportHeight
+            )
+            currentOutputFbo.unbind()
+            currentInputTex = currentOutputFbo.getTextureId()
+            currentOutputFbo = if (currentOutputFbo == fboB) fboA else fboB
+          }
         }
       }
     }
   }
 
-  private fun renderMainClip(
+  private fun processMainVideoTo2D(
     frame: ComposedFrame,
     textureId: Int,
     isOes: Boolean,
@@ -216,12 +325,18 @@ class GpuCompositionRenderer(private val context: Context) {
     viewportHeight: Int,
     adjustments: VideoAdjustments,
     filter: FilterSettings,
-    chromaKey: ChromaKeySettings = ChromaKeySettings()
-  ) {
+    chromaKey: ChromaKeySettings
+  ): Int {
+    fboMain2D.setup(viewportWidth, viewportHeight)
+    fboMain2D.bind()
+
+    GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+    GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
     val program = if (isOes) programOes else program2D
     GLES20.glUseProgram(program)
 
-    // Compute MVP transform
     Matrix.setIdentityM(mvpMatrix, 0)
     val clip = frame.activeClip
     var keyframeBlur = 0f
@@ -265,14 +380,12 @@ class GpuCompositionRenderer(private val context: Context) {
       )
     }
 
-    // Texture Matrix (handling surface texture orientation or cropping)
     if (customTexMatrix != null) {
       System.arraycopy(customTexMatrix, 0, texMatrix, 0, 16)
     } else {
       Matrix.setIdentityM(texMatrix, 0)
     }
 
-    // Transition effect if active on main clip
     if (frame.activeTransition != null) {
       val tr = frame.activeTransition
       when (tr.type) {
@@ -290,7 +403,6 @@ class GpuCompositionRenderer(private val context: Context) {
       }
     }
 
-    // Bind uniforms
     val effectiveFilter = clip?.filter ?: filter
     bindCommonUniforms(
       program = program,
@@ -306,44 +418,32 @@ class GpuCompositionRenderer(private val context: Context) {
       effectParam = keyframeEffectParam
     )
 
-    // Draw Quad
     drawQuad(program)
+    fboMain2D.unbind()
+
+    return fboMain2D.getTextureId()
   }
 
-  private fun renderOverlayClip(
+  private fun processOverlayVideoTo2D(
     overlay: ComposedOverlay,
     textureId: Int,
     viewportWidth: Int,
     viewportHeight: Int,
     chromaKey: ChromaKeySettings
-  ) {
+  ): Int {
+    val fbo = fboOverlayMap.getOrPut(overlay.clip.id) { GlFramebuffer() }
+    fbo.setup(viewportWidth, viewportHeight)
+    fbo.bind()
+
+    GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+    GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
     val program = program2D
     GLES20.glUseProgram(program)
 
-    val cachedOverlay = imageTextureCache[overlay.clip.id] ?: imageTextureCache.values.find { it.texId == textureId }
-    val ovW = cachedOverlay?.width ?: if (overlay.clip.width > 0) overlay.clip.width else viewportWidth
-    val ovH = cachedOverlay?.height ?: if (overlay.clip.height > 0) overlay.clip.height else viewportHeight
-    val ovAspect = ovW.toFloat() / max(1, ovH)
-    val vpAspect = viewportWidth.toFloat() / max(1, viewportHeight)
-
-    val baseScaleY = overlay.scaleY * 0.5f
-    val baseScaleX = baseScaleY * (ovAspect / vpAspect)
-
     Matrix.setIdentityM(mvpMatrix, 0)
-    // Map overlay position (-1..1), scaleX & scaleY, and rotation (inverted Y and negative rotation for OpenGL NDC)
-    Matrix.translateM(mvpMatrix, 0, overlay.posX, -overlay.posY, 0f)
-    Matrix.rotateM(mvpMatrix, 0, -overlay.rotation, 0f, 0f, 1f)
-    Matrix.scaleM(mvpMatrix, 0, baseScaleX, baseScaleY, 1f)
-
     Matrix.setIdentityM(texMatrix, 0)
-
-    // Apply Blend Mode
-    when (overlay.blendMode.lowercase()) {
-      "screen" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_COLOR)
-      "multiply" -> GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-      "add" -> GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-      else -> GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-    }
 
     val overlayAdj = VideoAdjustments(
       brightness = overlay.brightness,
@@ -355,7 +455,7 @@ class GpuCompositionRenderer(private val context: Context) {
       program = program,
       textureId = textureId,
       isOes = false,
-      opacity = overlay.opacity,
+      opacity = 1.0f,
       adjustments = overlayAdj,
       filter = FilterSettings(),
       chromaKey = chromaKey,
@@ -366,77 +466,110 @@ class GpuCompositionRenderer(private val context: Context) {
     )
 
     drawQuad(program)
+    fbo.unbind()
 
-    // Restore standard blend func
-    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+    return fbo.getTextureId()
   }
 
-  private fun renderTextClip(text: ComposedText, viewportWidth: Int, viewportHeight: Int) {
+  private fun getOrCreateTextTexture(
+    clip: TextClip,
+    currentPosMs: Long,
+    viewportWidth: Int,
+    viewportHeight: Int
+  ): CachedTexture? {
+    val hash = clip.text.hashCode() xor
+        clip.textColor.toInt() xor
+        clip.fontSizeSp.toInt() xor
+        clip.fontWeight.hashCode() xor
+        clip.backgroundColor.toInt() xor
+        clip.strokeColor.toInt() xor
+        viewportWidth
+
+    val cached = textTextureCache[clip.id]
+    if (cached != null && cached.hash == hash && cached.texId > 0) {
+      return cached
+    }
+
     val bitmap = TextLayerRenderer.renderToBitmap(
-      clip = text.clip,
-      currentPosMs = text.currentPosMs,
+      clip = clip,
+      currentPosMs = currentPosMs,
       width = viewportWidth,
       height = viewportHeight,
       context = context
-    )
-    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, 0)
+    ) ?: return null
+
+    val oldTexId = cached?.texId ?: 0
+    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, oldTexId)
     bitmap.recycle()
-    if (texId == 0) return
 
-    val program = program2D
-    GLES20.glUseProgram(program)
-
-    Matrix.setIdentityM(mvpMatrix, 0)
-    Matrix.setIdentityM(texMatrix, 0)
-
-    bindCommonUniforms(
-      program = program,
-      textureId = texId,
-      isOes = false,
-      opacity = 1.0f,
-      adjustments = VideoAdjustments(),
-      filter = FilterSettings(),
-      chromaKey = ChromaKeySettings(enabled = false),
-      viewportWidth = viewportWidth,
-      viewportHeight = viewportHeight
-    )
-
-    drawQuad(program)
-    GLES20.glDeleteTextures(1, intArrayOf(texId), 0)
+    if (texId == 0) return null
+    val entry = CachedTexture(texId, bitmap.width, bitmap.height, hash)
+    textTextureCache[clip.id] = entry
+    return entry
   }
 
-  private fun renderStickerClip(sticker: ComposedSticker, viewportWidth: Int, viewportHeight: Int) {
-    val cached = getOrCreateStickerTexture(sticker.clip, viewportWidth)
-    if (cached == null || cached.texId == 0) return
+  private fun getOrCreateStickerTexture(
+    clip: StickerClip,
+    viewportWidth: Int,
+    viewportHeight: Int
+  ): CachedTexture? {
+    val hash = clip.emojiOrAsset.hashCode() xor clip.badgeType.hashCode() xor viewportWidth
+    val cached = stickerTextureCache[clip.id]
+    if (cached != null && cached.hash == hash && cached.texId > 0) {
+      return cached
+    }
 
-    val program = program2D
-    GLES20.glUseProgram(program)
+    val isBadge = clip.badgeType != null
+    val targetWidth = if (isBadge) {
+      (160f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(128, 384)
+    } else {
+      (80f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(64, 256)
+    }
+    val targetHeight = if (isBadge) {
+      (targetWidth * 0.42f).toInt().coerceIn(54, 160)
+    } else {
+      targetWidth
+    }
 
-    Matrix.setIdentityM(mvpMatrix, 0)
-    Matrix.translateM(mvpMatrix, 0, sticker.posX, -sticker.posY, 0f)
-    Matrix.rotateM(mvpMatrix, 0, -sticker.rotation, 0f, 0f, 1f)
+    val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
 
-    val aspect = viewportWidth.toFloat() / max(1, viewportHeight)
-    val stickerAspect = cached.width.toFloat() / max(1, cached.height)
-    val scaleY = (cached.height.toFloat() / viewportHeight) * 2f * sticker.scale
-    val scaleX = scaleY * stickerAspect / aspect
-
-    Matrix.scaleM(mvpMatrix, 0, scaleX, scaleY, 1f)
-    Matrix.setIdentityM(texMatrix, 0)
-
-    bindCommonUniforms(
-      program = program,
-      textureId = cached.texId,
-      isOes = false,
-      opacity = sticker.opacity,
-      adjustments = VideoAdjustments(),
-      filter = FilterSettings(),
-      chromaKey = ChromaKeySettings(enabled = false),
-      viewportWidth = viewportWidth,
-      viewportHeight = viewportHeight
+    StickerLayerRenderer.draw(
+      canvas = canvas,
+      clip = clip.copy(posX = 0f, posY = 0f, scale = 1f, rotation = 0f, opacity = 1f),
+      currentPosMs = clip.timelineStartMs,
+      width = targetWidth,
+      height = targetHeight
     )
 
-    drawQuad(program)
+    val oldTexId = cached?.texId ?: 0
+    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, oldTexId)
+    bitmap.recycle()
+
+    if (texId == 0) return null
+    val entry = CachedTexture(texId, targetWidth, targetHeight, hash)
+    stickerTextureCache[clip.id] = entry
+    return entry
+  }
+
+  fun uploadImageTexture(id: String, bitmap: Bitmap): Int {
+    val existing = imageTextureCache[id]
+    if (existing != null && existing.hash == bitmap.generationId && existing.width == bitmap.width && existing.height == bitmap.height) {
+      return existing.texId
+    }
+    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, existing?.texId ?: 0)
+    imageTextureCache[id] = CachedTexture(texId, bitmap.width, bitmap.height, bitmap.generationId)
+    return texId
+  }
+
+  private fun mapBlendMode(modeStr: String): NativeBlendMode {
+    return when (modeStr.lowercase().trim()) {
+      "screen" -> NativeBlendMode.SCREEN
+      "multiply" -> NativeBlendMode.MULTIPLY
+      "add", "additive" -> NativeBlendMode.ADDITIVE
+      "premultiplied" -> NativeBlendMode.PREMULTIPLIED
+      else -> NativeBlendMode.NORMAL
+    }
   }
 
   private fun bindCommonUniforms(
@@ -450,8 +583,7 @@ class GpuCompositionRenderer(private val context: Context) {
     viewportWidth: Int,
     viewportHeight: Int,
     blur: Float = 0f,
-    effectParam: Float = 0f,
-    mask: MaskSettings = MaskSettings()
+    effectParam: Float = 0f
   ) {
     val uMVPMatrixHandle = GLES20.glGetUniformLocation(program, "uMVPMatrix")
     val uTexMatrixHandle = GLES20.glGetUniformLocation(program, "uTexMatrix")
@@ -466,13 +598,11 @@ class GpuCompositionRenderer(private val context: Context) {
     if (uBlurHandle >= 0) GLES20.glUniform1f(uBlurHandle, blur)
     if (uEffectParamHandle >= 0) GLES20.glUniform1f(uEffectParamHandle, effectParam)
 
-    // Bind texture
     val target = if (isOes) GLES11Ext.GL_TEXTURE_EXTERNAL_OES else GLES20.GL_TEXTURE_2D
     GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     GLES20.glBindTexture(target, textureId)
     GLES20.glUniform1i(uTextureHandle, 0)
 
-    // Color adjustments
     val uBrightnessHandle = GLES20.glGetUniformLocation(program, "uBrightness")
     val uContrastHandle = GLES20.glGetUniformLocation(program, "uContrast")
     val uSaturationHandle = GLES20.glGetUniformLocation(program, "uSaturation")
@@ -499,14 +629,13 @@ class GpuCompositionRenderer(private val context: Context) {
     if (uSharpnessHandle >= 0) GLES20.glUniform1f(uSharpnessHandle, adjustments.sharpness)
     if (uTexelSizeHandle >= 0) GLES20.glUniform2f(uTexelSizeHandle, 1.0f / max(1, viewportWidth), 1.0f / max(1, viewportHeight))
 
-    // Chroma key uniforms
     val uChromaEnabledHandle = GLES20.glGetUniformLocation(program, "uChromaEnabled")
     if (uChromaEnabledHandle >= 0) {
       if (chromaKey.enabled) {
         val color = chromaKey.targetColor.toInt()
-        val r = android.graphics.Color.red(color) / 255f
-        val g = android.graphics.Color.green(color) / 255f
-        val b = android.graphics.Color.blue(color) / 255f
+        val r = Color.red(color) / 255f
+        val g = Color.green(color) / 255f
+        val b = Color.blue(color) / 255f
 
         GLES20.glUniform1i(uChromaEnabledHandle, 1)
         val keyLoc = GLES20.glGetUniformLocation(program, "uChromaKeyColor").let { if (it >= 0) it else GLES20.glGetUniformLocation(program, "uKeyColor") }
@@ -521,17 +650,16 @@ class GpuCompositionRenderer(private val context: Context) {
         val bgType = if (chromaKey.backgroundType == "SolidColor") 1 else 0
         GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uChromaBgType"), bgType)
         val bgColor = chromaKey.backgroundColor.toInt()
-        val bgR = android.graphics.Color.red(bgColor) / 255f
-        val bgG = android.graphics.Color.green(bgColor) / 255f
-        val bgB = android.graphics.Color.blue(bgColor) / 255f
-        val bgA = android.graphics.Color.alpha(bgColor) / 255f
+        val bgR = Color.red(bgColor) / 255f
+        val bgG = Color.green(bgColor) / 255f
+        val bgB = Color.blue(bgColor) / 255f
+        val bgA = Color.alpha(bgColor) / 255f
         GLES20.glUniform4f(GLES20.glGetUniformLocation(program, "uChromaBgColor"), bgR, bgG, bgB, bgA)
       } else {
         GLES20.glUniform1i(uChromaEnabledHandle, 0)
       }
     }
 
-    // Color Matrix Filter uniforms (Preset Filters: 4K, HDR, Autumn, Cinematic, etc.)
     val uColorMatrixHandle = GLES20.glGetUniformLocation(program, "uColorMatrix")
     val uColorOffsetHandle = GLES20.glGetUniformLocation(program, "uColorOffset")
     val uUseColorMatrixHandle = GLES20.glGetUniformLocation(program, "uUseColorMatrix")
@@ -539,12 +667,11 @@ class GpuCompositionRenderer(private val context: Context) {
     val filterMatrix = com.example.engine.composition.ColorFilterGenerator.getFilterMatrix(filter.type, filter.intensity)
     if (filterMatrix != null && uUseColorMatrixHandle >= 0) {
       val arr = filterMatrix.array
-      // Convert Android 4x5 row-major ColorMatrix array to OpenGL 4x4 column-major matrix + offset
       val glMat = floatArrayOf(
-        arr[0], arr[5], arr[10], arr[15],  // col 0
-        arr[1], arr[6], arr[11], arr[16],  // col 1
-        arr[2], arr[7], arr[12], arr[17],  // col 2
-        arr[3], arr[8], arr[13], arr[18]   // col 3
+        arr[0], arr[5], arr[10], arr[15],
+        arr[1], arr[6], arr[11], arr[16],
+        arr[2], arr[7], arr[12], arr[17],
+        arr[3], arr[8], arr[13], arr[18]
       )
       val glOffset = floatArrayOf(
         arr[4] / 255.0f,
@@ -584,132 +711,25 @@ class GpuCompositionRenderer(private val context: Context) {
     GLES20.glDisableVertexAttribArray(aTextureCoordHandle)
   }
 
-  private fun getOrCreateTextTexture(clip: TextClip, viewportWidth: Int): CachedTexture? {
-    val hash = clip.hashCode() xor viewportWidth
-    val cached = textTextureCache[clip.id]
-    if (cached != null && cached.hash == hash) {
-      return cached
-    }
-
-    // Rasterize text to high-res Bitmap once, then upload to GPU texture
-    val scaleFactor = viewportWidth.toFloat() / 600f
-    val fontSize = (clip.fontSizeSp * scaleFactor).coerceAtLeast(14f)
-
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      this.textSize = fontSize
-      this.isFakeBoldText = clip.fontWeight >= 700
-      this.color = clip.textColor.toInt()
-      this.textAlign = Paint.Align.LEFT
-    }
-
-    val bounds = Rect()
-    paint.getTextBounds(clip.text, 0, clip.text.length, bounds)
-
-    val padX = 32
-    val padY = 24
-    val bmpWidth = max(bounds.width() + padX * 2, 64)
-    val bmpHeight = max(bounds.height() + padY * 2, 48)
-
-    val bitmap = Bitmap.createBitmap(bmpWidth, bmpHeight, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    // Background rect
-    if (clip.hasBackground) {
-      val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = clip.backgroundColor.toInt()
-      }
-      canvas.drawRoundRect(RectF(0f, 0f, bmpWidth.toFloat(), bmpHeight.toFloat()), 16f, 16f, bgPaint)
-    }
-
-    // Text stroke
-    val textX = padX.toFloat() - bounds.left
-    val textY = padY.toFloat() - bounds.top
-    if (clip.strokeWidth > 0f) {
-      val strokePaint = Paint(paint).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = clip.strokeWidth * scaleFactor
-        color = clip.strokeColor.toInt()
-      }
-      canvas.drawText(clip.text, textX, textY, strokePaint)
-    }
-
-    // Gradient
-    if (clip.hasGradient) {
-      paint.shader = LinearGradient(
-        0f, 0f, bmpWidth.toFloat(), 0f,
-        clip.gradientColorStart.toInt(), clip.gradientColorEnd.toInt(),
-        Shader.TileMode.CLAMP
-      )
-    }
-
-    // Text fill
-    canvas.drawText(clip.text, textX, textY, paint)
-
-    // Upload to OpenGL texture
-    val oldTexId = cached?.texId ?: 0
-    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, oldTexId)
-    bitmap.recycle()
-
-    val entry = CachedTexture(texId, bmpWidth, bmpHeight, hash)
-    textTextureCache[clip.id] = entry
-    return entry
-  }
-
-  private fun getOrCreateStickerTexture(clip: StickerClip, viewportWidth: Int): CachedTexture? {
-    val hash = clip.hashCode() xor viewportWidth
-    val cached = stickerTextureCache[clip.id]
-    if (cached != null && cached.hash == hash) {
-      return cached
-    }
-
-    val isBadge = clip.badgeType != null
-    val targetWidth = if (isBadge) {
-      (160f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(128, 384)
-    } else {
-      (80f * (viewportWidth.toFloat() / 600f)).toInt().coerceIn(64, 256)
-    }
-    val targetHeight = if (isBadge) {
-      (targetWidth * 0.42f).toInt().coerceIn(54, 160)
-    } else {
-      targetWidth
-    }
-
-    val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    StickerLayerRenderer.draw(
-      canvas = canvas,
-      clip = clip.copy(posX = 0f, posY = 0f, scale = 1f, rotation = 0f, opacity = 1f),
-      currentPosMs = clip.timelineStartMs,
-      width = targetWidth,
-      height = targetHeight
-    )
-
-    val oldTexId = cached?.texId ?: 0
-    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, oldTexId)
-    bitmap.recycle()
-
-    val entry = CachedTexture(texId, targetWidth, targetHeight, hash)
-    stickerTextureCache[clip.id] = entry
-    return entry
-  }
-
-  fun uploadImageTexture(id: String, bitmap: Bitmap): Int {
-    val existing = imageTextureCache[id]
-    if (existing != null && existing.hash == bitmap.generationId && existing.width == bitmap.width && existing.height == bitmap.height) {
-      return existing.texId
-    }
-    val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, existing?.texId ?: 0)
-    imageTextureCache[id] = CachedTexture(texId, bitmap.width, bitmap.height, bitmap.generationId)
-    return texId
+  fun onContextLost() {
+    isInitialized = false
+    textTextureCache.clear()
+    stickerTextureCache.clear()
+    imageTextureCache.clear()
+    fboOverlayMap.clear()
+    NativeRenderBridge.onContextLost()
   }
 
   fun release() {
-    // Release framebuffers
+    fboMain2D.release()
     fboA.release()
     fboB.release()
 
-    // Delete textures
+    for (fbo in fboOverlayMap.values) {
+      fbo.release()
+    }
+    fboOverlayMap.clear()
+
     val texturesToDelete = mutableListOf<Int>()
     for (t in textTextureCache.values) texturesToDelete.add(t.texId)
     for (s in stickerTextureCache.values) texturesToDelete.add(s.texId)
@@ -722,7 +742,6 @@ class GpuCompositionRenderer(private val context: Context) {
     stickerTextureCache.clear()
     imageTextureCache.clear()
 
-    // Delete programs
     if (program2D != 0) {
       GLES20.glDeleteProgram(program2D)
       program2D = 0
@@ -741,7 +760,8 @@ class GpuCompositionRenderer(private val context: Context) {
     }
 
     isInitialized = false
-    Log.d(TAG, "GpuCompositionRenderer resources cleanly released")
+    NativeRenderBridge.release()
+    Log.d(TAG, "GpuCompositionRenderer & Native Engine cleanly released")
   }
 
   private fun applyEffect(
