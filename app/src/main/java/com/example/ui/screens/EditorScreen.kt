@@ -253,7 +253,8 @@ fun EditorScreen(
       AnimatedVisibility(
         visible = activeTab == null,
         enter = fadeIn() + slideInVertically { it },
-        exit = fadeOut() + slideOutVertically { it }
+        exit = fadeOut() + slideOutVertically { it },
+        modifier = Modifier.navigationBarsPadding()
       ) {
         EditorBottomToolbar(
           activeTab = activeTab,
@@ -267,7 +268,6 @@ fun EditorScreen(
         )
       }
     },
-    contentWindowInsets = WindowInsets(0, 0, 0, 0)
   ) { padding ->
     BoxWithConstraints(
       modifier = Modifier
@@ -705,6 +705,7 @@ fun EditorScreen(
         border = BorderStroke(1.dp, Color(0xFF1E283E)),
         modifier = Modifier
           .fillMaxWidth()
+          .navigationBarsPadding()
           .heightIn(max = (maxHeight * 0.46f).coerceAtMost(320.dp))
           .clickable(
             interactionSource = remember { MutableInteractionSource() },
@@ -1174,6 +1175,7 @@ private fun EditorTopBar(
   Row(
     modifier = Modifier
       .fillMaxWidth()
+      .statusBarsPadding()
       .height(52.dp)
       .background(Color.Black)
       .padding(horizontal = 12.dp),
