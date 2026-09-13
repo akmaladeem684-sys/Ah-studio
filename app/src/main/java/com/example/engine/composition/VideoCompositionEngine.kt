@@ -148,8 +148,8 @@ class VideoCompositionEngine(private val context: Context) {
 
     val activeClip = if (!isVideoHidden) {
       timeline.videoClips.find {
-        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-      } ?: timeline.videoClips.lastOrNull()
+        !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+      } ?: timeline.videoClips.lastOrNull { !it.isHidden }
     } else null
 
     val sourcePosMs = activeClip?.timelineToSourceMs(posMs) ?: 0L
@@ -181,7 +181,7 @@ class VideoCompositionEngine(private val context: Context) {
     // Overlays with keyframes
     val overlays = if (!isOverlayHidden) {
       timeline.overlayClips.filter {
-        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+        !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
       }.map { clip ->
         val rel = posMs - clip.timelineStartMs
         val kf = KeyframeInterpolator.interpolate(clip, rel)
@@ -207,7 +207,7 @@ class VideoCompositionEngine(private val context: Context) {
     // Texts
     val texts = if (!isTextHidden) {
       timeline.textClips.filter {
-        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+        !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
       }.map { clip ->
         val state = TextLayerRenderer.evaluateAnimation(clip, posMs)
         ComposedText(
@@ -225,7 +225,7 @@ class VideoCompositionEngine(private val context: Context) {
     // Stickers
     val stickers = if (!isStickerHidden) {
       timeline.stickerClips.filter {
-        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
+        !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
       }.map { clip ->
         ComposedSticker(
           clip = clip,
@@ -242,7 +242,7 @@ class VideoCompositionEngine(private val context: Context) {
     val isEffectHidden = timeline.trackSettings[TrackType.EFFECT]?.isHidden == true
     val activeEffects = if (!isEffectHidden) {
       timeline.effectClips.filter {
-        posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs &&
+        !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs &&
         (it.targetClipId == null || activeClip == null || it.targetClipId == activeClip.id)
       }.sortedBy { it.timelineStartMs }.map { clip ->
         val relTime = posMs - clip.timelineStartMs

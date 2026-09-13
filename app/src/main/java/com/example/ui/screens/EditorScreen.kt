@@ -455,37 +455,73 @@ fun EditorScreen(
           }
         }
 
-        // Above media track: Add Media button (White plus, Blue color)
-        Surface(
-          shape = RoundedCornerShape(14.dp),
-          color = Color(0xFF0080FF),
-          modifier = Modifier
-            .clickable {
-              timelineMediaPickerLauncher.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          // Dedicated Layers Studio Button
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = if (isLayersOpen) CyanAccent else Color(0xFF1E283E),
+            border = BorderStroke(1.dp, if (isLayersOpen) Color.White else StudioBorder),
+            modifier = Modifier
+              .clickable { isLayersOpen = !isLayersOpen }
+              .testTag("open_layers_manager_btn")
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              Icon(
+                imageVector = Icons.Default.Layers,
+                contentDescription = "Layers Manager",
+                tint = if (isLayersOpen) Color.Black else CyanAccent,
+                modifier = Modifier.size(15.dp)
+              )
+              Text(
+                text = "Layers",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  color = if (isLayersOpen) Color.Black else Color.White,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 11.5.sp
+                )
               )
             }
-            .testTag("above_media_track_add_btn")
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          }
+
+          // Above media track: Add Media button (White plus, Blue color)
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF0080FF),
+            modifier = Modifier
+              .clickable {
+                timelineMediaPickerLauncher.launch(
+                  PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                )
+              }
+              .testTag("above_media_track_add_btn")
           ) {
-            Icon(
-              imageVector = Icons.Default.Add,
-              contentDescription = "Add Media",
-              tint = Color.White,
-              modifier = Modifier.size(16.dp)
-            )
-            Text(
-              text = "Add Media",
-              style = MaterialTheme.typography.labelSmall.copy(
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.5.sp
+            Row(
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Add Media",
+                tint = Color.White,
+                modifier = Modifier.size(16.dp)
               )
-            )
+              Text(
+                text = "Add Media",
+                style = MaterialTheme.typography.labelSmall.copy(
+                  color = Color.White,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 11.5.sp
+                )
+              )
+            }
           }
         }
       }
@@ -881,6 +917,52 @@ fun EditorScreen(
           }
         }
       }
+    }
+
+    // 3. Sliding Multi-Layer Studio Drawer
+    AnimatedVisibility(
+      visible = isLayersOpen,
+      enter = slideInHorizontally { -it } + fadeIn(),
+      exit = slideOutHorizontally { -it } + fadeOut(),
+      modifier = Modifier.align(Alignment.CenterStart)
+    ) {
+      com.example.ui.components.timeline.LayersDrawer(
+        timeline = timeline,
+        selectedElement = selectedElement,
+        onSelectElement = { sel ->
+          viewModel.timelineEngine.selectElement(sel)
+        },
+        onBringLayerForward = { clipId ->
+          viewModel.timelineEngine.bringLayerForward(clipId)
+        },
+        onSendLayerBackward = { clipId ->
+          viewModel.timelineEngine.sendLayerBackward(clipId)
+        },
+        onBringLayerToFront = { clipId ->
+          viewModel.timelineEngine.bringLayerToFront(clipId)
+        },
+        onSendLayerToBack = { clipId ->
+          viewModel.timelineEngine.sendLayerToBack(clipId)
+        },
+        onToggleClipLock = { clipId ->
+          viewModel.timelineEngine.toggleClipLock(clipId)
+        },
+        onToggleClipHide = { clipId ->
+          viewModel.timelineEngine.toggleClipHide(clipId)
+        },
+        onDuplicateClip = { clipId ->
+          viewModel.timelineEngine.duplicateClips(setOf(clipId))
+        },
+        onDeleteClip = { clipId ->
+          viewModel.timelineEngine.deleteClips(setOf(clipId))
+        },
+        onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
+        onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
+        onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
+        onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
+        onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
+        onClose = { isLayersOpen = false }
+      )
     }
   }
 }

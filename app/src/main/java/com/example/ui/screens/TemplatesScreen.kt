@@ -38,12 +38,27 @@ fun TemplatesScreen(
   viewModel: StudioViewModel,
   modifier: Modifier = Modifier
 ) {
+  var searchQuery by remember { mutableStateOf("") }
   var selectedCategory by remember { mutableStateOf("All") }
   val firebaseTemplates by FirebaseTemplateManager.templates.collectAsState()
 
-  val filteredTemplates = remember(firebaseTemplates, selectedCategory) {
-    if (selectedCategory == "All") firebaseTemplates
-    else firebaseTemplates.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+  val filteredTemplates = remember(firebaseTemplates, selectedCategory, searchQuery) {
+    firebaseTemplates.filter { tpl ->
+      val matchesSearch = searchQuery.isBlank() ||
+        tpl.title.contains(searchQuery, ignoreCase = true) ||
+        tpl.category.contains(searchQuery, ignoreCase = true) ||
+        tpl.description.contains(searchQuery, ignoreCase = true) ||
+        tpl.creatorName.contains(searchQuery, ignoreCase = true) ||
+        tpl.creatorHandle.contains(searchQuery, ignoreCase = true)
+
+      val matchesCategory = if (selectedCategory == "All") {
+        true
+      } else {
+        tpl.category.contains(selectedCategory, ignoreCase = true)
+      }
+
+      matchesSearch && matchesCategory
+    }
   }
 
   Scaffold(
@@ -56,7 +71,7 @@ fun TemplatesScreen(
         title = {
           Column {
             Text("Templates Community", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("Real Firebase dynamic video templates", color = TextSecondary, fontSize = 11.sp)
+            Text("Browse and search motion templates", color = TextSecondary, fontSize = 11.sp)
           }
         },
         navigationIcon = {
@@ -73,27 +88,67 @@ fun TemplatesScreen(
         .fillMaxSize()
         .padding(padding)
         .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp)
+      verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-      // Category Selector
+      // Search Bar
+      OutlinedTextField(
+        value = searchQuery,
+        onValueChange = { searchQuery = it },
+        placeholder = { Text("Search templates by name, creator, or tag...", color = TextTertiary, fontSize = 13.sp) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = TextSecondary) },
+        trailingIcon = {
+          if (searchQuery.isNotEmpty()) {
+            IconButton(onClick = { searchQuery = "" }) {
+              Icon(Icons.Default.Clear, contentDescription = "Clear search", tint = TextSecondary)
+            }
+          }
+        },
+        singleLine = true,
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("templates_screen_search_field"),
+        shape = RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedContainerColor = StudioSurface,
+          unfocusedContainerColor = StudioSurface,
+          focusedBorderColor = CyanAccent,
+          unfocusedBorderColor = StudioBorder,
+          focusedTextColor = TextPrimary,
+          unfocusedTextColor = TextPrimary
+        )
+      )
+
+      // Category Selector Chips
       LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
         items(TemplatesCatalog.categories) { cat ->
+          val isSelected = selectedCategory == cat
+          val categoryCount = remember(firebaseTemplates, cat) {
+            if (cat == "All") firebaseTemplates.size
+            else firebaseTemplates.count { it.category.contains(cat, ignoreCase = true) }
+          }
+
           FilterChip(
-            selected = selectedCategory == cat,
+            selected = isSelected,
             onClick = { selectedCategory = cat },
-            label = { Text(cat) },
+            label = {
+              Text(
+                text = if (cat == "All") "All ($categoryCount)" else "$cat ($categoryCount)",
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+              )
+            },
             colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = CyanAccent,
-              selectedLabelColor = Color.Black,
+              selectedContainerColor = CyanAccent.copy(alpha = 0.2f),
+              selectedLabelColor = CyanAccent,
               containerColor = StudioSurface,
-              labelColor = TextPrimary
+              labelColor = TextSecondary
             ),
             border = FilterChipDefaults.filterChipBorder(
               enabled = true,
-              selected = selectedCategory == cat,
+              selected = isSelected,
               selectedBorderColor = CyanAccent,
               borderColor = StudioBorder
             )
@@ -124,15 +179,35 @@ fun TemplatesScreen(
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-              text = if (selectedCategory == "All") "No Templates in Firebase Yet" else "No Templates in $selectedCategory",
-              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+              text = if (searchQuery.isNotBlank()) "No templates matching \"$searchQuery\""
+                else if (selectedCategory != "All") "No templates in $selectedCategory"
+                else "No templates published yet",
+              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary),
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-              text = "Templates are created exclusively through the Template Creator flow. Design in Screen Editor and export to publish here automatically.",
+              text = if (searchQuery.isNotBlank() || selectedCategory != "All")
+                "Try searching for another keyword or selecting a different category filter."
+              else
+                "Templates are created exclusively through the Template Creator flow. Design in Screen Editor and export to publish here automatically.",
               style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary),
               textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
+            if (searchQuery.isNotBlank() || selectedCategory != "All") {
+              Spacer(modifier = Modifier.height(14.dp))
+              OutlinedButton(
+                onClick = {
+                  searchQuery = ""
+                  selectedCategory = "All"
+                },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent)
+              ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Reset Filters")
+              }
+            }
           }
         }
       } else {

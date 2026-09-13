@@ -3369,6 +3369,188 @@ class TimelineEngine {
     _timeline.value = _timeline.value.copy(effectClips = list)
   }
 
+  // --- Unified Multi-Layer Management (Z-Index, Lock, Visibility, Reordering) ---
+
+  fun bringLayerForward(clipId: String): Boolean {
+    recordHistory()
+    // 1. Text Clips
+    val textIndex = _timeline.value.textClips.indexOfFirst { it.id == clipId }
+    if (textIndex in 0 until _timeline.value.textClips.size - 1) {
+      val list = _timeline.value.textClips.toMutableList()
+      java.util.Collections.swap(list, textIndex, textIndex + 1)
+      _timeline.value = _timeline.value.copy(textClips = list)
+      return true
+    }
+    // 2. Overlay Clips
+    val overlayIndex = _timeline.value.overlayClips.indexOfFirst { it.id == clipId }
+    if (overlayIndex in 0 until _timeline.value.overlayClips.size - 1) {
+      val list = _timeline.value.overlayClips.toMutableList()
+      java.util.Collections.swap(list, overlayIndex, overlayIndex + 1)
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+      return true
+    }
+    // 3. Sticker Clips
+    val stickerIndex = _timeline.value.stickerClips.indexOfFirst { it.id == clipId }
+    if (stickerIndex in 0 until _timeline.value.stickerClips.size - 1) {
+      val list = _timeline.value.stickerClips.toMutableList()
+      java.util.Collections.swap(list, stickerIndex, stickerIndex + 1)
+      _timeline.value = _timeline.value.copy(stickerClips = list)
+      return true
+    }
+    return false
+  }
+
+  fun sendLayerBackward(clipId: String): Boolean {
+    recordHistory()
+    // 1. Text Clips
+    val textIndex = _timeline.value.textClips.indexOfFirst { it.id == clipId }
+    if (textIndex > 0) {
+      val list = _timeline.value.textClips.toMutableList()
+      java.util.Collections.swap(list, textIndex, textIndex - 1)
+      _timeline.value = _timeline.value.copy(textClips = list)
+      return true
+    }
+    // 2. Overlay Clips
+    val overlayIndex = _timeline.value.overlayClips.indexOfFirst { it.id == clipId }
+    if (overlayIndex > 0) {
+      val list = _timeline.value.overlayClips.toMutableList()
+      java.util.Collections.swap(list, overlayIndex, overlayIndex - 1)
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+      return true
+    }
+    // 3. Sticker Clips
+    val stickerIndex = _timeline.value.stickerClips.indexOfFirst { it.id == clipId }
+    if (stickerIndex > 0) {
+      val list = _timeline.value.stickerClips.toMutableList()
+      java.util.Collections.swap(list, stickerIndex, stickerIndex - 1)
+      _timeline.value = _timeline.value.copy(stickerClips = list)
+      return true
+    }
+    return false
+  }
+
+  fun bringLayerToFront(clipId: String): Boolean {
+    recordHistory()
+    val textClip = _timeline.value.textClips.find { it.id == clipId }
+    if (textClip != null) {
+      val list = _timeline.value.textClips.filter { it.id != clipId }.toMutableList()
+      list.add(textClip)
+      _timeline.value = _timeline.value.copy(textClips = list)
+      return true
+    }
+    val overlayClip = _timeline.value.overlayClips.find { it.id == clipId }
+    if (overlayClip != null) {
+      val list = _timeline.value.overlayClips.filter { it.id != clipId }.toMutableList()
+      list.add(overlayClip)
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+      return true
+    }
+    val stickerClip = _timeline.value.stickerClips.find { it.id == clipId }
+    if (stickerClip != null) {
+      val list = _timeline.value.stickerClips.filter { it.id != clipId }.toMutableList()
+      list.add(stickerClip)
+      _timeline.value = _timeline.value.copy(stickerClips = list)
+      return true
+    }
+    return false
+  }
+
+  fun sendLayerToBack(clipId: String): Boolean {
+    recordHistory()
+    val textClip = _timeline.value.textClips.find { it.id == clipId }
+    if (textClip != null) {
+      val list = _timeline.value.textClips.filter { it.id != clipId }.toMutableList()
+      list.add(0, textClip)
+      _timeline.value = _timeline.value.copy(textClips = list)
+      return true
+    }
+    val overlayClip = _timeline.value.overlayClips.find { it.id == clipId }
+    if (overlayClip != null) {
+      val list = _timeline.value.overlayClips.filter { it.id != clipId }.toMutableList()
+      list.add(0, overlayClip)
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+      return true
+    }
+    val stickerClip = _timeline.value.stickerClips.find { it.id == clipId }
+    if (stickerClip != null) {
+      val list = _timeline.value.stickerClips.filter { it.id != clipId }.toMutableList()
+      list.add(0, stickerClip)
+      _timeline.value = _timeline.value.copy(stickerClips = list)
+      return true
+    }
+    return false
+  }
+
+  fun toggleClipLock(clipId: String) {
+    recordHistory()
+    if (_timeline.value.textClips.any { it.id == clipId }) {
+      val list = _timeline.value.textClips.map {
+        if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it
+      }
+      _timeline.value = _timeline.value.copy(textClips = list)
+    } else if (_timeline.value.overlayClips.any { it.id == clipId }) {
+      val list = _timeline.value.overlayClips.map {
+        if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it
+      }
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+    } else if (_timeline.value.stickerClips.any { it.id == clipId }) {
+      val list = _timeline.value.stickerClips.map {
+        if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it
+      }
+      _timeline.value = _timeline.value.copy(stickerClips = list)
+    } else if (_timeline.value.videoClips.any { it.id == clipId }) {
+      val list = _timeline.value.videoClips.map {
+        if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it
+      }
+      _timeline.value = _timeline.value.copy(videoClips = list)
+    } else if (_timeline.value.audioClips.any { it.id == clipId }) {
+      val list = _timeline.value.audioClips.map {
+        if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it
+      }
+      _timeline.value = _timeline.value.copy(audioClips = list)
+    } else if (_timeline.value.effectClips.any { it.id == clipId }) {
+      val list = _timeline.value.effectClips.map {
+        if (it.id == clipId) it.copy(isLocked = !it.isLocked) else it
+      }
+      _timeline.value = _timeline.value.copy(effectClips = list)
+    }
+  }
+
+  fun toggleClipHide(clipId: String) {
+    recordHistory()
+    if (_timeline.value.textClips.any { it.id == clipId }) {
+      val list = _timeline.value.textClips.map {
+        if (it.id == clipId) it.copy(isHidden = !it.isHidden) else it
+      }
+      _timeline.value = _timeline.value.copy(textClips = list)
+    } else if (_timeline.value.overlayClips.any { it.id == clipId }) {
+      val list = _timeline.value.overlayClips.map {
+        if (it.id == clipId) it.copy(isHidden = !it.isHidden) else it
+      }
+      _timeline.value = _timeline.value.copy(overlayClips = list)
+    } else if (_timeline.value.stickerClips.any { it.id == clipId }) {
+      val list = _timeline.value.stickerClips.map {
+        if (it.id == clipId) it.copy(isHidden = !it.isHidden) else it
+      }
+      _timeline.value = _timeline.value.copy(stickerClips = list)
+    } else if (_timeline.value.videoClips.any { it.id == clipId }) {
+      val list = _timeline.value.videoClips.map {
+        if (it.id == clipId) it.copy(isHidden = !it.isHidden) else it
+      }
+      _timeline.value = _timeline.value.copy(videoClips = list)
+    } else if (_timeline.value.audioClips.any { it.id == clipId }) {
+      val list = _timeline.value.audioClips.map {
+        if (it.id == clipId) it.copy(isHidden = !it.isHidden) else it
+      }
+      _timeline.value = _timeline.value.copy(audioClips = list)
+    } else if (_timeline.value.effectClips.any { it.id == clipId }) {
+      val list = _timeline.value.effectClips.map {
+        if (it.id == clipId) it.copy(isHidden = !it.isHidden) else it
+      }
+      _timeline.value = _timeline.value.copy(effectClips = list)
+    }
+  }
+
   // --- Transitions ---
 
   private val _selectedTransitionCutIndex = MutableStateFlow<Int>(0)

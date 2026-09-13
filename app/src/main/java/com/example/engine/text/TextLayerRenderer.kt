@@ -332,7 +332,7 @@ object TextLayerRenderer {
     context: Context
   ) {
     val rawText = if (clip.isAllCaps) state.visibleText.uppercase() else state.visibleText
-    if (state.opacity <= 0f || rawText.isEmpty()) return
+    if (clip.isHidden || state.opacity <= 0f || rawText.isEmpty()) return
 
     // Reference scaling base (360 width standard)
     val scaleFactor = width.toFloat() / 360f
@@ -516,11 +516,7 @@ object TextLayerRenderer {
       )
     } else {
       paint.shader = null
-      paint.color = if (clip.subtitleStyle.equals("Bold", true) && clip.textColor == 0xFFFFFFFF) {
-        0xFFFFE600.toInt() // Vibrant yellow for bold captions
-      } else {
-        clip.textColor.toInt()
-      }
+      paint.color = clip.textColor.toInt()
     }
 
     paint.style = Paint.Style.FILL

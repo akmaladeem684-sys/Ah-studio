@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -147,23 +148,33 @@ fun HomeTemplatesTabView(
     )
 
     // Filter Chips
-    Row(
+    val filterCategories = remember {
+      listOf("All", "Reels", "TikTok", "Shorts", "YouTube", "Instagram", "Business", "Product Ads", "Birthday", "Wedding", "Travel", "Cinematic", "Saved")
+    }
+
+    LazyRow(
       modifier = Modifier
         .fillMaxWidth()
         .padding(bottom = 12.dp),
       horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      listOf("All", "Reels", "TikTok", "Shorts", "Saved").forEach { filterName ->
+      items(filterCategories) { filterName ->
         val isSelected = selectedFilter == filterName
+        val count = when (filterName) {
+          "Saved" -> savedTemplateIds.size
+          "All" -> firebaseTemplates.size
+          else -> firebaseTemplates.count { it.category.contains(filterName, ignoreCase = true) }
+        }
+
         FilterChip(
           selected = isSelected,
           onClick = { selectedFilter = filterName },
           label = {
             Text(
               text = when (filterName) {
-                "Saved" -> "⭐ Saved (${savedTemplateIds.size})"
-                "All" -> "All Templates (${firebaseTemplates.size})"
-                else -> filterName
+                "Saved" -> "⭐ Saved ($count)"
+                "All" -> "All ($count)"
+                else -> "$filterName ($count)"
               },
               fontSize = 12.sp,
               fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium

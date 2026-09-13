@@ -1009,6 +1009,18 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     return com.example.engine.plugin.PluginManager.uninstallPlugin(getApplication(), pluginId)
   }
 
+  // ==========================================
+  // Multi-Layer Operations (Z-Index, Lock, Hide, Duplicate, Delete)
+  // ==========================================
+  fun bringLayerForward(clipId: String): Boolean = timelineEngine.bringLayerForward(clipId)
+  fun sendLayerBackward(clipId: String): Boolean = timelineEngine.sendLayerBackward(clipId)
+  fun bringLayerToFront(clipId: String): Boolean = timelineEngine.bringLayerToFront(clipId)
+  fun sendLayerToBack(clipId: String): Boolean = timelineEngine.sendLayerToBack(clipId)
+  fun toggleClipLock(clipId: String) = timelineEngine.toggleClipLock(clipId)
+  fun toggleClipHide(clipId: String) = timelineEngine.toggleClipHide(clipId)
+  fun duplicateClip(clipId: String): Boolean = timelineEngine.duplicateClips(setOf(clipId))
+  fun deleteClip(clipId: String): Boolean = timelineEngine.deleteClips(setOf(clipId))
+
   override fun onCleared() {
     super.onCleared()
     playbackJob?.cancel()

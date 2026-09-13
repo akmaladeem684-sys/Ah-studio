@@ -261,7 +261,9 @@ data class VideoClip(
   val animation: ClipAnimationSettings = ClipAnimationSettings(),
   val mask: MaskSettings = MaskSettings(),
   val speedCurve: SpeedCurve = SpeedCurve(),
-  val audioEffects: AudioEffectsSettings = AudioEffectsSettings()
+  val audioEffects: AudioEffectsSettings = AudioEffectsSettings(),
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false
 ) {
   val totalMediaDurationMs: Long
     get() = if (sourceTotalDurationMs > 0L) sourceTotalDurationMs else maxOf(sourceEndMs, durationMs)
@@ -318,7 +320,9 @@ data class AudioClip(
   val isReversed: Boolean = false,
   val keyframes: List<ClipKeyframe> = emptyList(),
   val speedCurve: SpeedCurve = SpeedCurve(),
-  val audioEffects: AudioEffectsSettings = AudioEffectsSettings()
+  val audioEffects: AudioEffectsSettings = AudioEffectsSettings(),
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false
 )
 
 data class WordTiming(
@@ -376,7 +380,9 @@ data class TextClip(
   val animationEasing: String = "Ease Out",
   val subtitleStyle: String = "Classic", // "Classic", "Bold", "HighlightWord", "Karaoke", "Animated"
   val highlightColor: Long = 0xFFFFEB3B,
-  val words: List<WordTiming> = emptyList()
+  val words: List<WordTiming> = emptyList(),
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false
 )
 
 enum class StickerAnimationType(val displayName: String) {
@@ -429,7 +435,9 @@ data class StickerClip(
   val opacity: Float = 1f,
   val animationType: StickerAnimationType = StickerAnimationType.NONE,
   val badgeType: BadgeType? = null,
-  val category: String = "Emoji & Emotions"
+  val category: String = "Emoji & Emotions",
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false
 )
 
 enum class EffectType(val category: String, val displayName: String) {
@@ -538,7 +546,9 @@ data class EffectClip(
   val keyframes: List<ClipKeyframe> = emptyList(),
   val customName: String = "",
   val effectCategory: String = "Video Effects",
-  val targetClipId: String? = null
+  val targetClipId: String? = null,
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false
 )
 
 enum class TransitionType(val displayName: String) {

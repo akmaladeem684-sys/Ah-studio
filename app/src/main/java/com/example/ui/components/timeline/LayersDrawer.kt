@@ -1,5 +1,6 @@
 package com.example.ui.components.timeline
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,7 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,56 +20,138 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.domain.model.EffectClip
+import com.example.domain.model.StickerClip
+import com.example.domain.model.TextClip
 import com.example.domain.model.Timeline
 import com.example.domain.model.TrackHeight
 import com.example.domain.model.TrackSettings
 import com.example.domain.model.TrackType
+import com.example.domain.model.VideoClip
+import com.example.engine.SelectedTrackElement
 import com.example.ui.theme.*
 
 /**
- * Collapsible Left Layers Drawer / Overlay for AH Video Studio.
+ * Unified Layer Representation for Z-Index ordering in the Layers Manager.
+ */
+sealed class LayerItem {
+  abstract val id: String
+  abstract val name: String
+  abstract val trackType: TrackType
+  abstract val isLocked: Boolean
+  abstract val isHidden: Boolean
+
+  data class TextLayer(val clip: TextClip) : LayerItem() {
+    override val id: String = clip.id
+    override val name: String = if (clip.text.isNotBlank()) clip.text else "Text Layer"
+    override val trackType: TrackType = TrackType.TEXT
+    override val isLocked: Boolean = clip.isLocked
+    override val isHidden: Boolean = clip.isHidden
+  }
+
+  data class StickerLayer(val clip: StickerClip) : LayerItem() {
+    override val id: String = clip.id
+    override val name: String = clip.badgeType?.name ?: "Sticker Layer"
+    override val trackType: TrackType = TrackType.STICKER
+    override val isLocked: Boolean = clip.isLocked
+    override val isHidden: Boolean = clip.isHidden
+  }
+
+  data class OverlayLayer(val clip: VideoClip) : LayerItem() {
+    override val id: String = clip.id
+    override val name: String = clip.name
+    override val trackType: TrackType = TrackType.OVERLAY
+    override val isLocked: Boolean = clip.isLocked
+    override val isHidden: Boolean = clip.isHidden
+  }
+
+  data class VideoLayer(val clip: VideoClip) : LayerItem() {
+    override val id: String = clip.id
+    override val name: String = clip.name
+    override val trackType: TrackType = TrackType.MAIN_VIDEO
+    override val isLocked: Boolean = clip.isLocked
+    override val isHidden: Boolean = clip.isHidden
+  }
+
+  data class EffectLayer(val clip: EffectClip) : LayerItem() {
+    override val id: String = clip.id
+    override val name: String = clip.customName.ifEmpty { clip.effectType.displayName }
+    override val trackType: TrackType = TrackType.EFFECT
+    override val isLocked: Boolean = clip.isLocked
+    override val isHidden: Boolean = clip.isHidden
+  }
+}
+
+/**
+ * Dedicated Multi-Layer Manager & Track Inspector Drawer for AH Video Studio.
  *
- * Displays all 5 primary project layers:
- * - V1 Main
- * - V2 Overlay
- * - T1 Subtitle
- * - A1 Master
- * - S1 Sticker
- * (plus FX Filter track)
- *
- * Provides full control over Lock, Visibility/Hide, Mute, Solo, and Height.
+ * Supports:
+ * - Full visual Z-index layer order representation (Text, Sticker, Overlay, Video, FX).
+ * - Individual layer selection, reordering (Bring Forward, Send Backward, Bring to Front, Send to Back).
+ * - Individual visibility (Eye toggle) and Lock toggle.
+ * - Single-tap duplicate and delete per layer.
+ * - Track-level master Lock, Visibility, Mute, Solo, and Height controls.
  */
 @Composable
 fun LayersDrawer(
   timeline: Timeline,
-  onToggleTrackLock: (TrackType) -> Unit,
-  onToggleTrackHide: (TrackType) -> Unit,
-  onToggleTrackMute: (TrackType) -> Unit,
-  onToggleTrackSolo: (TrackType) -> Unit,
-  onCycleTrackHeight: (TrackType) -> Unit,
+  selectedElement: SelectedTrackElement = SelectedTrackElement.None,
+  onSelectElement: (SelectedTrackElement) -> Unit = {},
+  onBringLayerForward: (String) -> Unit = {},
+  onSendLayerBackward: (String) -> Unit = {},
+  onBringLayerToFront: (String) -> Unit = {},
+  onSendLayerToBack: (String) -> Unit = {},
+  onToggleClipLock: (String) -> Unit = {},
+  onToggleClipHide: (String) -> Unit = {},
+  onDuplicateClip: (String) -> Unit = {},
+  onDeleteClip: (String) -> Unit = {},
+  onToggleTrackLock: (TrackType) -> Unit = {},
+  onToggleTrackHide: (TrackType) -> Unit = {},
+  onToggleTrackMute: (TrackType) -> Unit = {},
+  onToggleTrackSolo: (TrackType) -> Unit = {},
+  onCycleTrackHeight: (TrackType) -> Unit = {},
   onClose: () -> Unit,
   modifier: Modifier = Modifier
 ) {
-  val layersList = listOf(
-    TrackType.MAIN_VIDEO,
-    TrackType.OVERLAY,
+  var activeTab by remember { mutableIntStateOf(0) }
+
+  // Build Z-Index Layer Stack (Top-to-Bottom: Text -> Sticker -> Overlay -> FX -> Main Video)
+  val allLayers = remember(timeline) {
+    val list = mutableListOf<LayerItem>()
+    // Text layers are rendered on top
+    timeline.textClips.reversed().forEach { list.add(LayerItem.TextLayer(it)) }
+    // Sticker layers
+    timeline.stickerClips.reversed().forEach { list.add(LayerItem.StickerLayer(it)) }
+    // Overlay (PIP) layers
+    timeline.overlayClips.reversed().forEach { list.add(LayerItem.OverlayLayer(it)) }
+    // Effect layers
+    timeline.effectClips.reversed().forEach { list.add(LayerItem.EffectLayer(it)) }
+    // Main video clips
+    timeline.videoClips.reversed().forEach { list.add(LayerItem.VideoLayer(it)) }
+    list
+  }
+
+  val trackTypesList = listOf(
     TrackType.TEXT,
-    TrackType.AUDIO,
     TrackType.STICKER,
+    TrackType.OVERLAY,
+    TrackType.MAIN_VIDEO,
+    TrackType.AUDIO,
     TrackType.EFFECT
   )
 
   Surface(
     modifier = modifier
-      .width(280.dp)
+      .width(320.dp)
       .fillMaxHeight()
       .clip(RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp))
       .border(1.dp, StudioBorder, RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp)),
     color = StudioSurface,
     tonalElevation = 8.dp,
-    shadowElevation = 12.dp
+    shadowElevation = 16.dp
   ) {
     Column(
       modifier = Modifier
@@ -79,7 +162,7 @@ fun LayersDrawer(
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(bottom = 12.dp),
+          .padding(bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
@@ -93,7 +176,7 @@ fun LayersDrawer(
           ) {
             Icon(
               imageVector = Icons.Default.Layers,
-              contentDescription = "Layers",
+              contentDescription = "Layers Manager",
               tint = CyanAccent,
               modifier = Modifier.size(18.dp)
             )
@@ -101,7 +184,7 @@ fun LayersDrawer(
           Spacer(modifier = Modifier.width(10.dp))
           Column {
             Text(
-              text = "Track Layers",
+              text = "Multi-Layer Studio",
               style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
@@ -109,7 +192,7 @@ fun LayersDrawer(
               )
             )
             Text(
-              text = "5 Multi-Tracks Active",
+              text = "${allLayers.size} Layers (${allLayers.count { !it.isHidden }} Visible)",
               style = MaterialTheme.typography.bodySmall.copy(
                 color = TextSecondary,
                 fontSize = 11.sp
@@ -133,34 +216,134 @@ fun LayersDrawer(
         }
       }
 
-      HorizontalDivider(color = StudioBorder, thickness = 1.dp)
-
-      Spacer(modifier = Modifier.height(10.dp))
-
-      // List of Layer Cards
-      LazyColumn(
-        modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+      // Tab switcher: Z-Index Layers vs Track Controls
+      TabRow(
+        selectedTabIndex = activeTab,
+        containerColor = StudioDarkBg,
+        contentColor = CyanAccent,
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(8.dp))
+          .padding(bottom = 8.dp)
       ) {
-        items(layersList) { trackType ->
-          val settings = timeline.trackSettings[trackType] ?: TrackSettings(trackType)
-          LayerCardItem(
-            trackType = trackType,
-            settings = settings,
-            clipCount = when (trackType) {
-              TrackType.MAIN_VIDEO -> timeline.videoClips.size
-              TrackType.OVERLAY -> timeline.overlayClips.size
-              TrackType.TEXT -> timeline.textClips.size
-              TrackType.AUDIO -> timeline.audioClips.size
-              TrackType.STICKER -> timeline.stickerClips.size
-              TrackType.EFFECT -> timeline.effectClips.size
-            },
-            onToggleLock = { onToggleTrackLock(trackType) },
-            onToggleHide = { onToggleTrackHide(trackType) },
-            onToggleMute = { onToggleTrackMute(trackType) },
-            onToggleSolo = { onToggleTrackSolo(trackType) },
-            onCycleHeight = { onCycleTrackHeight(trackType) }
-          )
+        Tab(
+          selected = activeTab == 0,
+          onClick = { activeTab = 0 },
+          text = {
+            Text(
+              text = "Z-Index Layers (${allLayers.size})",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            )
+          }
+        )
+        Tab(
+          selected = activeTab == 1,
+          onClick = { activeTab = 1 },
+          text = {
+            Text(
+              text = "Track Controls",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            )
+          }
+        )
+      }
+
+      HorizontalDivider(color = StudioBorder, thickness = 1.dp)
+      Spacer(modifier = Modifier.height(8.dp))
+
+      if (activeTab == 0) {
+        // Tab 0: Individual Layer Cards sorted by Z-Index (Top to Bottom)
+        if (allLayers.isEmpty()) {
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+          ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+              Icon(
+                Icons.Default.LayersClear,
+                contentDescription = null,
+                tint = TextTertiary,
+                modifier = Modifier.size(40.dp)
+              )
+              Spacer(modifier = Modifier.height(8.dp))
+              Text(
+                text = "No active layers on canvas",
+                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+              )
+            }
+          }
+        } else {
+          LazyColumn(
+            modifier = Modifier
+              .weight(1f)
+              .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            items(allLayers, key = { it.id }) { layer ->
+              val isSelected = when (selectedElement) {
+                is SelectedTrackElement.Text -> (layer is LayerItem.TextLayer) && selectedElement.clipId == layer.id
+                is SelectedTrackElement.Sticker -> (layer is LayerItem.StickerLayer) && selectedElement.clipId == layer.id
+                is SelectedTrackElement.Overlay -> (layer is LayerItem.OverlayLayer) && selectedElement.clipId == layer.id
+                is SelectedTrackElement.Video -> (layer is LayerItem.VideoLayer) && selectedElement.clipId == layer.id
+                is SelectedTrackElement.Effect -> (layer is LayerItem.EffectLayer) && selectedElement.clipId == layer.id
+                else -> false
+              }
+
+              IndividualLayerRow(
+                layer = layer,
+                isSelected = isSelected,
+                onSelect = {
+                  val element = when (layer) {
+                    is LayerItem.TextLayer -> SelectedTrackElement.Text(layer.id)
+                    is LayerItem.StickerLayer -> SelectedTrackElement.Sticker(layer.id)
+                    is LayerItem.OverlayLayer -> SelectedTrackElement.Overlay(layer.id)
+                    is LayerItem.VideoLayer -> SelectedTrackElement.Video(layer.id)
+                    is LayerItem.EffectLayer -> SelectedTrackElement.Effect(layer.id)
+                  }
+                  onSelectElement(element)
+                },
+                onBringForward = { onBringLayerForward(layer.id) },
+                onSendBackward = { onSendLayerBackward(layer.id) },
+                onBringToFront = { onBringLayerToFront(layer.id) },
+                onSendToBack = { onSendLayerToBack(layer.id) },
+                onToggleLock = { onToggleClipLock(layer.id) },
+                onToggleHide = { onToggleClipHide(layer.id) },
+                onDuplicate = { onDuplicateClip(layer.id) },
+                onDelete = { onDeleteClip(layer.id) }
+              )
+            }
+          }
+        }
+      } else {
+        // Tab 1: Master Track Controls
+        LazyColumn(
+          modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          items(trackTypesList) { trackType ->
+            val settings = timeline.trackSettings[trackType] ?: TrackSettings(trackType)
+            LayerCardItem(
+              trackType = trackType,
+              settings = settings,
+              clipCount = when (trackType) {
+                TrackType.MAIN_VIDEO -> timeline.videoClips.size
+                TrackType.OVERLAY -> timeline.overlayClips.size
+                TrackType.TEXT -> timeline.textClips.size
+                TrackType.AUDIO -> timeline.audioClips.size
+                TrackType.STICKER -> timeline.stickerClips.size
+                TrackType.EFFECT -> timeline.effectClips.size
+              },
+              onToggleLock = { onToggleTrackLock(trackType) },
+              onToggleHide = { onToggleTrackHide(trackType) },
+              onToggleMute = { onToggleTrackMute(trackType) },
+              onToggleSolo = { onToggleTrackSolo(trackType) },
+              onCycleHeight = { onCycleTrackHeight(trackType) }
+            )
+          }
         }
       }
 
@@ -177,19 +360,234 @@ fun LayersDrawer(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Icon(
-            Icons.Default.Info,
+            Icons.Default.TouchApp,
             contentDescription = null,
             tint = CyanAccent,
             modifier = Modifier.size(16.dp)
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = "Tap outside or toggle header to close layers panel.",
+            text = "Tap any layer to make it active on canvas.",
             style = MaterialTheme.typography.labelSmall.copy(
               color = TextSecondary,
               fontSize = 11.sp
             )
           )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Individual Interactive Layer Card with quick action buttons.
+ */
+@Composable
+private fun IndividualLayerRow(
+  layer: LayerItem,
+  isSelected: Boolean,
+  onSelect: () -> Unit,
+  onBringForward: () -> Unit,
+  onSendBackward: () -> Unit,
+  onBringToFront: () -> Unit,
+  onSendToBack: () -> Unit,
+  onToggleLock: () -> Unit,
+  onToggleHide: () -> Unit,
+  onDuplicate: () -> Unit,
+  onDelete: () -> Unit
+) {
+  val (trackLabel, icon, badgeColor) = when (layer) {
+    is LayerItem.TextLayer -> Triple("TEXT", Icons.Default.TextFields, TextTrackColor)
+    is LayerItem.StickerLayer -> Triple("STICKER", Icons.Default.EmojiEmotions, StickerTrackColor)
+    is LayerItem.OverlayLayer -> Triple("PIP", Icons.Default.Layers, OverlayTrackColor)
+    is LayerItem.VideoLayer -> Triple("VIDEO", Icons.Default.Movie, VideoTrackColor)
+    is LayerItem.EffectLayer -> Triple("FX", Icons.Default.AutoFixHigh, EffectTrackColor)
+  }
+
+  val backgroundColor by animateColorAsState(
+    if (isSelected) SkyBlueContainer.copy(alpha = 0.5f) else Color.White,
+    label = "layerBg"
+  )
+
+  val borderColor = if (isSelected) CyanAccent else StudioBorder
+
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .border(if (isSelected) 1.5.dp else 0.5.dp, borderColor, RoundedCornerShape(10.dp))
+      .clickable(onClick = onSelect)
+      .testTag("layer_item_${layer.id}"),
+    color = backgroundColor,
+    tonalElevation = if (isSelected) 4.dp else 1.dp
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(8.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.weight(1f)
+        ) {
+          // Track Type Badge
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(badgeColor)
+              .padding(horizontal = 5.dp, vertical = 2.dp)
+          ) {
+            Text(
+              text = trackLabel,
+              style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+              )
+            )
+          }
+
+          Spacer(modifier = Modifier.width(6.dp))
+
+          // Layer Title
+          Text(
+            text = layer.name,
+            style = MaterialTheme.typography.bodyMedium.copy(
+              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+              color = if (layer.isHidden) TextTertiary else TextPrimary,
+              fontSize = 12.sp
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+
+        // Lock / Hide Status Icons
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          // Lock Button
+          IconButton(
+            onClick = onToggleLock,
+            modifier = Modifier.size(24.dp).testTag("layer_lock_${layer.id}")
+          ) {
+            Icon(
+              imageVector = if (layer.isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+              contentDescription = "Lock",
+              tint = if (layer.isLocked) RedAccent else TextSecondary,
+              modifier = Modifier.size(14.dp)
+            )
+          }
+
+          // Hide / Eye Button
+          IconButton(
+            onClick = onToggleHide,
+            modifier = Modifier.size(24.dp).testTag("layer_hide_${layer.id}")
+          ) {
+            Icon(
+              imageVector = if (layer.isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+              contentDescription = "Visibility",
+              tint = if (layer.isHidden) AmberAccent else TextSecondary,
+              modifier = Modifier.size(14.dp)
+            )
+          }
+        }
+      }
+
+      // Quick Actions Row (Reorder Up/Down, Duplicate, Delete)
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          // Bring Forward
+          IconButton(
+            onClick = onBringForward,
+            modifier = Modifier.size(22.dp).testTag("layer_up_${layer.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.ArrowUpward,
+              contentDescription = "Bring Forward",
+              tint = TextSecondary,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+
+          // Send Backward
+          IconButton(
+            onClick = onSendBackward,
+            modifier = Modifier.size(22.dp).testTag("layer_down_${layer.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.ArrowDownward,
+              contentDescription = "Send Backward",
+              tint = TextSecondary,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+
+          // Bring to Front
+          IconButton(
+            onClick = onBringToFront,
+            modifier = Modifier.size(22.dp).testTag("layer_top_${layer.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.VerticalAlignTop,
+              contentDescription = "Bring to Top",
+              tint = TextSecondary,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+
+          // Send to Back
+          IconButton(
+            onClick = onSendToBack,
+            modifier = Modifier.size(22.dp).testTag("layer_bottom_${layer.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.VerticalAlignBottom,
+              contentDescription = "Send to Bottom",
+              tint = TextSecondary,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          // Duplicate
+          IconButton(
+            onClick = onDuplicate,
+            modifier = Modifier.size(22.dp).testTag("layer_duplicate_${layer.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.ContentCopy,
+              contentDescription = "Duplicate Layer",
+              tint = TextSecondary,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+
+          // Delete
+          IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(22.dp).testTag("layer_delete_${layer.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Delete,
+              contentDescription = "Delete Layer",
+              tint = RedAccent,
+              modifier = Modifier.size(13.dp)
+            )
+          }
         }
       }
     }
@@ -223,13 +621,9 @@ private fun LayerCardItem(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .border(
-        width = if (settings.isLocked) 1.5.dp else 1.dp,
-        color = if (settings.isLocked) RedAccent.copy(alpha = 0.4f) else StudioBorder,
-        shape = RoundedCornerShape(10.dp)
-      ),
-    color = if (settings.isLocked) StudioSurfaceVariant.copy(alpha = 0.7f) else StudioSurfaceVariant,
-    tonalElevation = 1.dp
+      .border(0.5.dp, StudioBorder, RoundedCornerShape(10.dp)),
+    color = Color.White,
+    tonalElevation = 2.dp
   ) {
     Row(
       modifier = Modifier
@@ -238,7 +632,7 @@ private fun LayerCardItem(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween
     ) {
-      // Left: Track Color Indicator + Icon + Label + Clip count
+      // Track Info
       Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.weight(1f)
@@ -247,13 +641,13 @@ private fun LayerCardItem(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(color.copy(alpha = 0.18f)),
+            .background(color),
           contentAlignment = Alignment.Center
         ) {
           Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = color,
+            tint = Color.White,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -265,21 +659,21 @@ private fun LayerCardItem(
             text = label,
             style = MaterialTheme.typography.bodyMedium.copy(
               fontWeight = FontWeight.Bold,
-              fontSize = 13.sp,
-              color = if (settings.isLocked) TextTertiary else TextPrimary
+              color = TextPrimary,
+              fontSize = 12.sp
             )
           )
           Text(
-            text = "$clipCount clip${if (clipCount == 1) "" else "s"}",
+            text = "$clipCount clips",
             style = MaterialTheme.typography.labelSmall.copy(
-              fontSize = 10.sp,
-              color = TextSecondary
+              color = TextSecondary,
+              fontSize = 10.sp
             )
           )
         }
       }
 
-      // Right: Action Buttons (Lock, Eye/Visibility, Mute, Solo, Height)
+      // Action Control Buttons
       Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)

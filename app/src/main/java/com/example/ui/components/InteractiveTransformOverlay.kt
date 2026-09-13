@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CropRotate
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.RestartAlt
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import com.example.ui.theme.AmberAccent
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.PurpleAccent
+import com.example.ui.theme.RedAccent
 import com.example.ui.theme.StudioBorder
 import com.example.ui.theme.TextPrimary
 import kotlin.math.abs
@@ -223,7 +225,7 @@ fun InteractiveTransformOverlay(
     if (parentWidthPx <= 0f || parentHeightPx <= 0f) return@BoxWithConstraints
 
     // 1. Render Active Overlays (PIP / Picture-in-Picture)
-    activeOverlays.forEach { overlay ->
+    activeOverlays.filter { !it.isHidden }.forEach { overlay ->
       val isSelected = selectedElement is SelectedTrackElement.Overlay &&
         (selectedElement as SelectedTrackElement.Overlay).clipId == overlay.id
 
@@ -258,10 +260,10 @@ fun InteractiveTransformOverlay(
           .background(Color(0xFF1E293B))
           .border(
             width = if (isSelected) 2.dp else 1.dp,
-            color = if (isSelected) AmberAccent else Color.White.copy(alpha = 0.5f),
+            color = if (isSelected) (if (overlay.isLocked) RedAccent else AmberAccent) else Color.White.copy(alpha = 0.5f),
             shape = RoundedCornerShape(8.dp)
           )
-          .pointerInput(overlay.id, kf.rotation, kf.scale) {
+          .pointerInput(overlay.id, kf.rotation, kf.scale, overlay.isLocked) {
             detectElementTouchGestures(
               rotationDegrees = kf.rotation,
               scale = kf.scale,
@@ -271,6 +273,7 @@ fun InteractiveTransformOverlay(
                 currentOnSelectElement(SelectedTrackElement.Overlay(currentOverlay.id))
               },
               onMoveDelta = { deltaNormX, deltaNormY ->
+                if (currentOverlay.isLocked) return@detectElementTouchGestures
                 val clip = currentOverlay
                 val rel = currentPosMs - clip.timelineStartMs
                 val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
@@ -290,7 +293,7 @@ fun InteractiveTransformOverlay(
                   currentOnUpdateOverlay(clip.copy(cropOffsetX = newX, cropOffsetY = newY))
                 }
               },
-              onTwoFingerTransform = { scaleFactor, rotDelta ->
+              onTwoFingerTransform = if (overlay.isLocked) null else { scaleFactor, rotDelta ->
                 val clip = currentOverlay
                 val rel = currentPosMs - clip.timelineStartMs
                 val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
@@ -337,11 +340,11 @@ fun InteractiveTransformOverlay(
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .background(AmberAccent)
+                .background(if (overlay.isLocked) RedAccent else AmberAccent)
                 .padding(horizontal = 4.dp, vertical = 2.dp)
             ) {
               Text(
-                text = "PIP",
+                text = if (overlay.isLocked) "LOCKED" else "PIP",
                 style = MaterialTheme.typography.labelSmall.copy(
                   fontSize = 8.sp,
                   fontWeight = FontWeight.Bold,
@@ -350,9 +353,9 @@ fun InteractiveTransformOverlay(
               )
             }
             Icon(
-              if (overlay.isVideo) Icons.Default.Movie else Icons.Default.Image,
+              if (overlay.isLocked) Icons.Default.Lock else if (overlay.isVideo) Icons.Default.Movie else Icons.Default.Image,
               contentDescription = null,
-              tint = AmberAccent,
+              tint = if (overlay.isLocked) RedAccent else AmberAccent,
               modifier = Modifier.size(14.dp)
             )
           }
@@ -370,7 +373,7 @@ fun InteractiveTransformOverlay(
       }
 
       // If Overlay is Selected, Render Interactive Transform Handles around it
-      if (isSelected) {
+      if (isSelected && !overlay.isLocked) {
         TransformHandlesBox(
           centerXPx = centerXPx,
           centerYPx = centerYPx,
@@ -394,7 +397,7 @@ fun InteractiveTransformOverlay(
     }
 
     // 2. Render Active Stickers
-    activeStickers.forEach { sticker ->
+    activeStickers.filter { !it.isHidden }.forEach { sticker ->
       val isSelected = selectedElement is SelectedTrackElement.Sticker &&
         (selectedElement as SelectedTrackElement.Sticker).clipId == sticker.id
 
@@ -424,10 +427,10 @@ fun InteractiveTransformOverlay(
           .rotate(animState.rotation)
           .border(
             width = if (isSelected) 2.dp else 0.dp,
-            color = if (isSelected) AmberAccent else Color.Transparent,
+            color = if (isSelected) (if (sticker.isLocked) RedAccent else AmberAccent) else Color.Transparent,
             shape = RoundedCornerShape(12.dp)
           )
-          .pointerInput(sticker.id, animState.rotation, animState.scale) {
+          .pointerInput(sticker.id, animState.rotation, animState.scale, sticker.isLocked) {
             detectElementTouchGestures(
               rotationDegrees = animState.rotation,
               scale = animState.scale,
@@ -437,12 +440,13 @@ fun InteractiveTransformOverlay(
                 currentOnSelectElement(SelectedTrackElement.Sticker(currentSticker.id))
               },
               onMoveDelta = { deltaNormX, deltaNormY ->
+                if (currentSticker.isLocked) return@detectElementTouchGestures
                 val clip = currentSticker
                 val newX = (clip.posX + deltaNormX).coerceIn(-1.8f, 1.8f)
                 val newY = (clip.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
                 currentOnUpdateSticker(clip.copy(posX = newX, posY = newY))
               },
-              onTwoFingerTransform = { scaleFactor, rotDelta ->
+              onTwoFingerTransform = if (sticker.isLocked) null else { scaleFactor, rotDelta ->
                 val clip = currentSticker
                 val newScale = (clip.scale * scaleFactor).coerceIn(0.15f, 8.0f)
                 val newRot = (clip.rotation + rotDelta) % 360f
@@ -469,7 +473,7 @@ fun InteractiveTransformOverlay(
         }
       }
 
-      if (isSelected) {
+      if (isSelected && !sticker.isLocked) {
         TransformHandlesBox(
           centerXPx = centerXPx,
           centerYPx = centerYPx,
@@ -493,7 +497,7 @@ fun InteractiveTransformOverlay(
     }
 
     // 3. Render Active Text Layers
-    activeTexts.forEach { textClip ->
+    activeTexts.filter { !it.isHidden }.forEach { textClip ->
       val isSelected = selectedElement is SelectedTrackElement.Text &&
         (selectedElement as SelectedTrackElement.Text).clipId == textClip.id
 
@@ -545,7 +549,7 @@ fun InteractiveTransformOverlay(
           )
           .size(currentWidthDp, currentHeightDp)
           .rotate(textClip.rotation)
-          .pointerInput(textClip.id, textClip.rotation, textClip.scale) {
+          .pointerInput(textClip.id, textClip.rotation, textClip.scale, textClip.isLocked) {
             detectElementTouchGestures(
               rotationDegrees = textClip.rotation,
               scale = textClip.scale,
@@ -555,12 +559,13 @@ fun InteractiveTransformOverlay(
                 currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
               },
               onMoveDelta = { deltaNormX, deltaNormY ->
+                if (currentTextClip.isLocked) return@detectElementTouchGestures
                 val clip = currentTextClip
                 val newX = (clip.posX + deltaNormX).coerceIn(-1.8f, 1.8f)
                 val newY = (clip.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
                 currentOnUpdateText(clip.copy(posX = newX, posY = newY))
               },
-              onTwoFingerTransform = { scaleFactor, rotDelta ->
+              onTwoFingerTransform = if (textClip.isLocked) null else { scaleFactor, rotDelta ->
                 val clip = currentTextClip
                 val newScale = (clip.scale * scaleFactor).coerceIn(0.15f, 8.0f)
                 val newRot = (clip.rotation + rotDelta) % 360f
@@ -571,14 +576,16 @@ fun InteractiveTransformOverlay(
               },
               onDoubleTap = {
                 currentOnSelectElement(SelectedTrackElement.Text(currentTextClip.id))
-                currentOnEditText?.invoke(currentTextClip)
+                if (!currentTextClip.isLocked) {
+                  currentOnEditText?.invoke(currentTextClip)
+                }
               }
             )
           }
       )
 
       // When text is selected: display Four-Corner Controls around selected text
-      if (isSelected) {
+      if (isSelected && !textClip.isLocked) {
         TextFourCornerControlsBox(
           centerXPx = centerXPx,
           centerYPx = centerYPx,
