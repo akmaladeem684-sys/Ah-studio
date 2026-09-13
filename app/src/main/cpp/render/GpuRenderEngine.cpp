@@ -234,6 +234,8 @@ void GpuRenderEngine::renderFrame(const std::vector<RenderLayer>& inputLayers) {
         }
     }
 
+    if (layers.empty()) return;
+
     // Deterministic sorting: Primary by zOrder, Secondary by LayerType priority
     std::stable_sort(layers.begin(), layers.end(), [](const RenderLayer& a, const RenderLayer& b) {
         if (a.zOrder != b.zOrder) {
@@ -242,10 +244,12 @@ void GpuRenderEngine::renderFrame(const std::vector<RenderLayer>& inputLayers) {
         return static_cast<int>(a.type) < static_cast<int>(b.type);
     });
 
-    // Configure GL Global State
+    // Configure GL Global State for Multi-Layer Rendering
     glUseProgram(mProgram);
     glBindVertexArray(mVao);
+    glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
 
     // Render each layer in sorted deterministic order
     for (const auto& layer : layers) {
@@ -310,19 +314,19 @@ GLuint GpuRenderEngine::endOffscreen() {
 void GpuRenderEngine::applyBlendMode(BlendMode blendMode) {
     switch (blendMode) {
         case BlendMode::NORMAL:
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
         case BlendMode::ADDITIVE:
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ONE);
             break;
         case BlendMode::MULTIPLY:
-            glBlendFunc(GL_DST_COLOR, GL_ZERO);
+            glBlendFuncSeparate(GL_DST_COLOR, GL_ZERO, GL_DST_ALPHA, GL_ZERO);
             break;
         case BlendMode::SCREEN:
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
         case BlendMode::PREMULTIPLIED:
-            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             break;
     }
 }

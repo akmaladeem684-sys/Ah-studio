@@ -27,6 +27,8 @@ fun AccurateTimecodeRuler(
   fps: Int = 30,
   isFrameSnapping: Boolean = false,
   onDoubleTapSnap: (() -> Unit)? = null,
+  onScrubStart: () -> Unit = {},
+  onScrubStop: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val msPerDp = msPerPixel
@@ -84,6 +86,7 @@ fun AccurateTimecodeRuler(
         detectDragGestures(
           onDragStart = { offset ->
             isScrubbing = true
+            onScrubStart()
             val xDp = offset.x / density.density
             val rawMs = (xDp * msPerDp).toLong().coerceIn(0L, safeTotalDuration)
             val targetMs = if (isFrameSnapping) {
@@ -94,9 +97,11 @@ fun AccurateTimecodeRuler(
           },
           onDragEnd = {
             isScrubbing = false
+            onScrubStop()
           },
           onDragCancel = {
             isScrubbing = false
+            onScrubStop()
           },
           onDrag = { change, _ ->
             change.consume()

@@ -11,12 +11,13 @@ import com.example.ui.components.navigation.NavItemThemes
 
 enum class TextSubTool(val label: String, val icon: ImageVector, val tag: String) {
   ADD_TEXT("Add Text", Icons.Default.TextFields, "subtool_add_text"),
-  AUTO_CAPTIONS("Auto Captions", Icons.Default.Subtitles, "subtool_auto_captions"),
+  AUTO_CAPTIONS("Auto Captions", Icons.Default.ClosedCaption, "subtool_auto_captions"),
   STICKERS("Stickers", Icons.Default.EmojiEmotions, "subtool_stickers"),
   DRAW("Draw", Icons.Default.Brush, "subtool_draw"),
+  INK_TEXT("Ink Text", Icons.Default.Create, "subtool_ink_text"),
   TEXT_TEMPLATES("Text Template", Icons.Default.AutoAwesome, "subtool_text_templates"),
-  TEXT_TO_AUDIO("Effects", Icons.Default.RecordVoiceOver, "subtool_text_to_audio"),
-  AUTO_LYRICS("Filters", Icons.Default.MusicNote, "subtool_auto_lyrics")
+  TEXT_TO_AUDIO("Text to Audio", Icons.Default.RecordVoiceOver, "subtool_text_to_audio"),
+  AUTO_LYRICS("Auto Lyrics", Icons.Default.MusicNote, "subtool_auto_lyrics")
 }
 
 @Composable
@@ -32,6 +33,7 @@ fun TextToolsSubBar(
       TextSubTool.AUTO_CAPTIONS -> NavItemThemes.Captions
       TextSubTool.STICKERS -> NavItemThemes.Stickers
       TextSubTool.DRAW -> NavItemThemes.DrawTheme
+      TextSubTool.INK_TEXT -> NavItemThemes.InkText
       TextSubTool.TEXT_TEMPLATES -> NavItemThemes.TextTemplateTheme
       TextSubTool.TEXT_TO_AUDIO -> NavItemThemes.Effects
       TextSubTool.AUTO_LYRICS -> NavItemThemes.Filters

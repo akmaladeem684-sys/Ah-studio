@@ -63,8 +63,12 @@ class VideoPlaybackEngine(
 
   // Scrubbing & Request Coalescing
   private var isScrubbingMode = false
+  private var wasPlayingBeforeScrub = false
+  private val seekSequence = AtomicLong(0L)
   private val pendingSeekPosUs = AtomicLong(-1L)
   private var coalescedSeekJob: Job? = null
+
+  val isScrubbing: Boolean get() = isScrubbingMode
 
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
   private var progressSyncJob: Job? = null
@@ -156,6 +160,79 @@ class VideoPlaybackEngine(
   }
 
   /**
+   * Smoothly initiates scrubbing mode: pauses playback cleanly if active, saving previous play state.
+   */
+  fun startScrubbing() {
+    if (_isPlaying.value || player.isPlaying) {
+      wasPlayingBeforeScrub = true
+      pause()
+    } else {
+      wasPlayingBeforeScrub = false
+    }
+    isScrubbingMode = true
+  }
+
+  /**
+   * Smoothly concludes scrubbing mode: executes final high-precision seek and resumes playback if playing before scrub.
+   */
+  fun stopScrubbing(finalPosMs: Long? = null) {
+    coalescedSeekJob?.cancel()
+    val targetPos = finalPosMs ?: currentPosMs
+    isScrubbingMode = false
+    val seq = proxyEngine?.nextSeekSequence() ?: seekSequence.incrementAndGet()
+
+    val boundedPos = targetPos.coerceIn(0L, currentTimeline.totalDurationMs)
+    currentPosMs = boundedPos
+
+    val active = findClipAt(boundedPos)
+    _activeClip.value = active
+
+    if (active != null && active.isVideo) {
+      val sourcePosMs = active.timelineToSourceMs(boundedPos)
+      ensureClipLoaded(active)
+      if (player.playbackState != Player.STATE_IDLE) {
+        player.seekTo(sourcePosMs)
+      }
+      proxyEngine?.requestFrameAsync(active, sourcePosMs, seq) { _, _ -> }
+    } else {
+      player.pause()
+    }
+
+    if (wasPlayingBeforeScrub) {
+      wasPlayingBeforeScrub = false
+      play()
+    }
+  }
+
+  /**
+   * High-performance scrub seek with 16ms request coalescing and nearest-frame fallback.
+   */
+  fun scrubTo(timelinePosMs: Long) {
+    if (!isScrubbingMode) {
+      startScrubbing()
+    }
+    val seq = proxyEngine?.nextSeekSequence() ?: seekSequence.incrementAndGet()
+    val boundedPos = timelinePosMs.coerceIn(0L, currentTimeline.totalDurationMs)
+    currentPosMs = boundedPos
+
+    val active = findClipAt(boundedPos)
+    _activeClip.value = active
+
+    if (active != null && active.isVideo) {
+      val sourcePosMs = active.timelineToSourceMs(boundedPos)
+
+      // Immediate nearest-frame fallback request for zero-lag UI/GL rendering
+      proxyEngine?.requestFrameAsync(active, sourcePosMs, seq) { _, _ -> }
+
+      // Coalesce rapid seek calls to maintain 60 FPS target
+      pendingSeekPosUs.set(sourcePosMs)
+      scheduleCoalescedSeek(active, sourcePosMs, seq)
+    } else {
+      player.pause()
+    }
+  }
+
+  /**
    * Seeks to a specific timeline position. Supports request coalescing during rapid scrubbing.
    */
   fun seekTo(timelinePosMs: Long) {
@@ -166,7 +243,12 @@ class VideoPlaybackEngine(
    * Overloaded seekTo with scrubbing mode support.
    */
   fun seekTo(timelinePosMs: Long, isScrubbing: Boolean) {
-    this.isScrubbingMode = isScrubbing
+    if (isScrubbing) {
+      scrubTo(timelinePosMs)
+      return
+    }
+    this.isScrubbingMode = false
+    val seq = proxyEngine?.nextSeekSequence() ?: seekSequence.incrementAndGet()
     val boundedPos = timelinePosMs.coerceIn(0L, currentTimeline.totalDurationMs)
     currentPosMs = boundedPos
 
@@ -175,22 +257,15 @@ class VideoPlaybackEngine(
 
     if (active != null && active.isVideo) {
       val sourcePosMs = active.timelineToSourceMs(boundedPos)
-
-      if (isScrubbing) {
-        // Coalesce rapid seek calls to maintain 60 FPS target
-        pendingSeekPosUs.set(sourcePosMs)
-        scheduleCoalescedSeek(active, sourcePosMs)
-      } else {
-        // Direct immediate seek for non-scrubbing events (jump / touch release)
-        coalescedSeekJob?.cancel()
-        syncWithPosition(boundedPos, forceReload = false)
-      }
+      coalescedSeekJob?.cancel()
+      syncWithPosition(boundedPos, forceReload = false)
+      proxyEngine?.requestFrameAsync(active, sourcePosMs, seq) { _, _ -> }
     } else {
       player.pause()
     }
   }
 
-  private fun scheduleCoalescedSeek(clip: VideoClip, targetSourcePosMs: Long) {
+  private fun scheduleCoalescedSeek(clip: VideoClip, targetSourcePosMs: Long, sequence: Long = 0L) {
     if (coalescedSeekJob?.isActive == true) {
       return
     }
@@ -198,11 +273,14 @@ class VideoPlaybackEngine(
     coalescedSeekJob = scope.launch {
       delay(FRAME_INTERVAL_60FPS_MS) // 16ms window to throttle rapid touch drag events
       val latestPos = pendingSeekPosUs.getAndSet(-1L)
-      if (latestPos >= 0L) {
+      val currentSeq = proxyEngine?.getCurrentSequence() ?: seekSequence.get()
+
+      if (latestPos >= 0L && sequence >= currentSeq) {
         ensureClipLoaded(clip)
         if (player.playbackState != Player.STATE_IDLE) {
           player.seekTo(latestPos)
         }
+        proxyEngine?.requestFrameAsync(clip, latestPos, sequence) { _, _ -> }
         // Asynchronously prefetch surrounding proxy frames in background
         proxyEngine?.prefetchFramesAround(clip, latestPos, 1500L)
       }

@@ -245,7 +245,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // Sync seeking from timeline UI into playback engine
     viewModelScope.launch {
       timelineEngine.currentPositionMs.collectLatest { posMs ->
-        if (!isSyncingFromPlayback && !timelineEngine.isPlaying.value) {
+        if (!isSyncingFromPlayback && !timelineEngine.isPlaying.value && !playbackEngine.isScrubbing) {
           playbackEngine.seekTo(posMs)
         }
       }
@@ -260,6 +260,21 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
       timelineEngine.pause()
     }
     _currentScreen.value = screen
+  }
+
+  fun onScrubStart() {
+    playbackEngine.startScrubbing()
+  }
+
+  fun onScrubProgress(posMs: Long) {
+    timelineEngine.setPosition(posMs)
+    playbackEngine.scrubTo(posMs)
+  }
+
+  fun onScrubStop(posMs: Long? = null) {
+    val finalPos = posMs ?: timelineEngine.currentPositionMs.value
+    timelineEngine.setPosition(finalPos)
+    playbackEngine.stopScrubbing(finalPos)
   }
 
   fun setActiveToolbarTab(tab: EditorToolbarTab?) {
@@ -1028,6 +1043,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     playbackEngine.release()
     audioEngine.release()
     videoExporter.release()
+    proxyMediaEngine.release()
     compositionEngine.releaseGpu()
   }
 }

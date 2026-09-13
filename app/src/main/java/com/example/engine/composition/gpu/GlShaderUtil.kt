@@ -72,12 +72,17 @@ object GlShaderUtil {
   }
 
   fun uploadBitmapToTexture(bitmap: Bitmap, targetTexId: Int): Int {
+    if (bitmap.isRecycled) return targetTexId
     var texId = targetTexId
     if (texId == 0) {
       texId = createTexture(GLES20.GL_TEXTURE_2D)
     }
     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
-    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+    try {
+      GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to upload bitmap to OpenGL texture", e)
+    }
     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     return texId
   }

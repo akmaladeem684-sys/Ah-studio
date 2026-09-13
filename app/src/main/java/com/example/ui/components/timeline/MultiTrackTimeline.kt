@@ -154,6 +154,8 @@ fun MultiTrackTimeline(
   onToggleTracksSync: (() -> Unit)? = null,
   onMoveToPlayhead: (() -> Unit)? = null,
   onSplitAllTracks: (() -> Unit)? = null,
+  onScrubStart: () -> Unit = {},
+  onScrubStop: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val horizontalScrollState = rememberScrollState()
@@ -218,8 +220,8 @@ fun MultiTrackTimeline(
       timeline.stickerClips.isNotEmpty() ||
       timeline.effectClips.isNotEmpty()
 
-    val hasRightAddButton = hasAnyTrack && onAddMedia != null
-    val rightColumnWidthDp = if (hasRightAddButton) 60.dp else 0.dp
+    val hasRightAddButton = false
+    val rightColumnWidthDp = 0.dp
     val leftColumnWidthDp = if (hasAnyTrack) 88.dp else 0.dp
 
     val timelineViewportWidthDp = (maxWidth - leftColumnWidthDp - rightColumnWidthDp).coerceAtLeast(100.dp)
@@ -243,6 +245,8 @@ fun MultiTrackTimeline(
           onTogglePlayPause = onTogglePlayPause,
           onSeek = onSeek,
           onSeekToNextCut = onSeekToNextCut,
+          onScrubStart = onScrubStart,
+          onScrubStop = onScrubStop,
           onAddMedia = onAddMedia
         )
 
@@ -279,12 +283,15 @@ fun MultiTrackTimeline(
                     onDragStart = {
                       isTouchScrubbing = true
                       scrubAccumulatorMs = currentPosMs.toFloat()
+                      onScrubStart()
                     },
                     onDragEnd = {
                       isTouchScrubbing = false
+                      onScrubStop()
                     },
                     onDragCancel = {
                       isTouchScrubbing = false
+                      onScrubStop()
                     },
                     onDrag = { change, dragAmount ->
                       change.consume()
@@ -328,12 +335,12 @@ fun MultiTrackTimeline(
                         onSeek(clickedMs)
                       }
                     },
-                  verticalArrangement = Arrangement.spacedBy(8.dp)
+                  verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                   // ==========================================
-                  // 1. MAIN VIDEO TRACK (Filmstrip + Permanent Right-Side Add Media '+' Button)
+                  // 1. MAIN VIDEO TRACK (Filmstrip)
                   // ==========================================
-                  val videoTrackHeight = 64.dp
+                  val videoTrackHeight = 56.dp
                   val maxVideoEndMs = timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
                   val videoSequenceWidthDp = (maxVideoEndMs / msPerPixel).dp
 
@@ -541,10 +548,10 @@ fun MultiTrackTimeline(
                   }
 
                   // ==========================================
-                  // 2. OVERLAY / PIP TRACK (44.dp)
+                  // 2. OVERLAY / PIP TRACK (36.dp)
                   // ==========================================
                   if (timeline.overlayClips.isNotEmpty()) {
-                    val overlayTrackHeight = 44.dp
+                    val overlayTrackHeight = 36.dp
                     Box(
                       modifier = Modifier
                         .fillMaxWidth()
@@ -1239,6 +1246,8 @@ private fun TimelineRulerHeader(
   onTogglePlayPause: (() -> Unit)?,
   onSeek: (Long) -> Unit,
   onSeekToNextCut: (() -> Unit)?,
+  onScrubStart: () -> Unit = {},
+  onScrubStop: () -> Unit = {},
   onAddMedia: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
@@ -1285,37 +1294,11 @@ private fun TimelineRulerHeader(
           fps = fps,
           isFrameSnapping = isFrameSnapping,
           onSeek = onSeek,
-          onDoubleTapSnap = onSeekToNextCut
+          onDoubleTapSnap = onSeekToNextCut,
+          onScrubStart = onScrubStart,
+          onScrubStop = onScrubStop
         )
-        Spacer(modifier = Modifier.width(centerPaddingDp + 180.dp))
-      }
-    }
-
-    // Right column above media track: Add Media button (White plus, Blue color)
-    if (hasRightAddButton) {
-      Box(
-        modifier = Modifier
-          .width(60.dp)
-          .fillMaxHeight(),
-        contentAlignment = Alignment.Center
-      ) {
-        Surface(
-          shape = CircleShape,
-          color = Color(0xFF0080FF),
-          modifier = Modifier
-            .size(24.dp)
-            .clickable { onAddMedia?.invoke() }
-            .testTag("above_media_track_ruler_add_btn")
-        ) {
-          Box(contentAlignment = Alignment.Center) {
-            Icon(
-              imageVector = Icons.Default.Add,
-              contentDescription = "Add Media",
-              tint = Color.White,
-              modifier = Modifier.size(16.dp)
-            )
-          }
-        }
+        Spacer(modifier = Modifier.width(centerPaddingDp))
       }
     }
   }
@@ -1383,14 +1366,14 @@ private fun TimelineLeftUtilityColumn(
       .background(Color.Black)
       .padding(start = 6.dp, end = 6.dp)
       .verticalScroll(verticalScrollState),
-    verticalArrangement = Arrangement.spacedBy(8.dp)
+    verticalArrangement = Arrangement.spacedBy(4.dp)
   ) {
-    // Row 1: Video Track Left Utility (Mute clip + Cover Card) (64.dp)
+    // Row 1: Video Track Left Utility (Mute clip + Cover Card) (56.dp)
     if (timeline.videoClips.isNotEmpty()) {
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .height(64.dp),
+          .height(56.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
@@ -1407,16 +1390,16 @@ private fun TimelineLeftUtilityColumn(
             imageVector = if (isMutedAll) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
             contentDescription = "Mute clip",
             tint = if (isMutedAll) RedAccent else Color.White.copy(alpha = 0.85f),
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(18.dp)
           )
-          Spacer(modifier = Modifier.height(2.dp))
+          Spacer(modifier = Modifier.height(1.dp))
           Text(
             text = "Mute\nclip",
             style = MaterialTheme.typography.labelSmall.copy(
-              fontSize = 9.sp,
+              fontSize = 8.5.sp,
               color = Color.White.copy(alpha = 0.75f),
               textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-              lineHeight = 11.sp
+              lineHeight = 10.sp
             )
           )
         }
@@ -1428,7 +1411,7 @@ private fun TimelineLeftUtilityColumn(
           border = BorderStroke(1.dp, Color(0xFF333A4A)),
           modifier = Modifier
             .width(36.dp)
-            .height(52.dp)
+            .height(46.dp)
             .clickable { onEditCover?.invoke() }
             .testTag("cover_thumbnail_btn")
         ) {
@@ -1437,7 +1420,7 @@ private fun TimelineLeftUtilityColumn(
               imageVector = Icons.Default.Image,
               contentDescription = null,
               tint = Color.White.copy(alpha = 0.4f),
-              modifier = Modifier.size(18.dp)
+              modifier = Modifier.size(16.dp)
             )
             Column(
               modifier = Modifier
@@ -1450,12 +1433,12 @@ private fun TimelineLeftUtilityColumn(
                 imageVector = Icons.Default.Edit,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(12.dp)
+                modifier = Modifier.size(11.dp)
               )
               Text(
                 text = "Cover",
                 style = MaterialTheme.typography.labelSmall.copy(
-                  fontSize = 8.5.sp,
+                  fontSize = 8.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color.White
                 )
@@ -1466,11 +1449,12 @@ private fun TimelineLeftUtilityColumn(
       }
     }
 
-    // Row 2: Overlay / PIP Track Icon (44.dp)
+    // Row 2: Overlay / PIP Track Icon (36.dp)
     if (timeline.overlayClips.isNotEmpty()) {
       Box(
         modifier = Modifier
-          .size(36.dp)
+          .fillMaxWidth()
+          .height(36.dp)
           .clip(RoundedCornerShape(6.dp))
           .background(Color(0xFF1B1F2A))
           .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
@@ -1480,16 +1464,17 @@ private fun TimelineLeftUtilityColumn(
           imageVector = Icons.Default.Layers,
           contentDescription = "Overlay Track",
           tint = OverlayTrackColor,
-          modifier = Modifier.size(18.dp)
+          modifier = Modifier.size(16.dp)
         )
       }
     }
 
-    // Row 3: Audio Track Icon (36.dp)
+    // Row 3: Audio Track Icon (32.dp)
     if (timeline.audioClips.isNotEmpty()) {
       Box(
         modifier = Modifier
-          .size(36.dp)
+          .fillMaxWidth()
+          .height(32.dp)
           .clip(RoundedCornerShape(6.dp))
           .background(Color(0xFF1B1F2A))
           .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
@@ -1499,17 +1484,18 @@ private fun TimelineLeftUtilityColumn(
           imageVector = Icons.Default.MusicNote,
           contentDescription = "Audio Track",
           tint = AudioTrackColor,
-          modifier = Modifier.size(18.dp)
+          modifier = Modifier.size(16.dp)
         )
       }
     }
 
-    // Row 4: Text Track Icon(s) (36.dp each)
+    // Row 4: Text Track Icon(s) (32.dp each)
     if (textTracks.isNotEmpty()) {
       for ((trackIdx, _) in textTracks.withIndex()) {
         Box(
           modifier = Modifier
-            .size(36.dp)
+            .fillMaxWidth()
+            .height(32.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(Color(0xFF1B1F2A))
             .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
@@ -1518,7 +1504,7 @@ private fun TimelineLeftUtilityColumn(
           Text(
             text = if (textTracks.size > 1) "T${trackIdx + 1}" else "T",
             style = MaterialTheme.typography.titleMedium.copy(
-              fontSize = 14.sp,
+              fontSize = 13.sp,
               fontWeight = FontWeight.Bold,
               color = TextTrackColor
             )
@@ -1527,11 +1513,12 @@ private fun TimelineLeftUtilityColumn(
       }
     }
 
-    // Row 5: Sticker Track Icon (36.dp)
+    // Row 5: Sticker Track Icon (32.dp)
     if (timeline.stickerClips.isNotEmpty()) {
       Box(
         modifier = Modifier
-          .size(36.dp)
+          .fillMaxWidth()
+          .height(32.dp)
           .clip(RoundedCornerShape(6.dp))
           .background(Color(0xFF1B1F2A))
           .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),
@@ -1541,16 +1528,17 @@ private fun TimelineLeftUtilityColumn(
           imageVector = Icons.Default.EmojiEmotions,
           contentDescription = "Sticker Track",
           tint = StickerTrackColor,
-          modifier = Modifier.size(18.dp)
+          modifier = Modifier.size(16.dp)
         )
       }
     }
 
-    // Row 6: Effect Track Icon (36.dp)
+    // Row 6: Effect Track Icon (32.dp)
     if (timeline.effectClips.isNotEmpty()) {
       Box(
         modifier = Modifier
-          .size(36.dp)
+          .fillMaxWidth()
+          .height(32.dp)
           .clip(RoundedCornerShape(6.dp))
           .background(Color(0xFF1B1F2A))
           .border(0.5.dp, Color(0xFF2E3547), RoundedCornerShape(6.dp)),

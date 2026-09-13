@@ -56,6 +56,8 @@ fun TimelineScrubberBar(
   onSeekToNextCut: () -> Unit,
   onFpsChange: (Int) -> Unit,
   onToggleFrameSnapping: () -> Unit,
+  onScrubStart: () -> Unit = {},
+  onScrubEnd: () -> Unit = {},
   isMultiTrackView: Boolean = true,
   onToggleMultiTrackView: (() -> Unit)? = null,
   modifier: Modifier = Modifier
@@ -373,8 +375,10 @@ fun TimelineScrubberBar(
           activeScrubOffsetFrames = (activeScrubOffsetFrames ?: 0) + deltaFrames
           onStepFrames(deltaFrames)
         },
+        onScrubStart = onScrubStart,
         onScrubEnd = {
           activeScrubOffsetFrames = null
+          onScrubEnd()
         },
         activeDeltaDisplay = activeScrubOffsetFrames
       )
@@ -392,6 +396,7 @@ fun JogWheelFrameScrubber(
   onScrubDeltaFrames: (Int) -> Unit,
   onScrubEnd: () -> Unit,
   activeDeltaDisplay: Int?,
+  onScrubStart: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var accumulatedDragPx by remember { mutableFloatStateOf(0f) }
@@ -413,6 +418,7 @@ fun JogWheelFrameScrubber(
         detectDragGestures(
           onDragStart = {
             accumulatedDragPx = 0f
+            onScrubStart()
           },
           onDragEnd = {
             accumulatedDragPx = 0f

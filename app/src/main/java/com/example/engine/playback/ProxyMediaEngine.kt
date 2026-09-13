@@ -145,9 +145,77 @@ class ProxyMediaEngine(private val context: Context) {
   private val activeProxyJobs = ConcurrentHashMap<String, Job>()
   private val frameCache = BoundedFrameCache(maxMemoryMb = 48)
 
+  private val currentSeekSequence = java.util.concurrent.atomic.AtomicLong(0L)
+
   private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
   var currentQuality: PreviewQuality = PreviewQuality.BALANCED
+
+  fun nextSeekSequence(): Long = currentSeekSequence.incrementAndGet()
+
+  fun getCurrentSequence(): Long = currentSeekSequence.get()
+
+  /**
+   * Asynchronously fetches a frame for [clip] at [sourcePosMs] with sequence tracking and nearest-frame fallback.
+   * Runs completely non-blockingly:
+   * 1. Checks exact match in LRU cache -> delivers immediately.
+   * 2. Checks nearest cached frame fallback -> delivers nearest frame immediately for zero-lag scrubbing.
+   * 3. Decodes exact frame asynchronously on Dispatchers.IO.
+   * 4. Drops obsolete seek results if a newer seek request has arrived (sequence < currentSeekSequence).
+   */
+  fun requestFrameAsync(
+    clip: VideoClip,
+    sourcePosMs: Long,
+    sequence: Long,
+    onFrameReady: (bitmap: Bitmap, isExactMatch: Boolean) -> Unit
+  ) {
+    if (!clip.isVideo || clip.uri.isBlank()) return
+
+    val targetDim = currentQuality.maxDimension
+    val cacheKey = "proxy_${clip.id}_${sourcePosMs / 100}_$targetDim"
+
+    // 1. Check exact match in LRU cache
+    val exact = frameCache.get(cacheKey)
+    if (exact != null && !exact.isRecycled) {
+      onFrameReady(exact, true)
+      return
+    }
+
+    // 2. Nearest-frame fallback for instant zero-lag rendering during scrubbing
+    val nearest = frameCache.getNearestFrame(clip.id, sourcePosMs, maxToleranceMs = 2000L)
+    if (nearest != null && !nearest.isRecycled) {
+      onFrameReady(nearest, false)
+    }
+
+    // 3. Async frame decoding on IO thread
+    scope.launch(Dispatchers.IO) {
+      if (sequence < currentSeekSequence.get()) {
+        return@launch // Drop obsolete seek request
+      }
+
+      val bitmap = try {
+        val retriever = getOrCreateRetriever(clip.uri) ?: return@launch
+        extractFrameAt(retriever, sourcePosMs, targetDim)
+      } catch (e: Exception) {
+        Log.w(tag, "Async frame decoding failed for clip ${clip.id} at $sourcePosMs ms", e)
+        null
+      }
+
+      if (bitmap != null && !bitmap.isRecycled) {
+        frameCache.put(cacheKey, bitmap, clip.id, sourcePosMs)
+        memoryManager.renderFrameCache.put(cacheKey, bitmap)
+
+        // Drop obsolete seek result if sequence has advanced
+        if (sequence >= currentSeekSequence.get()) {
+          withContext(Dispatchers.Main) {
+            if (!bitmap.isRecycled && sequence >= currentSeekSequence.get()) {
+              onFrameReady(bitmap, true)
+            }
+          }
+        }
+      }
+    }
+  }
 
   /**
    * Determines if a video clip has heavy/4K media parameters.

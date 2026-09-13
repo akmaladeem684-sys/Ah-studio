@@ -282,8 +282,8 @@ fun EditorScreen(
       val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
       // Fixed, stable video preview height that never changes regardless of tool panels opening or tracks added
       val fixedPreviewHeight = remember(maxHeight, isLandscape) {
-        if (isLandscape) (maxHeight * 0.65f).coerceIn(200.dp, 320.dp)
-        else (maxHeight * 0.44f).coerceIn(260.dp, 340.dp)
+        if (isLandscape) (maxHeight * 0.65f).coerceIn(200.dp, 360.dp)
+        else (maxHeight * 0.52f).coerceIn(320.dp, 480.dp)
       }
 
       Column(
@@ -574,9 +574,10 @@ fun EditorScreen(
         isMultiSelectMode = isMultiSelectMode,
         snapIndicatorMs = snapIndicatorMs,
         onSeek = {
-          viewModel.timelineEngine.setPosition(it)
-          viewModel.playbackEngine.seekTo(it)
+          viewModel.onScrubProgress(it)
         },
+        onScrubStart = { viewModel.onScrubStart() },
+        onScrubStop = { viewModel.onScrubStop() },
         onSelectElement = { viewModel.timelineEngine.selectElement(it) },
         onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
         onZoomChange = { multiTrackZoom = it },

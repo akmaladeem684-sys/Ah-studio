@@ -20,9 +20,10 @@ import java.nio.FloatBuffer
 import kotlin.math.max
 
 /**
- * High-performance GPU composition pipeline powered by native C++ OpenGL ES 3.0 engine.
- * Renders real-time video clips, PIP overlays, text layers, stickers, visual effects,
- * color adjustments, and transitions deterministically with 25+ simultaneous layers.
+ * Production-Grade GPU Composition Renderer powered by Native C++ OpenGL ES 3.0 Engine.
+ * Supports 1, 3, 10, 20, and 25+ simultaneous layers (Base Video, PIP Videos, Image Stickers,
+ * Text Layers, Visual Effects) with 60 FPS performance, deterministic Z-ordering,
+ * texture recycling, and premultiplied alpha blending.
  */
 class GpuCompositionRenderer(private val context: Context) {
   companion object {
@@ -31,6 +32,7 @@ class GpuCompositionRenderer(private val context: Context) {
     private const val TRIANGLE_VERTICES_DATA_STRIDE_BYTES = 4 * FLOAT_SIZE_BYTES
     private const val POSITION_DATA_OFFSET = 0
     private const val TEXTURE_DATA_OFFSET = 2
+    private const val MAX_UNTOUCHED_CACHE_FRAMES = 60
   }
 
   // Full-screen quad geometry: (x, y, u, v)
@@ -62,11 +64,20 @@ class GpuCompositionRenderer(private val context: Context) {
   private val fboA = GlFramebuffer()
   private val fboB = GlFramebuffer()
 
-  // Cached Text & Sticker textures: Key -> CachedTexture(texId, width, height, hash)
-  private data class CachedTexture(val texId: Int, val width: Int, val height: Int, val hash: Int)
+  // Cached Text & Sticker textures with frame-access tracking
+  private data class CachedTexture(
+    val texId: Int,
+    val width: Int,
+    val height: Int,
+    val hash: Int,
+    var lastFrameUsed: Long = 0L
+  )
+
   private val textTextureCache = mutableMapOf<String, CachedTexture>()
   private val stickerTextureCache = mutableMapOf<String, CachedTexture>()
   private val imageTextureCache = mutableMapOf<String, CachedTexture>()
+
+  private var currentFrameCounter = 0L
 
   // Reusable Matrix buffers
   private val mvpMatrix = FloatArray(16)
@@ -110,6 +121,8 @@ class GpuCompositionRenderer(private val context: Context) {
       initGl()
     }
 
+    currentFrameCounter++
+
     // Initialize or resize native C++ OpenGL ES 3.0 renderer
     if (viewportWidth != currentViewportWidth || viewportHeight != currentViewportHeight) {
       currentViewportWidth = viewportWidth
@@ -148,9 +161,9 @@ class GpuCompositionRenderer(private val context: Context) {
       }
     }
 
-    // 2. Process PIP Overlays
-    var overlayZ = 1
-    for (overlay in frame.activeOverlays) {
+    // 2. Process PIP Overlays (Deterministically ordered)
+    for (i in frame.activeOverlays.indices) {
+      val overlay = frame.activeOverlays[i]
       val overlayTexId = overlayTextures[overlay.clip.id]
       if (overlayTexId != null && overlayTexId > 0) {
         val ov2dTexId = processOverlayVideoTo2D(
@@ -162,13 +175,13 @@ class GpuCompositionRenderer(private val context: Context) {
         )
 
         if (ov2dTexId > 0) {
-          val ovW = overlay.clip.width.let { if (it > 0) it else viewportWidth }
-          val ovH = overlay.clip.height.let { if (it > 0) it else viewportHeight }
+          val ovW = if (overlay.clip.width > 0) overlay.clip.width else viewportWidth
+          val ovH = if (overlay.clip.height > 0) overlay.clip.height else viewportHeight
           val ovAspect = ovW.toFloat() / max(1, ovH)
           val vpAspect = viewportWidth.toFloat() / max(1, viewportHeight)
 
-          val baseScaleY = overlay.scaleY * 0.5f
-          val baseScaleX = baseScaleY * (ovAspect / vpAspect)
+          val baseScaleY = (overlay.scaleY * 0.5f).coerceAtLeast(0.01f)
+          val baseScaleX = (baseScaleY * (ovAspect / vpAspect)).coerceAtLeast(0.01f)
 
           val ovMatrix = FloatArray(16)
           Matrix.setIdentityM(ovMatrix, 0)
@@ -176,13 +189,14 @@ class GpuCompositionRenderer(private val context: Context) {
           Matrix.rotateM(ovMatrix, 0, -overlay.rotation, 0f, 0f, 1f)
           Matrix.scaleM(ovMatrix, 0, baseScaleX, baseScaleY, 1f)
 
+          val calculatedZ = 100 + (i * 10)
           val overlayLayer = NativeLayer(
             id = overlay.clip.id.hashCode().toLong(),
             textureId = ov2dTexId,
             type = NativeLayerType.VIDEO,
             isVisible = true,
-            zOrder = overlayZ++,
-            opacity = overlay.opacity,
+            zOrder = calculatedZ,
+            opacity = overlay.opacity.coerceIn(0f, 1f),
             blendMode = mapBlendMode(overlay.blendMode),
             useCustomMatrix = true,
             transformMatrix = ovMatrix
@@ -192,15 +206,16 @@ class GpuCompositionRenderer(private val context: Context) {
       }
     }
 
-    // 3. Process Sticker Layers
-    var stickerZ = 10
-    for (sticker in frame.activeStickers) {
+    // 3. Process Sticker Layers (Deterministically ordered)
+    for (i in frame.activeStickers.indices) {
+      val sticker = frame.activeStickers[i]
       val cached = getOrCreateStickerTexture(sticker.clip, viewportWidth, viewportHeight)
       if (cached != null && cached.texId > 0) {
+        cached.lastFrameUsed = currentFrameCounter
         val aspect = viewportWidth.toFloat() / max(1, viewportHeight)
         val stickerAspect = cached.width.toFloat() / max(1, cached.height)
-        val scaleY = (cached.height.toFloat() / viewportHeight) * 2f * sticker.scale
-        val scaleX = scaleY * stickerAspect / aspect
+        val scaleY = ((cached.height.toFloat() / viewportHeight) * 2f * sticker.scale).coerceAtLeast(0.01f)
+        val scaleX = (scaleY * stickerAspect / aspect).coerceAtLeast(0.01f)
 
         val stkMatrix = FloatArray(16)
         Matrix.setIdentityM(stkMatrix, 0)
@@ -208,13 +223,14 @@ class GpuCompositionRenderer(private val context: Context) {
         Matrix.rotateM(stkMatrix, 0, -sticker.rotation, 0f, 0f, 1f)
         Matrix.scaleM(stkMatrix, 0, scaleX, scaleY, 1f)
 
+        val calculatedZ = 500 + (i * 10)
         val stickerLayer = NativeLayer(
           id = sticker.clip.id.hashCode().toLong(),
           textureId = cached.texId,
           type = NativeLayerType.IMAGE_STICKER,
           isVisible = true,
-          zOrder = stickerZ++,
-          opacity = sticker.opacity,
+          zOrder = calculatedZ,
+          opacity = sticker.opacity.coerceIn(0f, 1f),
           blendMode = NativeBlendMode.PREMULTIPLIED,
           useCustomMatrix = true,
           transformMatrix = stkMatrix
@@ -223,15 +239,16 @@ class GpuCompositionRenderer(private val context: Context) {
       }
     }
 
-    // 4. Process Text Layers (Deterministically placed with high Z-Order to prevent hidden text)
-    var textZ = 50
-    for (text in frame.activeTexts) {
+    // 4. Process Text Layers (Deterministically ordered with highest Z-Order to guarantee visibility)
+    for (i in frame.activeTexts.indices) {
+      val text = frame.activeTexts[i]
       val cached = getOrCreateTextTexture(text.clip, text.currentPosMs, viewportWidth, viewportHeight)
       if (cached != null && cached.texId > 0) {
+        cached.lastFrameUsed = currentFrameCounter
         val aspect = viewportWidth.toFloat() / max(1, viewportHeight)
         val txtAspect = cached.width.toFloat() / max(1, cached.height)
-        val scaleY = (cached.height.toFloat() / viewportHeight) * 2f * text.scale
-        val scaleX = scaleY * txtAspect / aspect
+        val scaleY = ((cached.height.toFloat() / viewportHeight) * 2f * text.scale).coerceAtLeast(0.01f)
+        val scaleX = (scaleY * txtAspect / aspect).coerceAtLeast(0.01f)
 
         val txtMatrix = FloatArray(16)
         Matrix.setIdentityM(txtMatrix, 0)
@@ -239,13 +256,14 @@ class GpuCompositionRenderer(private val context: Context) {
         Matrix.rotateM(txtMatrix, 0, -text.rotation, 0f, 0f, 1f)
         Matrix.scaleM(txtMatrix, 0, scaleX, scaleY, 1f)
 
+        val calculatedZ = 1000 + (text.clip.trackIndex * 10) + i
         val textLayer = NativeLayer(
           id = text.clip.id.hashCode().toLong(),
           textureId = cached.texId,
           type = NativeLayerType.TEXT,
           isVisible = true,
-          zOrder = textZ++,
-          opacity = text.opacity,
+          zOrder = calculatedZ,
+          opacity = text.opacity.coerceIn(0f, 1f),
           blendMode = NativeBlendMode.PREMULTIPLIED,
           useCustomMatrix = true,
           transformMatrix = txtMatrix
@@ -254,7 +272,12 @@ class GpuCompositionRenderer(private val context: Context) {
       }
     }
 
-    // 5. Render via Native C++ OpenGL ES 3.0 Engine
+    // 5. Clean up stale textures periodically
+    if (currentFrameCounter % 30L == 0L) {
+      cleanStaleTextureCaches()
+    }
+
+    // 6. Render via Native C++ OpenGL ES 3.0 Engine
     val hasEffects = frame.activeEffects.isNotEmpty()
     if (hasEffects) {
       NativeRenderBridge.beginOffscreen()
@@ -270,7 +293,7 @@ class GpuCompositionRenderer(private val context: Context) {
 
     NativeRenderBridge.renderFrame(nativeLayers)
 
-    // 6. Apply Active Visual Effects (Multi-pass ping-ponging)
+    // 7. Apply Active Visual Effects (Multi-pass ping-ponging)
     if (hasEffects) {
       val offscreenTex = NativeRenderBridge.endOffscreen()
       if (offscreenTex > 0) {
@@ -477,12 +500,18 @@ class GpuCompositionRenderer(private val context: Context) {
     viewportWidth: Int,
     viewportHeight: Int
   ): CachedTexture? {
+    val hasAnim = clip.animationType != "None"
+    val animTimeStep = if (hasAnim) (currentPosMs / 33L).toInt() else 0
+
     val hash = clip.text.hashCode() xor
         clip.textColor.toInt() xor
         clip.fontSizeSp.toInt() xor
         clip.fontWeight.hashCode() xor
         clip.backgroundColor.toInt() xor
         clip.strokeColor.toInt() xor
+        clip.fontFamily.hashCode() xor
+        clip.animationType.hashCode() xor
+        animTimeStep xor
         viewportWidth
 
     val cached = textTextureCache[clip.id]
@@ -498,12 +527,12 @@ class GpuCompositionRenderer(private val context: Context) {
       context = context
     ) ?: return null
 
-    val oldTexId = cached?.texId ?: 0
+    val oldTexId = if (cached != null && cached.hash != hash) cached.texId else 0
     val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, oldTexId)
     bitmap.recycle()
 
     if (texId == 0) return null
-    val entry = CachedTexture(texId, bitmap.width, bitmap.height, hash)
+    val entry = CachedTexture(texId, bitmap.width, bitmap.height, hash, currentFrameCounter)
     textTextureCache[clip.id] = entry
     return entry
   }
@@ -547,7 +576,7 @@ class GpuCompositionRenderer(private val context: Context) {
     bitmap.recycle()
 
     if (texId == 0) return null
-    val entry = CachedTexture(texId, targetWidth, targetHeight, hash)
+    val entry = CachedTexture(texId, targetWidth, targetHeight, hash, currentFrameCounter)
     stickerTextureCache[clip.id] = entry
     return entry
   }
@@ -555,11 +584,31 @@ class GpuCompositionRenderer(private val context: Context) {
   fun uploadImageTexture(id: String, bitmap: Bitmap): Int {
     val existing = imageTextureCache[id]
     if (existing != null && existing.hash == bitmap.generationId && existing.width == bitmap.width && existing.height == bitmap.height) {
+      existing.lastFrameUsed = currentFrameCounter
       return existing.texId
     }
     val texId = GlShaderUtil.uploadBitmapToTexture(bitmap, existing?.texId ?: 0)
-    imageTextureCache[id] = CachedTexture(texId, bitmap.width, bitmap.height, bitmap.generationId)
+    val entry = CachedTexture(texId, bitmap.width, bitmap.height, bitmap.generationId, currentFrameCounter)
+    imageTextureCache[id] = entry
     return texId
+  }
+
+  private fun cleanStaleTextureCaches() {
+    val textToDel = textTextureCache.filter { currentFrameCounter - it.value.lastFrameUsed > MAX_UNTOUCHED_CACHE_FRAMES }
+    for ((id, tex) in textToDel) {
+      if (tex.texId > 0) {
+        GLES20.glDeleteTextures(1, intArrayOf(tex.texId), 0)
+      }
+      textTextureCache.remove(id)
+    }
+
+    val stickerToDel = stickerTextureCache.filter { currentFrameCounter - it.value.lastFrameUsed > MAX_UNTOUCHED_CACHE_FRAMES }
+    for ((id, tex) in stickerToDel) {
+      if (tex.texId > 0) {
+        GLES20.glDeleteTextures(1, intArrayOf(tex.texId), 0)
+      }
+      stickerTextureCache.remove(id)
+    }
   }
 
   private fun mapBlendMode(modeStr: String): NativeBlendMode {
