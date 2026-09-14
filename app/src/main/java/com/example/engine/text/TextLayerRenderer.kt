@@ -2,17 +2,25 @@ package com.example.engine.text
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Camera
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.os.Build
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
+import android.text.TextPaint
 import com.example.domain.model.TextClip
 import com.example.domain.model.WordTiming
 import com.example.util.FontManager
+import java.text.Normalizer
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
@@ -26,6 +34,10 @@ data class EvaluatedTextState(
   val scale: Float,
   val rotation: Float,
   val opacity: Float,
+  val rot3DX: Float = 0f,
+  val rot3DY: Float = 0f,
+  val rot3DZ: Float = 0f,
+  val depth3D: Float = 0f,
   val activeWordIndex: Int = -1,
   val words: List<WordTiming> = emptyList()
 )
@@ -44,6 +56,12 @@ object TextLayerRenderer {
     var animRotation = clip.rotation
     var visibleText = clip.text
 
+    var rot3DX = 0f
+    var rot3DY = 0f
+    var rot3DZ = 0f
+    var depth3D = if (clip.is3D) clip.depth3D else 0f
+
+    // 1. Standard In/Out/Loop animations
     when (clip.animationType.lowercase().trim()) {
       "fade", "fade in", "fade_in", "fadein" -> {
         animAlpha = progress
@@ -171,6 +189,9 @@ object TextLayerRenderer {
         animScale = (0.8f + 0.2f * progress) * depthScale
         animRotation = clip.rotation + rotFlip
         animAlpha = progress.coerceIn(0.2f, 1f)
+        rot3DY = sin(t * 1.5f) * 20f
+        rot3DX = cos(t * 1.2f) * 10f
+        depth3D = max(depth3D, 12f)
       }
       "neon", "neon flicker", "neon_flicker", "cyber neon", "electric text", "rgb glow", "cyberpunk text", "laser text", "digital glow" -> {
         val flickerCycle = ((relTime / 70L) % 5).toInt()
@@ -197,16 +218,6 @@ object TextLayerRenderer {
         animRotation += sin(t * 2.1f) * (2.8f * decay)
         animAlpha = (progress * 2f).coerceIn(0f, 1f)
       }
-      "scale", "scale in", "scale_in" -> {
-        val easeOut = 1f - (1f - progress) * (1f - progress)
-        animScale = 1.6f - 0.6f * easeOut
-        animAlpha = (progress * 2f).coerceIn(0f, 1f)
-      }
-      "blur", "blur in", "blur_in" -> {
-        val easeOut = 1f - (1f - progress) * (1f - progress)
-        animAlpha = easeOut
-        animScale = 0.92f + 0.08f * easeOut
-      }
       "cinematic", "cinematic reveal", "movie title", "epic entrance", "film credits", "dramatic zoom", "wide letter reveal", "epic gold", "trailer title", "movie opener" -> {
         val easeOut = 1f - (1f - progress) * (1f - progress)
         animAlpha = easeOut
@@ -219,33 +230,60 @@ object TextLayerRenderer {
         animScale = 0.4f + 0.6f * easeOut
         animAlpha = progress
       }
-      "flicker", "light flicker", "light sweep", "shine text", "spotlight", "light burst" -> {
-        val cycle = ((relTime / 80L) % 4).toInt()
-        animAlpha = if (cycle == 0) 0.4f else 1.0f
-        val sweepShift = (sin(relTime.toFloat() / 250f) * 0.02f)
-        animPosX = clip.posX + sweepShift
-      }
-      "mask reveal", "mask_reveal" -> {
-        val easeOut = 1f - (1f - progress) * (1f - progress)
-        val totalChars = clip.text.length
-        val charCount = (totalChars * easeOut).toInt().coerceIn(0, totalChars)
-        visibleText = clip.text.substring(0, charCount)
-        animPosY = clip.posY + (1f - easeOut) * 0.06f
-        animAlpha = progress
-      }
       else -> {
-        // Continuous gentle pulse fallback for all other template types so cards NEVER freeze
-        val gentlePulse = sin(relTime.toFloat() / 300f) * 0.03f
+        // Continuous gentle pulse fallback
+        val gentlePulse = sin(relTime.toFloat() / 300f) * 0.02f
         animScale = 1.0f + gentlePulse
         animAlpha = (0.7f + 0.3f * progress).coerceIn(0.5f, 1.0f)
       }
     }
 
-    // Resolve words and active word index for word-level timing
+    // 2. Specialized 3D Animations
+    val effective3DAnim = if (clip.animation3D != "None") clip.animation3D else ""
+    when (effective3DAnim.lowercase().trim()) {
+      "3d flip", "flip_3d", "flip" -> {
+        val flipProgress = (relTime.toFloat() / 1500f)
+        rot3DY = (flipProgress * 360f) % 360f
+        depth3D = max(depth3D, 14f)
+      }
+      "3d spin", "spin_3d", "spin" -> {
+        rot3DY = (relTime.toFloat() / 14f) % 360f
+        rot3DX = sin(relTime.toFloat() / 300f) * 12f
+        depth3D = max(depth3D, 14f)
+      }
+      "3d tilt", "tilt_3d", "tilt" -> {
+        val t = relTime.toFloat() / 250f
+        rot3DX = sin(t * 1.4f) * 22f
+        rot3DY = cos(t * 1.8f) * 24f
+        depth3D = max(depth3D, 16f)
+      }
+      "3d float", "float_3d", "floating" -> {
+        val t = relTime.toFloat() / 320f
+        rot3DX = sin(t * 1.1f) * 12f
+        rot3DY = cos(t * 1.3f) * 14f
+        animPosY += sin(t * 1.8f) * 0.035f
+        animScale *= (1.0f + sin(t * 2f) * 0.04f)
+        depth3D = max(depth3D, 12f)
+      }
+      "3d wave", "wave_3d", "wave" -> {
+        val t = relTime.toFloat() / 180f
+        rot3DX = sin(t * 2.0f) * 16f
+        rot3DZ = sin(t * 1.5f) * 8f
+        depth3D = max(depth3D, 10f) + sin(t * 2.5f) * 4f
+      }
+      "3d extrude", "extrude_3d", "extrude" -> {
+        val t = relTime.toFloat() / 220f
+        val pulse = (0.5f + 0.5f * sin(t * 2f))
+        depth3D = (max(depth3D, 10f) * pulse).coerceAtLeast(2f)
+        rot3DX = 12f * pulse
+        rot3DY = 10f * pulse
+      }
+    }
+
+    // Resolve words for word-level timing
     val resolvedWords = if (clip.words.isNotEmpty()) {
       clip.words
     } else {
-      // Auto-partition words across duration
       val tokens = clip.text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
       if (tokens.isNotEmpty()) {
         val wordDur = clip.durationMs / tokens.size
@@ -274,6 +312,10 @@ object TextLayerRenderer {
       scale = clip.scale * animScale,
       rotation = animRotation,
       opacity = (clip.opacity * animAlpha).coerceIn(0f, 1f),
+      rot3DX = rot3DX,
+      rot3DY = rot3DY,
+      rot3DZ = rot3DZ,
+      depth3D = depth3D,
       activeWordIndex = activeIdx,
       words = resolvedWords
     )
@@ -292,10 +334,6 @@ object TextLayerRenderer {
     drawInternal(canvas, clip, state, width, height, context)
   }
 
-  /**
-   * Draws a live animated template preview frame using the EXACT same vector rendering engine
-   * as the Screen Editor. Smoothly loops the animation and provides vertical centering.
-   */
   fun drawTemplatePreview(
     canvas: Canvas,
     clip: TextClip,
@@ -331,10 +369,30 @@ object TextLayerRenderer {
     height: Int,
     context: Context
   ) {
-    val rawText = if (clip.isAllCaps) state.visibleText.uppercase() else state.visibleText
+    var rawText = if (clip.isAllCaps) state.visibleText.uppercase() else state.visibleText
     if (clip.isHidden || state.opacity <= 0f || rawText.isEmpty()) return
 
-    // Reference scaling base (360 width standard)
+    // 1. Multi-Language Unicode Script Detection & Normalization
+    val containsUrdu = rawText.any {
+      it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' ||
+          it in '\u08A0'..'\u08FF' || it in '\uFB50'..'\uFDFF' || it in '\uFE70'..'\uFEFF'
+    }
+
+    val containsHindi = rawText.any {
+      it in '\u0900'..'\u097F' || it in '\uA8E0'..'\uA8FF'
+    }
+
+    val containsChinese = rawText.any {
+      it in '\u4E00'..'\u9FFF' || it in '\u3400'..'\u4DBF' ||
+          it in '\u3000'..'\u303F' || it in '\uF900'..'\uFAFF'
+    }
+
+    // NFC Canonical composition normalization fixes broken Devanagari matras and Arabic ligatures
+    if (containsHindi || containsUrdu) {
+      rawText = Normalizer.normalize(rawText, Normalizer.Form.NFC)
+    }
+
+    // 2. Reference scaling base (360 width standard)
     val scaleFactor = width.toFloat() / 360f
     val baseFontSize = clip.fontSizeSp * scaleFactor * state.scale
 
@@ -346,64 +404,92 @@ object TextLayerRenderer {
       isItalic = clip.isItalic
     )
 
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
       this.typeface = typeface
       this.textSize = baseFontSize
-      this.letterSpacing = clip.letterSpacing / 10f
+      this.letterSpacing = if (containsUrdu) 0f else clip.letterSpacing / 10f
       this.color = clip.textColor.toInt()
       this.alpha = (state.opacity * 255).toInt().coerceIn(0, 255)
       this.isUnderlineText = clip.isUnderline
     }
 
-    // Alignment setup
-    paint.textAlign = when (clip.alignment.lowercase()) {
-      "left" -> Paint.Align.LEFT
-      "right" -> Paint.Align.RIGHT
-      else -> Paint.Align.CENTER
+    // Alignment setup: in RTL Urdu, default alignment aligns appropriately
+    val layoutAlignment = when (clip.alignment.lowercase()) {
+      "left" -> if (containsUrdu) Layout.Alignment.ALIGN_OPPOSITE else Layout.Alignment.ALIGN_NORMAL
+      "right" -> if (containsUrdu) Layout.Alignment.ALIGN_NORMAL else Layout.Alignment.ALIGN_OPPOSITE
+      else -> Layout.Alignment.ALIGN_CENTER
     }
 
     val centerX = (width / 2f) + (state.posX * width / 2f)
     val centerY = (height / 2f) + (state.posY * height / 2f)
 
     canvas.save()
+
+    // 3. GPU 3D Perspective Projection via Android Graphics Camera
+    val has3DRot = state.rot3DX != 0f || state.rot3DY != 0f || state.rot3DZ != 0f
+    if (has3DRot) {
+      val camera = Camera()
+      val matrix = Matrix()
+      camera.save()
+      camera.rotateX(state.rot3DX)
+      camera.rotateY(state.rot3DY)
+      camera.rotateZ(state.rot3DZ)
+      camera.getMatrix(matrix)
+      camera.restore()
+      matrix.preTranslate(-centerX, -centerY)
+      matrix.postTranslate(centerX, centerY)
+      canvas.concat(matrix)
+    }
+
     canvas.translate(centerX, centerY)
     canvas.rotate(state.rotation)
 
-    val isKaraoke = clip.subtitleStyle.equals("Karaoke", true)
-    val isHighlightWord = clip.subtitleStyle.equals("HighlightWord", true) || clip.subtitleStyle.equals("Highlight word", true)
-    val isAnimatedCaptions = clip.subtitleStyle.equals("Animated", true) || clip.subtitleStyle.equals("Animated captions", true)
-
-    val containsUrdu = rawText.any {
-      it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' ||
-          it in '\u08A0'..'\u08FF' || it in '\uFB50'..'\uFDFF' || it in '\uFE70'..'\uFEFF'
+    // Compute line spacing and metrics
+    val effectiveLineSpacing = when {
+      containsUrdu -> maxOf(clip.lineSpacing, 1.35f)
+      containsHindi -> maxOf(clip.lineSpacing, 1.25f)
+      else -> clip.lineSpacing
     }
 
+    // Max line width calculation for StaticLayout
     val lines = rawText.split("\n")
-    val fontMetrics = paint.fontMetrics
-    val effectiveLineSpacing = if (containsUrdu) maxOf(clip.lineSpacing, 1.25f) else clip.lineSpacing
-    val lineHeight = (fontMetrics.descent - fontMetrics.ascent) * effectiveLineSpacing
-    val totalTextHeight = lines.size * lineHeight
-
-    // Measure bounding box for background
     var maxLineWidth = 0f
     lines.forEach { line ->
       val w = paint.measureText(line)
       if (w > maxLineWidth) maxLineWidth = w
     }
+    // Safe minimum width for bounds
+    val layoutWidth = max(maxLineWidth.toInt() + 16, 32)
+
+    // Create StaticLayout for flawless BiDi Unicode script rendering
+    val textDir = if (containsUrdu) TextDirectionHeuristics.ANYRTL_LTR else TextDirectionHeuristics.FIRSTSTRONG_LTR
+    val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      val builder = StaticLayout.Builder.obtain(rawText, 0, rawText.length, paint, layoutWidth)
+        .setAlignment(layoutAlignment)
+        .setTextDirection(textDir)
+        .setLineSpacing(0f, effectiveLineSpacing)
+        .setIncludePad(true)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && containsChinese) {
+        builder.setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_HIGH_QUALITY)
+      }
+      builder.build()
+    } else {
+      @Suppress("DEPRECATION")
+      StaticLayout(rawText, paint, layoutWidth, layoutAlignment, effectiveLineSpacing, 0f, true)
+    }
+
+    val totalTextWidth = layout.width.toFloat()
+    val totalTextHeight = layout.height.toFloat()
 
     val padX = clip.bgPadding * scaleFactor
     val padY = (clip.bgPadding * 0.7f) * scaleFactor
 
-    val bgLeft = when (clip.alignment.lowercase()) {
-      "left" -> -padX
-      "right" -> -maxLineWidth - padX
-      else -> -maxLineWidth / 2f - padX
-    }
+    val bgLeft = -totalTextWidth / 2f - padX
     val bgTop = -totalTextHeight / 2f - padY
-    val bgRight = bgLeft + maxLineWidth + (padX * 2)
-    val bgBottom = bgTop + totalTextHeight + (padY * 2)
+    val bgRight = totalTextWidth / 2f + padX
+    val bgBottom = totalTextHeight / 2f + padY
 
-    // 1. Draw Background
+    // 4. Draw Background Box if configured
     if (clip.hasBackground || clip.subtitleStyle.equals("Bold", true)) {
       val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = if (clip.hasBackground) clip.backgroundColor.toInt() else 0xCC000000.toInt()
@@ -419,68 +505,174 @@ object TextLayerRenderer {
       canvas.drawRoundRect(RectF(bgLeft, bgTop, bgRight, bgBottom), cornerRad, cornerRad, bgPaint)
     }
 
-    // 2. Draw Text Lines
-    val startY = -totalTextHeight / 2f - fontMetrics.ascent
+    val textDrawX = -totalTextWidth / 2f
+    val textDrawY = -totalTextHeight / 2f
 
-    if ((isHighlightWord || isKaraoke || isAnimatedCaptions) && state.words.isNotEmpty()) {
-      drawWordLevelSubtitle(
-        canvas = canvas,
-        clip = clip,
-        state = state,
-        paint = paint,
-        scaleFactor = scaleFactor,
-        startY = startY,
-        lineHeight = lineHeight,
-        isKaraoke = isKaraoke,
-        isHighlight = isHighlightWord,
-        isAnimated = isAnimatedCaptions
-      )
-    } else {
-      lines.forEachIndexed { i, line ->
-        val y = startY + (i * lineHeight)
-        drawSingleLineText(canvas, clip, line, 0f, y, paint, scaleFactor, state.opacity)
+    // 5. 3D Extruded Depth Layers
+    val effectiveDepth = state.depth3D
+    if (clip.is3D || effectiveDepth > 0f) {
+      val rad = Math.toRadians((clip.bevelAngle3D + 45f).toDouble())
+      val stepX = (cos(rad) * 1.25f * scaleFactor).toFloat()
+      val stepY = (sin(rad) * 1.25f * scaleFactor).toFloat()
+      val steps = effectiveDepth.coerceIn(1f, 30f).toInt()
+
+      val extrudePaint = TextPaint(paint)
+      val base3DColor = if (clip.color3D != 0L) clip.color3D.toInt() else 0xFF1E293B.toInt()
+      extrudePaint.style = Paint.Style.FILL
+      extrudePaint.shader = null
+      extrudePaint.clearShadowLayer()
+
+      for (d in steps downTo 1) {
+        val fraction = d.toFloat() / steps
+        val shade = (0.45f + 0.45f * (1f - fraction)).coerceIn(0.2f, 1f)
+        val r = (Color.red(base3DColor) * shade).toInt().coerceIn(0, 255)
+        val g = (Color.green(base3DColor) * shade).toInt().coerceIn(0, 255)
+        val b = (Color.blue(base3DColor) * shade).toInt().coerceIn(0, 255)
+        extrudePaint.color = Color.argb((state.opacity * 255).toInt(), r, g, b)
+
+        canvas.save()
+        canvas.translate(textDrawX + (d * stepX), textDrawY + (d * stepY))
+        layout.draw(canvas)
+        canvas.restore()
       }
     }
 
-    canvas.restore()
-  }
+    // 6. Special Effects (Glitch, Neon, Chrome, Fire, Rainbow, Holographic, Gold, Comic)
+    when (clip.effectStyle.lowercase().trim()) {
+      "glitch" -> {
+        val glitchOff = 3.5f * scaleFactor
+        // Cyan pass
+        paint.color = 0xFF00FFFF.toInt()
+        paint.alpha = (state.opacity * 200).toInt()
+        canvas.save()
+        canvas.translate(textDrawX - glitchOff, textDrawY)
+        layout.draw(canvas)
+        canvas.restore()
 
-  private fun drawSingleLineText(
-    canvas: Canvas,
-    clip: TextClip,
-    text: String,
-    x: Float,
-    y: Float,
-    paint: Paint,
-    scaleFactor: Float,
-    opacity: Float
-  ) {
-    if (text.isEmpty()) return
+        // Red pass
+        paint.color = 0xFFFF0055.toInt()
+        paint.alpha = (state.opacity * 200).toInt()
+        canvas.save()
+        canvas.translate(textDrawX + glitchOff, textDrawY)
+        layout.draw(canvas)
+        canvas.restore()
 
-    // Glow pass if enabled
-    if (clip.hasGlow) {
-      val glowPaint = Paint(paint).apply {
+        // Main text pass
+        paint.color = clip.textColor.toInt()
+        paint.alpha = (state.opacity * 255).toInt()
+      }
+
+      "neon" -> {
+        val neonGlowColor = if (clip.hasGlow) clip.glowColor.toInt() else 0xFF00E5FF.toInt()
+        val glowLayers = listOf(20f * scaleFactor, 12f * scaleFactor, 6f * scaleFactor)
+        glowLayers.forEach { r ->
+          paint.clearShadowLayer()
+          paint.setShadowLayer(r, 0f, 0f, neonGlowColor)
+          paint.color = neonGlowColor
+          canvas.save()
+          canvas.translate(textDrawX, textDrawY)
+          layout.draw(canvas)
+          canvas.restore()
+        }
+        paint.clearShadowLayer()
+        paint.color = 0xFFFFFFFF.toInt()
+      }
+
+      "chrome" -> {
+        val chromeShader = LinearGradient(
+          0f, textDrawY, 0f, textDrawY + totalTextHeight,
+          intArrayOf(0xFFFFFFFF.toInt(), 0xFFCBD5E1.toInt(), 0xFF475569.toInt(), 0xFFE2E8F0.toInt(), 0xFFFFFFFF.toInt()),
+          floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f),
+          Shader.TileMode.CLAMP
+        )
+        paint.shader = chromeShader
+      }
+
+      "fire" -> {
+        val fireShader = LinearGradient(
+          0f, textDrawY, 0f, textDrawY + totalTextHeight,
+          intArrayOf(0xFFFFF000.toInt(), 0xFFFF6600.toInt(), 0xFFD00000.toInt()),
+          floatArrayOf(0f, 0.45f, 1f),
+          Shader.TileMode.CLAMP
+        )
+        paint.setShadowLayer(14f * scaleFactor, 0f, 4f * scaleFactor, 0xFFFF3300.toInt())
+        paint.shader = fireShader
+      }
+
+      "rainbow" -> {
+        val rainbowShader = LinearGradient(
+          textDrawX, 0f, textDrawX + totalTextWidth, 0f,
+          intArrayOf(
+            0xFFFF0000.toInt(), 0xFFFF7700.toInt(), 0xFFFFFF00.toInt(),
+            0xFF00FF00.toInt(), 0xFF00FFFF.toInt(), 0xFF0000FF.toInt(), 0xFFFF00FF.toInt()
+          ),
+          null,
+          Shader.TileMode.CLAMP
+        )
+        paint.shader = rainbowShader
+      }
+
+      "holographic" -> {
+        val holoShader = LinearGradient(
+          textDrawX, textDrawY, textDrawX + totalTextWidth, textDrawY + totalTextHeight,
+          intArrayOf(0xFF00FFFF.toInt(), 0xFFF472B6.toInt(), 0xFF818CF8.toInt(), 0xFF34D399.toInt()),
+          null,
+          Shader.TileMode.CLAMP
+        )
+        paint.setShadowLayer(8f * scaleFactor, 0f, 0f, 0xAA00E5FF.toInt())
+        paint.shader = holoShader
+      }
+
+      "gold" -> {
+        val goldShader = LinearGradient(
+          0f, textDrawY, 0f, textDrawY + totalTextHeight,
+          intArrayOf(0xFFFFF7C2.toInt(), 0xFFF59E0B.toInt(), 0xFFB45309.toInt(), 0xFFFDE68A.toInt()),
+          floatArrayOf(0f, 0.4f, 0.75f, 1f),
+          Shader.TileMode.CLAMP
+        )
+        paint.setShadowLayer(6f * scaleFactor, 2f * scaleFactor, 3f * scaleFactor, 0xCC78350F.toInt())
+        paint.shader = goldShader
+      }
+
+      "comic" -> {
+        val comicStroke = max(clip.strokeWidth, 4f) * scaleFactor
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = comicStroke
+        paint.color = 0xFF000000.toInt()
+        canvas.save()
+        canvas.translate(textDrawX + (3f * scaleFactor), textDrawY + (3f * scaleFactor))
+        layout.draw(canvas)
+        canvas.restore()
+      }
+    }
+
+    // 7. Glow Pass (if enabled and not neon)
+    if (clip.hasGlow && !clip.effectStyle.equals("neon", true)) {
+      val glowPaint = TextPaint(paint).apply {
         clearShadowLayer()
         setShadowLayer(clip.glowRadius * scaleFactor, 0f, 0f, clip.glowColor.toInt())
         color = clip.glowColor.toInt()
         style = Paint.Style.FILL
-        alpha = (opacity * 200).toInt().coerceIn(0, 255)
+        alpha = (state.opacity * 210).toInt().coerceIn(0, 255)
       }
-      canvas.drawText(text, x, y, glowPaint)
+      canvas.save()
+      canvas.translate(textDrawX, textDrawY)
+      layout.draw(canvas)
+      canvas.restore()
     }
 
-    // Shadow
+    // 8. Shadow Pass
     if (clip.hasShadow || clip.subtitleStyle.equals("Classic", true)) {
       val sColor = if (clip.hasShadow) clip.shadowColor.toInt() else 0xDD000000.toInt()
       val sBlur = if (clip.hasShadow) clip.shadowBlur * scaleFactor else 4f * scaleFactor
       val sOffX = if (clip.hasShadow) clip.shadowOffsetX * scaleFactor else 2f * scaleFactor
       val sOffY = if (clip.hasShadow) clip.shadowOffsetY * scaleFactor else 2f * scaleFactor
       paint.setShadowLayer(sBlur, sOffX, sOffY, sColor)
-    } else {
+    } else if (!clip.effectStyle.equals("neon", true) && !clip.effectStyle.equals("fire", true) && !clip.effectStyle.equals("gold", true)) {
       paint.clearShadowLayer()
     }
 
-    // Stroke
+    // 9. Stroke Pass
     val effectiveStrokeWidth = if (clip.subtitleStyle.equals("Bold", true)) {
       max(clip.strokeWidth, 3.5f) * scaleFactor
     } else {
@@ -488,25 +680,25 @@ object TextLayerRenderer {
     }
 
     if (effectiveStrokeWidth > 0f) {
-      val strokePaint = Paint(paint).apply {
+      val strokePaint = TextPaint(paint).apply {
         style = Paint.Style.STROKE
         strokeWidth = effectiveStrokeWidth
         color = clip.strokeColor.toInt()
-        alpha = (opacity * 255).toInt().coerceIn(0, 255)
+        alpha = (state.opacity * 255).toInt().coerceIn(0, 255)
+        shader = null
       }
-      canvas.drawText(text, x, y, strokePaint)
+      canvas.save()
+      canvas.translate(textDrawX, textDrawY)
+      layout.draw(canvas)
+      canvas.restore()
     }
 
-    // Gradient or Solid Fill
-    if (clip.hasGradient) {
-      val textWidth = paint.measureText(text)
-      val bounds = Rect()
-      paint.getTextBounds(text, 0, text.length, bounds)
-
+    // 10. Gradient Shader or Solid Fill
+    if (clip.hasGradient && paint.shader == null) {
       val (x0, y0, x1, y1) = when (clip.gradientDirection.lowercase()) {
-        "vertical" -> listOf(0f, y - bounds.height(), 0f, y)
-        "diagonal" -> listOf(-textWidth / 2f, y - bounds.height(), textWidth / 2f, y)
-        else -> listOf(-textWidth / 2f, y, textWidth / 2f, y)
+        "vertical" -> listOf(0f, textDrawY, 0f, textDrawY + totalTextHeight)
+        "diagonal" -> listOf(textDrawX, textDrawY, textDrawX + totalTextWidth, textDrawY + totalTextHeight)
+        else -> listOf(textDrawX, 0f, textDrawX + totalTextWidth, 0f)
       }
       paint.shader = LinearGradient(
         x0, y0, x1, y1,
@@ -514,85 +706,23 @@ object TextLayerRenderer {
         clip.gradientColorEnd.toInt(),
         Shader.TileMode.CLAMP
       )
-    } else {
-      paint.shader = null
+    } else if (paint.shader == null) {
       paint.color = clip.textColor.toInt()
     }
 
     paint.style = Paint.Style.FILL
-    paint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
-    canvas.drawText(text, x, y, paint)
+    paint.alpha = (state.opacity * 255).toInt().coerceIn(0, 255)
+
+    // Main text draw pass
+    canvas.save()
+    canvas.translate(textDrawX, textDrawY)
+    layout.draw(canvas)
+    canvas.restore()
+
     paint.shader = null
     paint.clearShadowLayer()
-  }
 
-  private fun drawWordLevelSubtitle(
-    canvas: Canvas,
-    clip: TextClip,
-    state: EvaluatedTextState,
-    paint: Paint,
-    scaleFactor: Float,
-    startY: Float,
-    lineHeight: Float,
-    isKaraoke: Boolean,
-    isHighlight: Boolean,
-    isAnimated: Boolean
-  ) {
-    val words = state.words
-    val totalWidth = words.sumOf { paint.measureText(it.word).toDouble() }.toFloat() +
-        (words.size - 1) * paint.measureText(" ")
-
-    var currentX = -totalWidth / 2f
-    val spaceWidth = paint.measureText(" ")
-
-    words.forEachIndexed { idx, wordTiming ->
-      val word = wordTiming.word
-      val wordWidth = paint.measureText(word)
-      val isActive = idx == state.activeWordIndex
-      val isPast = state.activeWordIndex >= 0 && idx < state.activeWordIndex
-
-      val wordPaint = Paint(paint)
-
-      var wordScale = 1.0f
-      if (isActive) {
-        wordPaint.color = clip.highlightColor.toInt()
-        if (isAnimated) {
-          wordScale = 1.15f
-        }
-      } else if (isKaraoke) {
-        if (isPast) {
-          wordPaint.color = clip.textColor.toInt()
-          wordPaint.alpha = (state.opacity * 255).toInt().coerceIn(0, 255)
-        } else {
-          // Future word dimmed
-          wordPaint.color = clip.textColor.toInt()
-          wordPaint.alpha = (state.opacity * 130).toInt().coerceIn(0, 255)
-        }
-      } else if (isHighlight) {
-        wordPaint.color = clip.textColor.toInt()
-      }
-
-      // Stroke for word
-      val effectiveStrokeWidth = max(clip.strokeWidth, 2.5f) * scaleFactor
-      val strokePaint = Paint(wordPaint).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = effectiveStrokeWidth
-        color = clip.strokeColor.toInt()
-      }
-
-      canvas.save()
-      val wordCenterX = currentX + (wordWidth / 2f)
-      canvas.translate(wordCenterX, startY)
-      if (wordScale != 1.0f) {
-        canvas.scale(wordScale, wordScale)
-      }
-
-      canvas.drawText(word, -wordWidth / 2f, 0f, strokePaint)
-      canvas.drawText(word, -wordWidth / 2f, 0f, wordPaint)
-      canvas.restore()
-
-      currentX += wordWidth + spaceWidth
-    }
+    canvas.restore()
   }
 
   fun renderToBitmap(

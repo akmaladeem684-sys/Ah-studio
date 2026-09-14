@@ -358,11 +358,20 @@ class VideoExporter(private val context: Context) {
    */
   fun canExportWithMedia3Transformer(timeline: Timeline): Boolean {
     if (timeline.videoClips.isEmpty()) return false
-    // Timelines with filters, color adjustments, chroma key, custom canvas overlays, text layers, stickers, animations, or effects use composition engine
+    // Timelines with filters, color adjustments, chroma key, custom canvas overlays, text layers, stickers, animations, effects, or clip transformations use composition engine
     if (timeline.filter.type != com.example.domain.model.FilterType.NONE ||
         timeline.adjustments != com.example.domain.model.VideoAdjustments() ||
         timeline.chromaKey.enabled ||
-        timeline.videoClips.any { it.filter?.type != com.example.domain.model.FilterType.NONE } ||
+        timeline.videoClips.any {
+          it.filter?.type != com.example.domain.model.FilterType.NONE ||
+          it.rotationDegrees != 0 ||
+          it.cropScale != 1.0f ||
+          it.cropOffsetX != 0f ||
+          it.cropOffsetY != 0f ||
+          it.flipHorizontal ||
+          it.flipVertical ||
+          it.opacity != 1.0f
+        } ||
         timeline.overlayClips.isNotEmpty() ||
         timeline.textClips.isNotEmpty() ||
         timeline.stickerClips.isNotEmpty() ||
@@ -712,22 +721,18 @@ class VideoExporter(private val context: Context) {
         try {
           setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
         } catch (ignored: Exception) {}
-        if (videoMime == MediaFormat.MIMETYPE_VIDEO_AVC) {
-          try {
-            if (exportWidth >= 2160 || exportHeight >= 2160) {
-              setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-              setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel51)
-            } else {
-              setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-              setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel41)
-            }
-          } catch (ignored: Exception) {}
-        }
       }
 
-      videoEncoder = MediaCodec.createEncoderByType(videoMime)
+      videoEncoder = try {
+        MediaCodec.createEncoderByType(videoMime)
+      } catch (e: Exception) {
+        Log.w(tag, "Failed to create encoder for $videoMime, falling back to AVC", e)
+        MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+      }
       val codecInfo = videoEncoder.codecInfo
-      val caps = codecInfo.getCapabilitiesForType(videoMime)
+      val caps = codecInfo.getCapabilitiesForType(videoEncoder.name.let {
+        try { videoEncoder.inputFormat.getString(MediaFormat.KEY_MIME) ?: videoMime } catch (e: Exception) { videoMime }
+      })
       val chosenColorFormat = if (caps.colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)) {
         MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
       } else if (caps.colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar)) {
@@ -742,7 +747,19 @@ class VideoExporter(private val context: Context) {
       if (supportsSurface) {
         try {
           videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-          videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          try {
+            videoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          } catch (configEx: Exception) {
+            Log.w(tag, "Standard configure failed, retrying basic format", configEx)
+            videoEncoder.reset()
+            val basicFmt = MediaFormat.createVideoFormat(videoMime, exportWidth, exportHeight).apply {
+              setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+              setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+              setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+              setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            }
+            videoEncoder.configure(basicFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          }
           val surface = videoEncoder.createInputSurface()
           encoderInputSurface = surface
 
@@ -1334,14 +1351,15 @@ class VideoExporter(private val context: Context) {
         retriever.getFrameAtTime(sourceUs, MediaMetadataRetriever.OPTION_CLOSEST)
       }
 
-      // Check orientation metadata from source video and correct rotation
+      // Check orientation metadata from source video (only needed on pre-API 27)
       val orientationDegrees = try {
         retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
       } catch (e: Exception) {
         0
       }
 
-      val orientedBmp = if (rawBmp != null && orientationDegrees != 0) {
+      // MediaMetadataRetriever auto-rotates on API 27+ (Android 8.1+)
+      val orientedBmp = if (rawBmp != null && orientationDegrees != 0 && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O_MR1) {
         val matrix = Matrix().apply { postRotate(orientationDegrees.toFloat()) }
         val rotated = Bitmap.createBitmap(rawBmp, 0, 0, rawBmp.width, rawBmp.height, matrix, true)
         if (rotated != rawBmp) {

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import com.example.domain.model.Timeline
 import com.example.domain.model.TrackHeight
@@ -163,7 +164,7 @@ fun MultiTrackTimeline(
   val density = LocalDensity.current
 
   val totalDuration = timeline.totalDurationMs
-  val msPerPixel = remember(zoom) { (20f / zoom).coerceIn(2.5f, 120f) }
+  val msPerPixel = remember(zoom) { (20f / zoom).coerceIn(1.25f, 120f) }
   val maxTimelineMs = remember(timeline, totalDuration) {
     if (timeline.videoClips.isNotEmpty()) {
       (timeline.videoClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L).coerceAtLeast(100L)
@@ -190,7 +191,16 @@ fun MultiTrackTimeline(
 
   // Touch Scrubbing & Drag gesture state
   var isTouchScrubbing by remember { mutableStateOf(false) }
+  var isPinching by remember { mutableStateOf(false) }
   var scrubAccumulatorMs by remember { mutableFloatStateOf(currentPosMs.toFloat()) }
+
+  // Auto-hide pinch zoom indicator after 1.2s of inactivity
+  LaunchedEffect(isPinching, zoom) {
+    if (isPinching) {
+      delay(1200)
+      isPinching = false
+    }
+  }
 
   // Sync scrubAccumulatorMs when currentPosMs changes externally
   LaunchedEffect(currentPosMs) {
@@ -237,6 +247,10 @@ fun MultiTrackTimeline(
           totalDurationMs = timeline.totalDurationMs,
           maxTimelineMs = maxTimelineMs,
           msPerPixel = msPerPixel,
+          zoom = zoom,
+          onZoomChange = onZoomChange,
+          onPinchStart = { isPinching = true },
+          onPinchEnd = { isPinching = false },
           fps = fps,
           isFrameSnapping = isFrameSnapping,
           centerPaddingDp = centerPaddingDp,
@@ -309,8 +323,9 @@ fun MultiTrackTimeline(
                 }
                 .pointerInput(zoom) {
                   detectTransformGestures { _, _, zoomChange, _ ->
-                    if (kotlin.math.abs(zoomChange - 1f) > 0.01f) {
-                      onZoomChange((zoom * zoomChange).coerceIn(0.25f, 4.5f))
+                    if (kotlin.math.abs(zoomChange - 1f) > 0.005f) {
+                      isPinching = true
+                      onZoomChange((zoom * zoomChange).coerceIn(0.25f, 8.0f))
                     }
                   }
                 }
@@ -1052,13 +1067,14 @@ fun MultiTrackTimeline(
             )
           }
 
-          // Floating Frame & Timecode Tooltip Bubble when Touch Scrubbing
-          if (isTouchScrubbing) {
+          // Floating Frame & Timecode Tooltip Bubble when Touch Scrubbing or Zooming
+          if (isTouchScrubbing || isPinching) {
             val frameNum = (currentPosMs / (1000.0 / fps)).toLong()
+            val zoomPct = (zoom * 100).roundToInt()
             Surface(
               shape = RoundedCornerShape(4.dp),
               color = Color.Black.copy(alpha = 0.92f),
-              border = BorderStroke(1.dp, AmberAccent),
+              border = BorderStroke(1.dp, if (isPinching) CyanAccent else AmberAccent),
               modifier = Modifier
                 .align(Alignment.TopCenter)
                 .offset(y = 22.dp)
@@ -1068,24 +1084,51 @@ fun MultiTrackTimeline(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
               ) {
-                Text(
-                  text = formatDurationShort(currentPosMs),
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AmberAccent
+                if (isPinching) {
+                  Icon(
+                    imageVector = Icons.Default.ZoomIn,
+                    contentDescription = null,
+                    tint = CyanAccent,
+                    modifier = Modifier.size(12.dp)
                   )
-                )
-                Text(
-                  text = "F$frameNum",
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 8.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = CyanAccent
+                  Text(
+                    text = "${zoomPct}%",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontFamily = FontFamily.Monospace,
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = CyanAccent
+                    )
                   )
-                )
+                  Text(
+                    text = "${String.format(java.util.Locale.US, "%.1f", 1000f / (msPerPixel * fps))} px/f",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontFamily = FontFamily.Monospace,
+                      fontSize = 8.5.sp,
+                      fontWeight = FontWeight.Normal,
+                      color = Color.White.copy(alpha = 0.8f)
+                    )
+                  )
+                } else {
+                  Text(
+                    text = formatDurationShort(currentPosMs),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontFamily = FontFamily.Monospace,
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = AmberAccent
+                    )
+                  )
+                  Text(
+                    text = "F$frameNum",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontFamily = FontFamily.Monospace,
+                      fontSize = 8.5.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = CyanAccent
+                    )
+                  )
+                }
               }
             }
           }
@@ -1238,6 +1281,10 @@ private fun TimelineRulerHeader(
   totalDurationMs: Long,
   maxTimelineMs: Long,
   msPerPixel: Float,
+  zoom: Float,
+  onZoomChange: (Float) -> Unit,
+  onPinchStart: () -> Unit = {},
+  onPinchEnd: () -> Unit = {},
   fps: Int,
   isFrameSnapping: Boolean,
   centerPaddingDp: androidx.compose.ui.unit.Dp,
@@ -1279,10 +1326,19 @@ private fun TimelineRulerHeader(
     }
 
     // Timeline Ruler with Time Markers & Dots (Scrolls smoothly under fixed center CTI)
+    // Supports pinch-to-zoom directly on ruler
     Box(
       modifier = Modifier
         .weight(1f)
         .fillMaxHeight()
+        .pointerInput(zoom) {
+          detectTransformGestures { _, _, zoomChange, _ ->
+            if (kotlin.math.abs(zoomChange - 1f) > 0.005f) {
+              onPinchStart()
+              onZoomChange((zoom * zoomChange).coerceIn(0.25f, 8.0f))
+            }
+          }
+        }
         .horizontalScroll(horizontalScrollState)
     ) {
       Row(modifier = Modifier.fillMaxHeight()) {

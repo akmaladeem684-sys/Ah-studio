@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
@@ -35,6 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextStyle
 import com.example.domain.model.TextClip
 import com.example.engine.SelectedTrackElement
 import com.example.engine.text.TextLayerRenderer
@@ -48,7 +51,8 @@ enum class TextStudioMainTab(val label: String) {
   FONTS("Fonts"),
   STYLES("Styles"),
   EFFECTS("Effects"),
-  ANIMATIONS("Animations")
+  ANIMATIONS("Animations"),
+  BUBBLE("Bubble")
 }
 
 enum class TemplateViewLayout {
@@ -158,10 +162,11 @@ fun TextTemplatesBrowserPanel(
     mutableStateOf(selectedTextClip?.text?.ifBlank { "Your Text Here" } ?: "Your Text Here")
   }
 
-  // Layout mode: 2-Col (default for mobile so preview is large), 4-Col, or Feed
-  var viewLayout by remember { mutableStateOf(TemplateViewLayout.GRID_2COL) }
   var searchQuery by remember { mutableStateOf("") }
-  var selectedCategory by remember { mutableStateOf("All") }
+  var isSearchActive by remember { mutableStateOf(false) }
+  var isExpandedTextEditorOpen by remember { mutableStateOf(false) }
+  var selectedCategory by remember { mutableStateOf("Trending") }
+  var selectedTemplateId by remember { mutableStateOf("capcut_default") }
   var globalSpeedMultiplier by remember { mutableFloatStateOf(1.0f) }
 
   // Modal inspection / large preview state
@@ -232,6 +237,51 @@ fun TextTemplatesBrowserPanel(
           it.category.equals("Trending", ignoreCase = true) || it.isTrending || it.tags.contains("Trending", ignoreCase = true)
         }
       }
+      "KATSEYE👠" -> {
+        filtered = filtered.filter {
+          it.name.contains("KATSEYE", ignoreCase = true) || it.category.equals("Social", ignoreCase = true) || it.tags.contains("Trend", ignoreCase = true)
+        }
+      }
+      "Whimsical" -> {
+        filtered = filtered.filter {
+          it.category.equals("Creative", ignoreCase = true) || it.category.equals("Cartoon", ignoreCase = true) || it.name.contains("True", ignoreCase = true) || it.tags.contains("Whimsical", ignoreCase = true)
+        }
+      }
+      "Popular" -> {
+        filtered = filtered.filter {
+          it.isTrending || it.category.equals("Popular", ignoreCase = true) || it.isPremium
+        }
+      }
+      "Title" -> {
+        filtered = filtered.filter {
+          it.category.equals("Title", ignoreCase = true) || it.category.equals("Intro", ignoreCase = true) || it.name.contains("Title", ignoreCase = true)
+        }
+      }
+      "Social" -> {
+        filtered = filtered.filter {
+          it.category.equals("Social", ignoreCase = true) || it.name.contains("Subscribe", ignoreCase = true) || it.tags.contains("Youtube", ignoreCase = true)
+        }
+      }
+      "Cyberpunk" -> {
+        filtered = filtered.filter {
+          it.category.equals("Cyberpunk", ignoreCase = true) || it.category.equals("Neon", ignoreCase = true) || it.hasGlow
+        }
+      }
+      "Vlog" -> {
+        filtered = filtered.filter {
+          it.category.equals("Vlog", ignoreCase = true) || it.category.equals("Minimal", ignoreCase = true) || it.fontFamily.equals("Montserrat", ignoreCase = true)
+        }
+      }
+      "Minimal" -> {
+        filtered = filtered.filter {
+          it.category.equals("Minimal", ignoreCase = true) || it.fontFamily.equals("Monospace", ignoreCase = true) || it.fontFamily.equals("Sans-Serif", ignoreCase = true)
+        }
+      }
+      "Urdu & Arabic" -> {
+        filtered = filtered.filter {
+          it.category.equals("Urdu", ignoreCase = true) || it.category.equals("Arabic", ignoreCase = true) || isRtlText(it.sampleText)
+        }
+      }
       "Recently Used" -> {
         val idOrder = recentTemplateIds.mapIndexed { idx, id -> id to idx }.toMap()
         filtered = filtered.filter { it.id in recentTemplateIds }
@@ -241,7 +291,7 @@ fun TextTemplatesBrowserPanel(
         // Show all
       }
       else -> {
-        filtered = filtered.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+        filtered = filtered.filter { it.category.equals(selectedCategory, ignoreCase = true) || it.tags.contains(selectedCategory, ignoreCase = true) }
       }
     }
 
@@ -250,7 +300,6 @@ fun TextTemplatesBrowserPanel(
         it.name.contains(searchQuery, ignoreCase = true) ||
           it.category.contains(searchQuery, ignoreCase = true) ||
           it.sampleText.contains(searchQuery, ignoreCase = true) ||
-          it.animationType.contains(searchQuery, ignoreCase = true) ||
           it.tags.contains(searchQuery, ignoreCase = true)
       }
     }
@@ -364,180 +413,140 @@ fun TextTemplatesBrowserPanel(
   Column(
     modifier = modifier
       .fillMaxWidth()
-      .background(Color(0xFF0B0F19))
-      .padding(horizontal = 12.dp, vertical = 8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp)
+      .background(Color(0xFF141519))
+      .padding(bottom = 8.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp)
   ) {
-    // -------------------------------------------------------------
-    // SECTION 22: TOP TEXT STUDIO HEADER
-    // -------------------------------------------------------------
+    // 1. TOP BAR: Input field [ Enter text ⤢ ] + confirm checkmark ✓ (matches screenshot)
     Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
-          modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFFF59E0B)))),
-          contentAlignment = Alignment.Center
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .height(40.dp)
+          .clip(RoundedCornerShape(8.dp))
+          .background(Color(0xFF22242B))
+          .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.CenterStart
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween
         ) {
-          Text("Tt", fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.White)
-        }
-        Column {
-          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-              "Text Studio",
-              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
-            )
-            // LIVE badge indicator
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFFEF4444).copy(alpha = 0.2f))
-                .padding(horizontal = 4.dp, vertical = 1.dp)
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Box(
-                  modifier = Modifier
-                    .size(5.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFEF4444))
-                )
-                Text("LIVE", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFFEF4444))
+          BasicTextField(
+            value = userText,
+            onValueChange = { newText ->
+              userText = newText
+              if (selectedTextClip != null) {
+                viewModel.timelineEngine.updateTextClip(selectedTextClip.copy(text = newText))
               }
+            },
+            singleLine = true,
+            textStyle = TextStyle(
+              color = Color.White,
+              fontSize = 14.sp,
+              fontWeight = FontWeight.Medium,
+              textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Content
+            ),
+            modifier = Modifier.weight(1f),
+            decorationBox = { innerTextField ->
+              if (userText.isEmpty()) {
+                Text(
+                  "Enter text",
+                  color = Color(0xFF7E828E),
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.Normal
+                )
+              }
+              innerTextField()
             }
-          }
-          Text(
-            "Templates • Fonts • Styles • Effects • Animations",
-            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
           )
+
+          IconButton(
+            onClick = { isExpandedTextEditorOpen = true },
+            modifier = Modifier.size(24.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.OpenInFull,
+              contentDescription = "Expand text editor",
+              tint = Color(0xFF9E9E9E),
+              modifier = Modifier.size(16.dp)
+            )
+          }
         }
       }
 
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Right side: + Add Text button
-        Button(
-          onClick = addNewTextAction,
-          shape = RoundedCornerShape(8.dp),
-          colors = ButtonDefaults.buttonColors(
-            containerColor = AmberAccent,
-            contentColor = Color.Black
-          ),
-          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-          modifier = Modifier.height(30.dp)
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-            Text("+ Add Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          }
-        }
-
-        // Close button: X
-        IconButton(
-          onClick = onDismiss,
-          modifier = Modifier.size(30.dp)
-        ) {
-          Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-        }
+      // Checkmark button (✓) to confirm & dismiss
+      IconButton(
+        onClick = onDismiss,
+        modifier = Modifier.size(36.dp)
+      ) {
+        Icon(
+          imageVector = Icons.Default.Check,
+          contentDescription = "Confirm",
+          tint = Color(0xFFE2E4EA),
+          modifier = Modifier.size(24.dp)
+        )
       }
     }
 
-    // -------------------------------------------------------------
-    // SECTION 23: TEXT INPUT (TEXT CONTENT - Urdu & English Supported)
-    // -------------------------------------------------------------
-    OutlinedTextField(
-      value = userText,
-      onValueChange = { newText ->
-        userText = newText
-        if (selectedTextClip != null) {
-          viewModel.timelineEngine.updateTextClip(selectedTextClip.copy(text = newText))
-        } else {
-          val playhead = viewModel.timelineEngine.currentPositionMs.value
-          val newClip = TextClip(
-            id = java.util.UUID.randomUUID().toString(),
-            text = if (newText.isNotBlank()) newText else "Your Text Here",
-            timelineStartMs = playhead,
-            durationMs = 3000L,
-            fontSizeSp = 30f,
-            textColor = 0xFFFFFFFF,
-            animationType = "Pop"
-          )
-          viewModel.timelineEngine.addTextClipObject(newClip)
-          viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
-        }
-      },
-      label = {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-          Text("TEXT CONTENT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AmberAccent)
-          Text("• English & اردو Supported", fontSize = 9.sp, color = TextSecondary)
-        }
-      },
-      placeholder = { Text("Type here in English, اردو or any script...", color = TextSecondary, fontSize = 11.sp) },
-      trailingIcon = {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 6.dp)) {
-          Text(
-            "${userText.length} chars",
-            fontSize = 9.sp,
-            color = TextSecondary,
-            modifier = Modifier.padding(end = 4.dp)
-          )
-          if (userText.isNotEmpty()) {
-            IconButton(
-              onClick = {
-                userText = ""
-                if (selectedTextClip != null) {
-                  viewModel.timelineEngine.updateTextClip(selectedTextClip.copy(text = ""))
-                }
-              },
-              modifier = Modifier.size(24.dp)
-            ) {
-              Icon(Icons.Default.Clear, contentDescription = "Clear text", tint = TextSecondary, modifier = Modifier.size(14.dp))
-            }
-          }
-        }
-      },
-      singleLine = true,
-      textStyle = LocalTextStyle.current.copy(
-        fontSize = 13.sp,
-        textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Content
-      ),
-      modifier = Modifier.fillMaxWidth(),
-      colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = AmberAccent,
-        unfocusedBorderColor = Color(0xFF1E293B),
-        focusedTextColor = TextPrimary,
-        unfocusedTextColor = TextPrimary,
-        focusedContainerColor = Color(0xFF131826),
-        unfocusedContainerColor = Color(0xFF131826)
+    // 2. Drag handle bar
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 1.dp),
+      contentAlignment = Alignment.Center
+    ) {
+      Box(
+        modifier = Modifier
+          .width(36.dp)
+          .height(3.5.dp)
+          .clip(CircleShape)
+          .background(Color(0xFF383A42))
       )
-    )
+    }
 
-    // -------------------------------------------------------------
-    // SECTION 24: MAIN TABS (Templates | Fonts | Styles | Effects | Animations)
-    // -------------------------------------------------------------
+    // 3. Main Studio Tabs: Templates | Fonts | Styles | Effects | Animations | Bubble
     LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      modifier = Modifier.fillMaxWidth()
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 8.dp),
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically
     ) {
       items(TextStudioMainTab.values()) { tab ->
         val isSelected = activeMainTab == tab
-        Surface(
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
           modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { activeMainTab = tab },
-          color = if (isSelected) AmberAccent else Color(0xFF1E293B),
-          shape = RoundedCornerShape(8.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { activeMainTab = tab }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
           Text(
             text = tab.label,
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            color = if (isSelected) Color.Black else TextSecondary,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            fontSize = 14.5.sp,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (isSelected) Color.White else Color(0xFF8E929E)
           )
+          Spacer(modifier = Modifier.height(4.dp))
+          if (isSelected) {
+            Box(
+              modifier = Modifier
+                .width(28.dp)
+                .height(2.5.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(Color(0xFF00E5FF))
+            )
+          } else {
+            Spacer(modifier = Modifier.height(2.5.dp))
+          }
         }
       }
     }
@@ -547,185 +556,128 @@ fun TextTemplatesBrowserPanel(
     // -------------------------------------------------------------
     when (activeMainTab) {
       TextStudioMainTab.TEMPLATES -> {
-        // ---------------------------------------------------------
-        // SECTION 13 & 20: SEARCH BAR + VIEW LAYOUT TOGGLE
-        // ---------------------------------------------------------
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          // Search input
-          OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search neon, 3D, Urdu, cinematic, sale...", color = TextSecondary, fontSize = 11.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp)) },
-            trailingIcon = {
-              if (searchQuery.isNotEmpty()) {
-                IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
-                  Icon(Icons.Default.Clear, contentDescription = "Clear search", tint = TextSecondary, modifier = Modifier.size(14.dp))
-                }
-              }
-            },
-            singleLine = true,
-            modifier = Modifier
-              .weight(1f)
-              .height(42.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = AmberAccent,
-              unfocusedBorderColor = Color(0xFF1E293B),
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary,
-              focusedContainerColor = Color(0xFF131826),
-              unfocusedContainerColor = Color(0xFF131826)
-            )
-          )
+        // CapCut Sub-category Navigation row
+        val categories = listOf(
+          "Trending", "Whimsical", "KATSEYE👠", "Popular", "Title",
+          "Social", "Cyberpunk", "Vlog", "Minimal", "Urdu & Arabic"
+        )
 
-          // View Layout selector (2-Col, 4-Col, Feed)
+        if (isSearchActive) {
           Row(
             modifier = Modifier
-              .clip(RoundedCornerShape(8.dp))
-              .background(Color(0xFF131826))
-              .padding(2.dp)
+              .fillMaxWidth()
+              .padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            IconButton(
-              onClick = { viewLayout = TemplateViewLayout.GRID_2COL },
+            Box(
               modifier = Modifier
-                .size(30.dp)
+                .weight(1f)
+                .height(36.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(if (viewLayout == TemplateViewLayout.GRID_2COL) AmberAccent else Color.Transparent)
+                .background(Color(0xFF1C1E24))
+                .padding(horizontal = 10.dp),
+              contentAlignment = Alignment.CenterStart
+            ) {
+              BasicTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                modifier = Modifier.fillMaxWidth(),
+                decorationBox = { inner ->
+                  if (searchQuery.isEmpty()) {
+                    Text("Search templates...", color = Color(0xFF6B7280), fontSize = 13.sp)
+                  }
+                  inner()
+                }
+              )
+            }
+            IconButton(
+              onClick = {
+                searchQuery = ""
+                isSearchActive = false
+              },
+              modifier = Modifier.size(28.dp)
+            ) {
+              Icon(Icons.Default.Close, contentDescription = "Close search", tint = Color(0xFF8E929E), modifier = Modifier.size(18.dp))
+            }
+          }
+        } else {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            // Search icon button
+            IconButton(
+              onClick = { isSearchActive = true },
+              modifier = Modifier.size(32.dp)
             ) {
               Icon(
-                Icons.Default.GridView,
-                contentDescription = "2-Col Grid",
-                tint = if (viewLayout == TemplateViewLayout.GRID_2COL) Color.Black else TextSecondary,
-                modifier = Modifier.size(16.dp)
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search",
+                tint = Color(0xFF8E929E),
+                modifier = Modifier.size(19.dp)
               )
             }
 
+            // Bookmark / Saved icon button
             IconButton(
-              onClick = { viewLayout = TemplateViewLayout.GRID_4COL },
-              modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (viewLayout == TemplateViewLayout.GRID_4COL) AmberAccent else Color.Transparent)
+              onClick = {
+                selectedCategory = if (selectedCategory == "Favorites") "Trending" else "Favorites"
+              },
+              modifier = Modifier.size(32.dp)
             ) {
               Icon(
-                Icons.Default.Apps,
-                contentDescription = "4-Col Compact",
-                tint = if (viewLayout == TemplateViewLayout.GRID_4COL) Color.Black else TextSecondary,
-                modifier = Modifier.size(16.dp)
+                imageVector = if (selectedCategory == "Favorites") Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder,
+                contentDescription = "Favorites",
+                tint = if (selectedCategory == "Favorites") Color(0xFF00E5FF) else Color(0xFF8E929E),
+                modifier = Modifier.size(19.dp)
               )
             }
 
-            IconButton(
-              onClick = { viewLayout = TemplateViewLayout.FEED },
+            // Thin vertical divider line
+            Box(
               modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (viewLayout == TemplateViewLayout.FEED) AmberAccent else Color.Transparent)
+                .padding(horizontal = 4.dp)
+                .width(1.dp)
+                .height(14.dp)
+                .background(Color(0xFF2C2F36))
+            )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            LazyRow(
+              horizontalArrangement = Arrangement.spacedBy(14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.weight(1f)
             ) {
-              Icon(
-                Icons.Default.ViewAgenda,
-                contentDescription = "Feed Showcase",
-                tint = if (viewLayout == TemplateViewLayout.FEED) Color.Black else TextSecondary,
-                modifier = Modifier.size(16.dp)
-              )
+              items(categories) { cat ->
+                val isCatSelected = selectedCategory.equals(cat, ignoreCase = true)
+                Text(
+                  text = cat,
+                  fontSize = 13.sp,
+                  fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Normal,
+                  color = if (isCatSelected) Color.White else Color(0xFF8E929E),
+                  modifier = Modifier
+                    .clickable { selectedCategory = cat }
+                    .padding(vertical = 4.dp)
+                )
+              }
             }
           }
         }
 
-        // ---------------------------------------------------------
-        // SECTION 25: CATEGORY NAVIGATION (Horizontal Scrolling Bar)
-        // ---------------------------------------------------------
-        LazyRow(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          // Favorites category
-          item {
-            val isFav = selectedCategory == "Favorites"
-            FilterChip(
-              selected = isFav,
-              onClick = { selectedCategory = "Favorites" },
-              label = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                  Icon(
-                    if (isFav) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                    contentDescription = null,
-                    tint = if (isFav) Color.Black else Color(0xFFF43F5E),
-                    modifier = Modifier.size(13.dp)
-                  )
-                  Text("Favorites (${favoriteTemplateIds.size})", fontSize = 11.sp, fontWeight = if (isFav) FontWeight.Bold else FontWeight.Normal)
-                }
-              },
-              colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = AmberAccent,
-                selectedLabelColor = Color.Black,
-                containerColor = Color(0xFF131826),
-                labelColor = TextPrimary
-              )
-            )
-          }
-
-          // Recently Used category
-          item {
-            val isRecent = selectedCategory == "Recently Used"
-            FilterChip(
-              selected = isRecent,
-              onClick = { selectedCategory = "Recently Used" },
-              label = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                  Icon(
-                    Icons.Default.History,
-                    contentDescription = null,
-                    tint = if (isRecent) Color.Black else Color(0xFF38BDF8),
-                    modifier = Modifier.size(13.dp)
-                  )
-                  Text("Recently Used (${recentTemplateIds.size})", fontSize = 11.sp, fontWeight = if (isRecent) FontWeight.Bold else FontWeight.Normal)
-                }
-              },
-              colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = AmberAccent,
-                selectedLabelColor = Color.Black,
-                containerColor = Color(0xFF131826),
-                labelColor = TextPrimary
-              )
-            )
-          }
-
-          // All 28 predefined categories
-          items(TemplateCategories.ALL_CATEGORIES) { catInfo ->
-            val isSelected = selectedCategory == catInfo.name
-            FilterChip(
-              selected = isSelected,
-              onClick = { selectedCategory = catInfo.name },
-              label = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                  Text(catInfo.iconEmoji, fontSize = 12.sp)
-                  Text(catInfo.name, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
-                }
-              },
-              colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = Color(0xFF6366F1),
-                selectedLabelColor = Color.White,
-                containerColor = Color(0xFF131826),
-                labelColor = TextSecondary
-              ),
-              border = FilterChipDefaults.filterChipBorder(
-                enabled = true,
-                selected = isSelected,
-                borderColor = Color(0xFF1E293B),
-                selectedBorderColor = Color(0xFF6366F1)
-              )
-            )
+        // 4-Column Template Grid (Exact match to screenshot)
+        val gridState = rememberLazyGridState()
+        val visibleKeys by remember {
+          derivedStateOf {
+            gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }.toSet()
           }
         }
 
-        // ---------------------------------------------------------
-        // SECTION 5 & 20: LIVE TEMPLATE PREVIEW CARDS
-        // ---------------------------------------------------------
         if (displayedTemplates.isEmpty()) {
           Box(
             modifier = Modifier
@@ -733,144 +685,34 @@ fun TextTemplatesBrowserPanel(
               .height(180.dp),
             contentAlignment = Alignment.Center
           ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-              Text("No templates found", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-              Text("Try searching a different keyword or category", color = TextSecondary, fontSize = 11.sp)
-            }
+            Text("No templates found", color = Color(0xFF8E929E), fontSize = 13.sp)
           }
         } else {
-          val effectiveFeedSpeed = globalSpeedMultiplier
+          LazyVerticalGrid(
+            columns = GridCells.Fixed(4),
+            state = gridState,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 12.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 260.dp, max = 380.dp)
+          ) {
+            items(displayedTemplates, key = { it.id }) { tpl ->
+              val isCardVisible = visibleKeys.isEmpty() || visibleKeys.contains(tpl.id)
+              val isSelected = selectedTemplateId == tpl.id
 
-          when (viewLayout) {
-            TemplateViewLayout.GRID_2COL -> {
-              val gridState = rememberLazyGridState()
-              val visibleKeys by remember {
-                derivedStateOf {
-                  gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }.toSet()
+              CapCutGridTemplateCard(
+                tpl = tpl,
+                customPreviewText = userText.ifBlank { null },
+                isSelected = isSelected,
+                isVisible = isCardVisible,
+                onCardClick = {
+                  selectedTemplateId = tpl.id
+                  applyTemplateAction(tpl, userText.ifBlank { null }, 1.0f)
+                  addRecent(tpl.id)
                 }
-              }
-
-              LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                state = gridState,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .heightIn(min = 320.dp, max = 440.dp)
-              ) {
-                items(displayedTemplates, key = { it.id }) { tpl ->
-                  val isFavorite = tpl.id in favoriteTemplateIds
-                  val isCardVisible = visibleKeys.isEmpty() || visibleKeys.contains(tpl.id)
-
-                  ModernGridTemplateCard(
-                    tpl = tpl,
-                    customPreviewText = userText.ifBlank { null },
-                    speedMultiplier = effectiveFeedSpeed,
-                    isFavorite = isFavorite,
-                    isVisible = isCardVisible,
-                    onToggleFavorite = { toggleFavorite(tpl.id) },
-                    onCardClick = {
-                      inspectingTemplate = tpl
-                      inspectingCustomText = userText.ifBlank { tpl.sampleText }
-                      inspectingSpeedMultiplier = effectiveFeedSpeed
-                      inspectingIsPlaying = true
-                    },
-                    onQuickUse = {
-                      applyTemplateAction(tpl, userText.ifBlank { null }, effectiveFeedSpeed)
-                    }
-                  )
-                }
-              }
-            }
-
-            TemplateViewLayout.GRID_4COL -> {
-              val gridState = rememberLazyGridState()
-              val visibleKeys by remember {
-                derivedStateOf {
-                  gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }.toSet()
-                }
-              }
-
-              LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                state = gridState,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .heightIn(min = 320.dp, max = 440.dp)
-              ) {
-                items(displayedTemplates, key = { it.id }) { tpl ->
-                  val isFavorite = tpl.id in favoriteTemplateIds
-                  val isCardVisible = visibleKeys.isEmpty() || visibleKeys.contains(tpl.id)
-
-                  GridShowcaseTemplateCard(
-                    tpl = tpl,
-                    customPreviewText = userText.ifBlank { null },
-                    speedMultiplier = effectiveFeedSpeed,
-                    isFavorite = isFavorite,
-                    isSelected = selectedTextClip != null && selectedTextClip.fontFamily.equals(tpl.fontFamily, ignoreCase = true),
-                    isVisible = isCardVisible,
-                    onToggleFavorite = { toggleFavorite(tpl.id) },
-                    onCardClick = {
-                      inspectingTemplate = tpl
-                      inspectingCustomText = userText.ifBlank { tpl.sampleText }
-                      inspectingSpeedMultiplier = effectiveFeedSpeed
-                      inspectingIsPlaying = true
-                    },
-                    onInspectClick = {
-                      inspectingTemplate = tpl
-                      inspectingCustomText = userText.ifBlank { tpl.sampleText }
-                      inspectingSpeedMultiplier = effectiveFeedSpeed
-                      inspectingIsPlaying = true
-                    }
-                  )
-                }
-              }
-            }
-
-            TemplateViewLayout.FEED -> {
-              val listState = rememberLazyListState()
-              val visibleKeys by remember {
-                derivedStateOf {
-                  listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }.toSet()
-                }
-              }
-
-              LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .heightIn(min = 320.dp, max = 440.dp)
-              ) {
-                items(displayedTemplates, key = { it.id }) { tpl ->
-                  val isFavorite = tpl.id in favoriteTemplateIds
-                  val isVisible = visibleKeys.contains(tpl.id)
-
-                  VerticalShowcaseTemplateCard(
-                    tpl = tpl,
-                    customPreviewText = userText.ifBlank { null },
-                    speedMultiplier = effectiveFeedSpeed,
-                    isFavorite = isFavorite,
-                    isVisible = isVisible,
-                    onToggleFavorite = { toggleFavorite(tpl.id) },
-                    onCardClick = {
-                      inspectingTemplate = tpl
-                      inspectingCustomText = userText.ifBlank { tpl.sampleText }
-                      inspectingSpeedMultiplier = effectiveFeedSpeed
-                      inspectingIsPlaying = true
-                    },
-                    onUseTemplate = {
-                      applyTemplateAction(tpl, userText.ifBlank { null }, effectiveFeedSpeed)
-                    }
-                  )
-                }
-              }
+              )
             }
           }
         }
@@ -879,7 +721,7 @@ fun TextTemplatesBrowserPanel(
       TextStudioMainTab.FONTS -> {
         // Quick Font family selector
         FontsQuickPicker(
-          selectedFont = selectedTextClip?.fontFamily ?: "Impact",
+          selectedFont = selectedTextClip?.fontFamily ?: "Sans-Serif",
           onSelectFont = { fontName ->
             if (selectedTextClip != null) {
               viewModel.timelineEngine.updateTextClip(selectedTextClip.copy(fontFamily = fontName))
@@ -910,6 +752,81 @@ fun TextTemplatesBrowserPanel(
           clip = selectedTextClip,
           onUpdate = { updated -> viewModel.timelineEngine.updateTextClip(updated) }
         )
+      }
+
+      TextStudioMainTab.BUBBLE -> {
+        // Speech bubbles & comic tags
+        BubbleQuickPicker(
+          clip = selectedTextClip,
+          onUpdate = { updated -> viewModel.timelineEngine.updateTextClip(updated) }
+        )
+      }
+    }
+  }
+
+  // Expanded text editor modal dialog
+  if (isExpandedTextEditorOpen) {
+    Dialog(onDismissRequest = { isExpandedTextEditorOpen = false }) {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2026)),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFF2C2F36))
+      ) {
+        Column(
+          modifier = Modifier.padding(16.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text("Edit Text", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+            IconButton(onClick = { isExpandedTextEditorOpen = false }, modifier = Modifier.size(28.dp)) {
+              Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF8E929E))
+            }
+          }
+          OutlinedTextField(
+            value = userText,
+            onValueChange = { newText ->
+              userText = newText
+              if (selectedTextClip != null) {
+                viewModel.timelineEngine.updateTextClip(selectedTextClip.copy(text = newText))
+              }
+            },
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 120.dp, max = 200.dp),
+            placeholder = { Text("Enter text...", color = Color(0xFF6B7280)) },
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = Color(0xFF00E5FF),
+              unfocusedBorderColor = Color(0xFF2C2F36),
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White,
+              focusedContainerColor = Color(0xFF141519),
+              unfocusedContainerColor = Color(0xFF141519)
+            ),
+            textStyle = TextStyle(
+              fontSize = 15.sp,
+              color = Color.White,
+              textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Content
+            )
+          )
+          Button(
+            onClick = { isExpandedTextEditorOpen = false },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = Color(0xFF00E5FF),
+              contentColor = Color.Black
+            )
+          ) {
+            Text("Done", fontWeight = FontWeight.Bold)
+          }
+        }
       }
     }
   }
@@ -1117,6 +1034,191 @@ fun TextTemplatesBrowserPanel(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
               Text("Apply Template", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Clean CapCut-Style 4-Column Template Card (Exact match to screenshot)
+ * Square aspect ratio, clean dark rounded tile, responsive text preview with template styles, cyan selection border.
+ */
+@Composable
+private fun CapCutGridTemplateCard(
+  tpl: TextTemplateItem,
+  customPreviewText: String?,
+  isSelected: Boolean,
+  isVisible: Boolean,
+  onCardClick: () -> Unit
+) {
+  val previewText = (customPreviewText?.takeIf { it.isNotBlank() } ?: tpl.sampleText).take(14)
+  val border = if (isSelected) {
+    BorderStroke(2.dp, Color(0xFF00E5FF))
+  } else {
+    BorderStroke(1.dp, Color(0xFF262830))
+  }
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .aspectRatio(1f)
+      .clip(RoundedCornerShape(8.dp))
+      .clickable(onClick = onCardClick),
+    shape = RoundedCornerShape(8.dp),
+    border = border,
+    colors = CardDefaults.cardColors(
+      containerColor = if (isSelected) Color(0xFF1E222D) else Color(0xFF1C1E24)
+    )
+  ) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(4.dp),
+      contentAlignment = Alignment.Center
+    ) {
+      // Stylized text preview inside card
+      val fontStyle = when (tpl.fontFamily) {
+        "Cursive" -> FontFamily.Cursive
+        "Monospace" -> FontFamily.Monospace
+        "Serif" -> FontFamily.Serif
+        else -> FontFamily.Default
+      }
+      val fontWeight = FontWeight(tpl.fontWeight.coerceIn(100, 900))
+      val mainColor = Color(tpl.textColor)
+
+      Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxSize()
+      ) {
+        Text(
+          text = previewText,
+          fontSize = 11.sp,
+          fontWeight = fontWeight,
+          fontFamily = fontStyle,
+          color = mainColor,
+          textAlign = TextAlign.Center,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+          lineHeight = 13.sp,
+          modifier = Modifier.padding(horizontal = 2.dp)
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+          text = tpl.name.take(12),
+          fontSize = 8.5.sp,
+          fontWeight = FontWeight.Normal,
+          color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF8E929E),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+      }
+
+      // Small Pro / Trending badge if applicable
+      if (tpl.category == "Trending" || tpl.category == "KATSEYE👠") {
+        Box(
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .clip(RoundedCornerShape(bottomStart = 4.dp))
+            .background(Color(0xFF00E5FF).copy(alpha = 0.2f))
+            .padding(horizontal = 3.dp, vertical = 1.dp)
+        ) {
+          Text("★", fontSize = 7.sp, color = Color(0xFF00E5FF))
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Bubble Quick Picker for Speech Bubbles & Comic Tags
+ */
+@Composable
+private fun BubbleQuickPicker(
+  clip: TextClip?,
+  onUpdate: (TextClip) -> Unit
+) {
+  val bubblePresets = listOf(
+    "None" to Pair(Color.Transparent, Color.Transparent),
+    "Comic Cloud" to Pair(Color(0xFFFFEE58), Color.Black),
+    "Speech Oval" to Pair(Color.White, Color.Black),
+    "Cyber Tag" to Pair(Color(0xFF00E5FF), Color.Black),
+    "Neon Pink" to Pair(Color(0xFFFF007F), Color.White),
+    "Dark Card" to Pair(Color(0xFF1E293B), Color.White),
+    "Retro Pixel" to Pair(Color(0xFF10B981), Color.Black),
+    "Warning Box" to Pair(Color(0xFFF59E0B), Color.Black),
+    "Minimal Glass" to Pair(Color(0x33FFFFFF), Color.White)
+  )
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 12.dp, vertical = 8.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    Text(
+      "Text Bubbles & Tags",
+      style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = Color.White)
+    )
+
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      items(bubblePresets) { (name, colors) ->
+        val (bgColor, textColor) = colors
+        val isSelected = clip?.hasBackground == true && clip.backgroundColor == bgColor.value.toLong()
+
+        Card(
+          modifier = Modifier
+            .width(88.dp)
+            .height(56.dp)
+            .clickable {
+              if (clip != null) {
+                onUpdate(
+                  clip.copy(
+                    hasBackground = (name != "None"),
+                    backgroundColor = bgColor.value.toLong(),
+                    textColor = if (name == "None") 0xFFFFFFFF else textColor.value.toLong(),
+                    bgPadding = if (name == "None") 0f else 14f,
+                    cornerRadius = if (name == "None") 0f else 10f
+                  )
+                )
+              }
+            },
+          shape = RoundedCornerShape(8.dp),
+          border = BorderStroke(
+            if (isSelected) 2.dp else 1.dp,
+            if (isSelected) Color(0xFF00E5FF) else Color(0xFF2C2F36)
+          ),
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1C23))
+        ) {
+          Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+          ) {
+            if (name == "None") {
+              Icon(Icons.Default.Close, contentDescription = "None", tint = Color(0xFF8E929E), modifier = Modifier.size(20.dp))
+            } else {
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(bgColor)
+                  .padding(horizontal = 6.dp, vertical = 3.dp)
+              ) {
+                Text(
+                  text = name,
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = textColor,
+                  maxLines = 1
+                )
+              }
             }
           }
         }

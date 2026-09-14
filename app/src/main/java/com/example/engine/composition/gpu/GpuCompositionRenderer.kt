@@ -231,6 +231,8 @@ class GpuCompositionRenderer(private val context: Context) {
           isVisible = true,
           zOrder = calculatedZ,
           opacity = sticker.opacity.coerceIn(0f, 1f),
+          vScale = -1.0f,
+          vOffset = 1.0f,
           blendMode = NativeBlendMode.PREMULTIPLIED,
           useCustomMatrix = true,
           transformMatrix = stkMatrix
@@ -264,6 +266,8 @@ class GpuCompositionRenderer(private val context: Context) {
           isVisible = true,
           zOrder = calculatedZ,
           opacity = text.opacity.coerceIn(0f, 1f),
+          vScale = -1.0f,
+          vOffset = 1.0f,
           blendMode = NativeBlendMode.PREMULTIPLIED,
           useCustomMatrix = true,
           transformMatrix = txtMatrix
@@ -379,11 +383,11 @@ class GpuCompositionRenderer(private val context: Context) {
       val baseScaleX: Float
       val baseScaleY: Float
       if (texAspect > vpAspect) {
-        baseScaleX = texAspect / vpAspect
-        baseScaleY = 1.0f
-      } else {
         baseScaleX = 1.0f
         baseScaleY = vpAspect / texAspect
+      } else {
+        baseScaleX = texAspect / vpAspect
+        baseScaleY = 1.0f
       }
 
       val scaleX = baseScaleX * (if (clip.flipHorizontal) -clip.cropScale else clip.cropScale) * kf.scaleX
@@ -480,7 +484,7 @@ class GpuCompositionRenderer(private val context: Context) {
       isOes = false,
       opacity = 1.0f,
       adjustments = overlayAdj,
-      filter = FilterSettings(),
+      filter = overlay.clip.filter ?: FilterSettings(),
       chromaKey = chromaKey,
       viewportWidth = viewportWidth,
       viewportHeight = viewportHeight,
@@ -500,7 +504,7 @@ class GpuCompositionRenderer(private val context: Context) {
     viewportWidth: Int,
     viewportHeight: Int
   ): CachedTexture? {
-    val hasAnim = clip.animationType != "None"
+    val hasAnim = clip.animationType != "None" || clip.animation3D != "None"
     val animTimeStep = if (hasAnim) (currentPosMs / 33L).toInt() else 0
 
     val hash = clip.text.hashCode() xor
@@ -509,8 +513,20 @@ class GpuCompositionRenderer(private val context: Context) {
         clip.fontWeight.hashCode() xor
         clip.backgroundColor.toInt() xor
         clip.strokeColor.toInt() xor
+        clip.strokeWidth.toInt() xor
         clip.fontFamily.hashCode() xor
         clip.animationType.hashCode() xor
+        clip.animation3D.hashCode() xor
+        clip.effectStyle.hashCode() xor
+        clip.depth3D.toInt() xor
+        clip.bevelAngle3D.toInt() xor
+        clip.is3D.hashCode() xor
+        clip.hasGradient.hashCode() xor
+        clip.gradientColorStart.toInt() xor
+        clip.hasGlow.hashCode() xor
+        clip.hasShadow.hashCode() xor
+        clip.opacity.hashCode() xor
+        clip.scale.hashCode() xor
         animTimeStep xor
         viewportWidth
 

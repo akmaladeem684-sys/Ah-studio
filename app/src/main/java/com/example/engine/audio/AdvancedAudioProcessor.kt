@@ -152,7 +152,64 @@ object AdvancedAudioProcessor {
       VoiceEffect.TELEPHONE -> {
         applyEqualizer(pcm, sampleRate, channels, lowDb = -18f, midDb = 6f, highDb = -18f)
       }
+      VoiceEffect.RADIO -> {
+        applyEqualizer(pcm, sampleRate, channels, lowDb = -22f, midDb = 8f, highDb = -22f)
+      }
+      VoiceEffect.MEGAPHONE -> {
+        val filtered = applyEqualizer(pcm, sampleRate, channels, lowDb = -16f, midDb = 10f, highDb = -12f)
+        for (i in filtered.indices) {
+          filtered[i] = (filtered[i] * 1.5f).toInt().coerceIn(-32000, 32000).toShort()
+        }
+        filtered
+      }
       VoiceEffect.ANONYMOUS -> pitchShiftResample(pcm, channels, pitchRatio = 0.82f)
+      VoiceEffect.ALIEN -> {
+        val shifted = pitchShiftResample(pcm, channels, pitchRatio = 1.25f)
+        for (i in shifted.indices) {
+          val tremolo = (1.0 + 0.3 * kotlin.math.sin(i * 0.05)).toFloat()
+          shifted[i] = (shifted[i] * tremolo).toInt().coerceIn(-32768, 32767).toShort()
+        }
+        shifted
+      }
+      VoiceEffect.GIANT -> pitchShiftResample(pcm, channels, pitchRatio = 0.62f)
+      VoiceEffect.ELF -> pitchShiftResample(pcm, channels, pitchRatio = 1.62f)
+      VoiceEffect.CARTOON -> pitchShiftResample(pcm, channels, pitchRatio = 1.35f)
+      VoiceEffect.AUTOTUNE, VoiceEffect.SPEECH_TO_SONG -> {
+        val bright = applyEqualizer(pcm, sampleRate, channels, lowDb = -4f, midDb = 3f, highDb = 6f)
+        pitchShiftResample(bright, channels, pitchRatio = 1.08f)
+      }
+      VoiceEffect.CHIPTUNE -> {
+        val res = ShortArray(pcm.size)
+        for (i in pcm.indices) {
+          // 8-bit reduction bitcrush
+          res[i] = ((pcm[i].toInt() shr 8) shl 8).toShort()
+        }
+        res
+      }
+      VoiceEffect.VOCODER -> {
+        val res = ShortArray(pcm.size)
+        val carrierFreq = 220.0
+        for (i in pcm.indices step channels) {
+          val t = (i / channels).toDouble() / sampleRate
+          val carrier = kotlin.math.sin(2.0 * Math.PI * carrierFreq * t).toFloat()
+          res[i] = (pcm[i] * carrier * 1.2f).toInt().coerceIn(-32768, 32767).toShort()
+          if (channels > 1 && i + 1 < pcm.size) {
+            res[i + 1] = (pcm[i + 1] * carrier * 1.2f).toInt().coerceIn(-32768, 32767).toShort()
+          }
+        }
+        res
+      }
+      VoiceEffect.DISCO -> {
+        val delaySamples = (sampleRate * 0.15).toInt() * channels
+        val res = ShortArray(pcm.size)
+        val decay = 0.5f
+        for (i in pcm.indices) {
+          val delayed = if (i >= delaySamples) res[i - delaySamples] else 0
+          val mix = pcm[i] + (delayed * decay).toInt()
+          res[i] = mix.coerceIn(-32768, 32767).toShort()
+        }
+        pitchShiftResample(res, channels, pitchRatio = 1.12f)
+      }
       VoiceEffect.NONE -> {
         if (customPitchShift != 0.0f) {
           val ratio = 2.0.pow((customPitchShift / 12.0).toDouble()).toFloat()

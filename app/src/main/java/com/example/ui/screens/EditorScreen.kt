@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -230,6 +231,7 @@ fun EditorScreen(
         .fillMaxSize()
         .background(StudioDarkBg),
       containerColor = StudioDarkBg,
+      contentWindowInsets = WindowInsets(0, 0, 0, 0),
       topBar = {
         EditorTopBar(
           activeResolution = activeResolution,
@@ -249,57 +251,55 @@ fun EditorScreen(
             showExportConfigDialog = true
           }
         )
-      },
-    bottomBar = {
-      // Bottom Navigation Bar hides when a tool panel is active and is restored when closed
-      AnimatedVisibility(
-        visible = activeTab == null,
-        enter = fadeIn() + slideInVertically { it },
-        exit = fadeOut() + slideOutVertically { it },
-        modifier = Modifier.navigationBarsPadding()
-      ) {
-        EditorBottomToolbar(
-          activeTab = activeTab,
-          onTabSelected = { tab ->
-            viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
-          },
-          onMoreClick = { showMoreToolsDialog = true }
-        )
       }
-    },
   ) { padding ->
     BoxWithConstraints(
       modifier = Modifier
         .fillMaxSize()
-        .padding(padding)
+        .padding(top = padding.calculateTopPadding())
     ) {
       val configuration = LocalConfiguration.current
       val screenHeight = configuration.screenHeightDp.dp
       val screenWidth = configuration.screenWidthDp.dp
       val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
       
-      // Fully responsive preview height adapted to screen size classes (small phones, standard phones, tablets)
-      val fixedPreviewHeight = remember(screenHeight, screenWidth, isLandscape) {
+      // Base preview height in normal state:
+      // Reduced by approximately 10mm (~50dp) compared to previous baseline, positioned higher up
+      val basePreviewHeight = remember(screenHeight, screenWidth, isLandscape) {
         if (isLandscape) {
           when {
-            screenHeight < 500.dp -> (screenHeight * 0.55f).coerceIn(200.dp, 280.dp)
-            screenHeight < 700.dp -> (screenHeight * 0.60f).coerceIn(260.dp, 360.dp)
-            else -> (screenHeight * 0.65f).coerceIn(320.dp, 480.dp)
+            screenHeight < 500.dp -> (screenHeight * 0.44f).coerceIn(150.dp, 210.dp)
+            screenHeight < 700.dp -> (screenHeight * 0.48f).coerceIn(190.dp, 260.dp)
+            else -> (screenHeight * 0.52f).coerceIn(240.dp, 350.dp)
           }
         } else {
           when {
-            screenHeight < 650.dp -> (screenHeight * 0.42f).coerceIn(220.dp, 320.dp) // Small phones
-            screenHeight < 850.dp -> (screenHeight * 0.50f).coerceIn(320.dp, 440.dp) // Standard phones
-            else -> (screenHeight * 0.55f).coerceIn(400.dp, 560.dp) // Large phones / tablets
+            screenHeight < 650.dp -> (screenHeight * 0.35f).coerceIn(170.dp, 240.dp) // Small phones
+            screenHeight < 850.dp -> (screenHeight * 0.41f).coerceIn(240.dp, 330.dp) // Standard phones
+            else -> (screenHeight * 0.45f).coerceIn(290.dp, 400.dp) // Large phones / tablets
           }
         }
       }
 
+      // When any bottom navigation tool/panel is opened, automatically reduce the video preview size by approx. 30%
+      val targetPreviewHeight = if (activeTab != null) {
+        basePreviewHeight * 0.70f
+      } else {
+        basePreviewHeight
+      }
+
+      // Smooth layout resizing animation when the navigation panel opens or closes
+      val animatedPreviewHeight by animateDpAsState(
+        targetValue = targetPreviewHeight,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "animated_preview_height"
+      )
+
       val responsiveSpacerHeight = remember(screenHeight) {
         when {
-          screenHeight < 650.dp -> 2.dp
-          screenHeight < 850.dp -> 4.dp
-          else -> 6.dp
+          screenHeight < 650.dp -> 0.dp
+          screenHeight < 850.dp -> 2.dp
+          else -> 4.dp
         }
       }
 
@@ -346,11 +346,11 @@ fun EditorScreen(
         }
       }
 
-      // 1. VIDEO PREVIEW CONTAINER (Fixed stable height: never shrinks, jumps or reflows)
+      // 1. VIDEO PREVIEW CONTAINER (Dynamically resizes with smooth animation when panel opens/closes)
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(fixedPreviewHeight)
+          .height(animatedPreviewHeight)
           .background(Color.Black)
           .testTag("video_preview_container"),
         contentAlignment = Alignment.Center
@@ -405,7 +405,7 @@ fun EditorScreen(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.Black)
-          .padding(horizontal = 16.dp, vertical = 6.dp),
+          .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
@@ -515,312 +515,339 @@ fun EditorScreen(
       // Responsive spacing between video preview and timeline
       Spacer(modifier = Modifier.height(responsiveSpacerHeight))
 
-      var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
-
-      if (draggedTransitionType != null) {
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-          shape = RoundedCornerShape(8.dp),
-          color = PurpleAccent.copy(alpha = 0.95f),
-          border = BorderStroke(1.dp, Color.White)
-        ) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(Icons.Default.Transform, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "Dragging \"${draggedTransitionType?.displayName}\" ➔ Tap any Cut diamond on timeline",
-                style = MaterialTheme.typography.bodySmall.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-              )
-            }
-            IconButton(
-              onClick = { draggedTransitionType = null },
-              modifier = Modifier.size(20.dp)
-            ) {
-              Icon(Icons.Default.Close, contentDescription = "Cancel Drag", tint = Color.White, modifier = Modifier.size(14.dp))
-            }
-          }
-        }
-      }
-
-      // STUDIO MULTI-TRACK TIMELINE: Full multi-track video, audio, text, sticker, and effect tracks
-      MultiTrackTimeline(
-        timeline = timeline,
-        currentPosMs = currentPosMs,
-        isPlaying = isPlaying,
-        onTogglePlayPause = { viewModel.timelineEngine.togglePlayPause() },
-        zoom = multiTrackZoom,
-        selectedElement = selectedElement,
-        selectedClipIds = selectedClipIds,
-        isMultiSelectMode = isMultiSelectMode,
-        snapIndicatorMs = snapIndicatorMs,
-        onSeek = {
-          viewModel.onScrubProgress(it)
-        },
-        onScrubStart = { viewModel.onScrubStart() },
-        onScrubStop = { viewModel.onScrubStop() },
-        onSelectElement = { viewModel.timelineEngine.selectElement(it) },
-        onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
-        onZoomChange = { multiTrackZoom = it },
-        onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
-        onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
-        onOpenKeyframeTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME) },
-        onOpenTransitionsTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRANSITIONS) },
-        selectedTransitionCutIndex = selectedTransitionCutIndex,
-        onSelectTransitionCut = { cutIdx ->
-          viewModel.timelineEngine.setSelectedTransitionCutIndex(cutIdx)
-        },
-        draggedTransitionType = draggedTransitionType,
-        onDropTransition = { cutIdx, type ->
-          viewModel.timelineEngine.setTransition(cutIdx, type)
-          draggedTransitionType = null
-        },
-        onAddMedia = {
-          try {
-            timelineMediaPickerLauncher.launch(
-              PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-            )
-          } catch (e: Exception) {
-            viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA)
-          }
-        },
-        onAddAudio = {
-          viewModel.setActiveToolbarTab(EditorToolbarTab.AUDIO)
-        },
-        onAddText = {
-          activeTextSubTool = TextSubTool.TEXT_TEMPLATES
-          viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
-        },
-        onAddOverlay = {
-          viewModel.setActiveToolbarTab(EditorToolbarTab.OVERLAY)
-        },
-        onAddSticker = {
-          viewModel.setActiveToolbarTab(EditorToolbarTab.STICKERS)
-        },
-        onAddEffect = {
-          viewModel.setActiveToolbarTab(EditorToolbarTab.EFFECTS)
-        },
-        isTracksSyncEnabled = isTracksSyncEnabled,
-        onToggleTracksSync = { viewModel.timelineEngine.toggleTracksSync() },
-        onMoveToPlayhead = { viewModel.timelineEngine.moveSelectedClipToPlayhead() },
-        onSplitAllTracks = { viewModel.timelineEngine.splitAllTracksAtPlayhead() },
-        onSplitClip = {
-          viewModel.timelineEngine.splitAtPlayhead()
-        },
-        onTrimLeftToPlayhead = {
-          viewModel.timelineEngine.trimClipLeftToPlayhead()
-        },
-        onTrimRightToPlayhead = {
-          viewModel.timelineEngine.trimClipRightToPlayhead()
-        },
-        onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
-        onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
-        onNormalDelete = { viewModel.timelineEngine.normalDelete() },
-        onDuplicateClip = { viewModel.timelineEngine.duplicateClips() },
-        onCopyClip = { viewModel.timelineEngine.copySelectedClips() },
-        onPasteClip = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
-        onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
-        onNextPeak = { viewModel.jumpToNextAudioPeak() },
-        onPrevPeak = { viewModel.jumpToPrevAudioPeak() },
-        onNextSilence = { viewModel.jumpToNextAudioSilence() },
-        onPrevSilence = { viewModel.jumpToPrevAudioSilence() },
-        onRemoveSilence = { viewModel.removeSilenceInSelectedAudioClip() },
-        waveformStyle = waveformStyle,
-        onToggleWaveformStyle = { viewModel.cycleWaveformStyle() },
-        fps = timelineFps,
-        isFrameSnapping = isFrameSnapping,
-        onStepFrames = { delta ->
-          viewModel.timelineEngine.stepFrames(delta)
-          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-        },
-        onSeekToPrevCut = {
-          viewModel.timelineEngine.seekToPreviousCut()
-          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-        },
-        onSeekToNextCut = {
-          viewModel.timelineEngine.seekToNextCut()
-          viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
-        },
-        onFpsChange = { viewModel.timelineEngine.setTimelineFps(it) },
-        onToggleFrameSnapping = { viewModel.timelineEngine.toggleFrameSnapping() },
-        onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
-        onMoveClipStart = { clipId -> viewModel.beginMoveClip(clipId) },
-        onMoveClipEnd = { _ -> viewModel.endMoveClip() },
-        onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
-        onTrimClipLeftStart = { clipId -> viewModel.beginTrimClipLeft(clipId) },
-        onTrimClipLeftEnd = { _ -> viewModel.endTrimClipLeft() },
-        onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
-        onTrimClipRightStart = { clipId -> viewModel.beginTrimClipRight(clipId) },
-        onTrimClipRightEnd = { _ -> viewModel.endTrimClipRight() },
-        onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
-        onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
-        onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
-        onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
-        onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
-        onSelectKeyframe = { viewModel.timelineEngine.selectKeyframe(it) },
-        onMoveKeyframe = { kfId, newTime -> viewModel.timelineEngine.moveKeyframe(kfId, newTime) },
-        onAddAudioKeyframe = { clipId, relTime, vol ->
-          viewModel.timelineEngine.addAudioVolumeKeyframe(clipId, relTime, vol)
-        },
-        onUpdateAudioKeyframe = { clipId, kfId, relTime, vol ->
-          viewModel.timelineEngine.updateAudioVolumeKeyframe(clipId, kfId, relTime, vol)
-        },
-        onDeleteAudioKeyframe = { clipId, kfId ->
-          viewModel.timelineEngine.deleteAudioVolumeKeyframe(clipId, kfId)
-        },
+      // 1. DEFAULT EDITOR VIEW: Multi-track Timeline + Floating Bottom Navigation Bar
+      AnimatedVisibility(
+        visible = activeTab == null,
+        enter = fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) +
+          expandVertically(animationSpec = tween(300, easing = FastOutSlowInEasing), expandFrom = Alignment.Top),
+        exit = fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing)) +
+          shrinkVertically(animationSpec = tween(260, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top),
         modifier = Modifier
           .fillMaxWidth()
           .weight(1f)
-      )
+      ) {
+          Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+            ) {
+              var multiTrackZoom by remember { mutableFloatStateOf(1.0f) }
 
-      // HIDDEN SIDEBAR (Old layers panel - keep code but hide: 0% width, takes no space)
-      Box(
-        modifier = Modifier
-          .size(0.dp)
-          .testTag("layers_panel")
-      )
-    }
+          if (draggedTransitionType != null) {
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+              shape = RoundedCornerShape(8.dp),
+              color = PurpleAccent.copy(alpha = 0.95f),
+              border = BorderStroke(1.dp, Color.White)
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(Icons.Default.Transform, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(
+                    text = "Dragging \"${draggedTransitionType?.displayName}\" ➔ Tap any Cut diamond on timeline",
+                    style = MaterialTheme.typography.bodySmall.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                  )
+                }
+                IconButton(
+                  onClick = { draggedTransitionType = null },
+                  modifier = Modifier.size(20.dp)
+                ) {
+                  Icon(Icons.Default.Close, contentDescription = "Cancel Drag", tint = Color.White, modifier = Modifier.size(14.dp))
+                }
+              }
+            }
+          }
 
-    // 2. Active Sub-Tool Panel Overlay (Overlays at the bottom without shifting or resizing preview/timeline)
+          // STUDIO MULTI-TRACK TIMELINE: Full multi-track video, audio, text, sticker, and effect tracks
+          MultiTrackTimeline(
+            timeline = timeline,
+            currentPosMs = currentPosMs,
+            isPlaying = isPlaying,
+            onTogglePlayPause = { viewModel.timelineEngine.togglePlayPause() },
+            zoom = multiTrackZoom,
+            selectedElement = selectedElement,
+            selectedClipIds = selectedClipIds,
+            isMultiSelectMode = isMultiSelectMode,
+            snapIndicatorMs = snapIndicatorMs,
+            onSeek = {
+              viewModel.onScrubProgress(it)
+            },
+            onScrubStart = { viewModel.onScrubStart() },
+            onScrubStop = { viewModel.onScrubStop() },
+            onSelectElement = { viewModel.timelineEngine.selectElement(it) },
+            onToggleClipSelection = { viewModel.timelineEngine.toggleSelectClip(it) },
+            onZoomChange = { multiTrackZoom = it },
+            onReorderVideoClips = { from, to -> viewModel.reorderVideoClips(from, to) },
+            onOpenTrimTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRIM) },
+            onOpenKeyframeTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.KEYFRAME) },
+            onOpenTransitionsTool = { viewModel.setActiveToolbarTab(EditorToolbarTab.TRANSITIONS) },
+            selectedTransitionCutIndex = selectedTransitionCutIndex,
+            onSelectTransitionCut = { cutIdx ->
+              viewModel.timelineEngine.setSelectedTransitionCutIndex(cutIdx)
+            },
+            draggedTransitionType = draggedTransitionType,
+            onDropTransition = { cutIdx, type ->
+              viewModel.timelineEngine.setTransition(cutIdx, type)
+              draggedTransitionType = null
+            },
+            onAddMedia = {
+              try {
+                timelineMediaPickerLauncher.launch(
+                  PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                )
+              } catch (e: Exception) {
+                viewModel.setActiveToolbarTab(EditorToolbarTab.MEDIA)
+              }
+            },
+            onAddAudio = {
+              viewModel.setActiveToolbarTab(EditorToolbarTab.AUDIO)
+            },
+            onAddText = {
+              activeTextSubTool = TextSubTool.TEXT_TEMPLATES
+              viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
+            },
+            onAddOverlay = {
+              viewModel.setActiveToolbarTab(EditorToolbarTab.OVERLAY)
+            },
+            onAddSticker = {
+              viewModel.setActiveToolbarTab(EditorToolbarTab.STICKERS)
+            },
+            onAddEffect = {
+              viewModel.setActiveToolbarTab(EditorToolbarTab.EFFECTS)
+            },
+            isTracksSyncEnabled = isTracksSyncEnabled,
+            onToggleTracksSync = { viewModel.timelineEngine.toggleTracksSync() },
+            onMoveToPlayhead = { viewModel.timelineEngine.moveSelectedClipToPlayhead() },
+            onSplitAllTracks = { viewModel.timelineEngine.splitAllTracksAtPlayhead() },
+            onSplitClip = {
+              viewModel.timelineEngine.splitAtPlayhead()
+            },
+            onTrimLeftToPlayhead = {
+              viewModel.timelineEngine.trimClipLeftToPlayhead()
+            },
+            onTrimRightToPlayhead = {
+              viewModel.timelineEngine.trimClipRightToPlayhead()
+            },
+            onDeleteClip = { viewModel.timelineEngine.deleteSelected() },
+            onRippleDelete = { viewModel.timelineEngine.rippleDelete() },
+            onNormalDelete = { viewModel.timelineEngine.normalDelete() },
+            onDuplicateClip = { viewModel.timelineEngine.duplicateClips() },
+            onCopyClip = { viewModel.timelineEngine.copySelectedClips() },
+            onPasteClip = { viewModel.timelineEngine.pasteClipsAtPlayhead() },
+            onToggleMultiSelect = { viewModel.timelineEngine.toggleMultiSelectMode() },
+            onNextPeak = { viewModel.jumpToNextAudioPeak() },
+            onPrevPeak = { viewModel.jumpToPrevAudioPeak() },
+            onNextSilence = { viewModel.jumpToNextAudioSilence() },
+            onPrevSilence = { viewModel.jumpToPrevAudioSilence() },
+            onRemoveSilence = { viewModel.removeSilenceInSelectedAudioClip() },
+            waveformStyle = waveformStyle,
+            onToggleWaveformStyle = { viewModel.cycleWaveformStyle() },
+            fps = timelineFps,
+            isFrameSnapping = isFrameSnapping,
+            onStepFrames = { delta ->
+              viewModel.timelineEngine.stepFrames(delta)
+              viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+            },
+            onSeekToPrevCut = {
+              viewModel.timelineEngine.seekToPreviousCut()
+              viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+            },
+            onSeekToNextCut = {
+              viewModel.timelineEngine.seekToNextCut()
+              viewModel.playbackEngine.seekTo(viewModel.timelineEngine.currentPositionMs.value)
+            },
+            onFpsChange = { viewModel.timelineEngine.setTimelineFps(it) },
+            onToggleFrameSnapping = { viewModel.timelineEngine.toggleFrameSnapping() },
+            onMoveClip = { clipId, delta -> viewModel.moveClipByDelta(clipId, delta) },
+            onMoveClipStart = { clipId -> viewModel.beginMoveClip(clipId) },
+            onMoveClipEnd = { _ -> viewModel.endMoveClip() },
+            onTrimClipLeft = { clipId, delta -> viewModel.trimClipLeftByDelta(clipId, delta) },
+            onTrimClipLeftStart = { clipId -> viewModel.beginTrimClipLeft(clipId) },
+            onTrimClipLeftEnd = { _ -> viewModel.endTrimClipLeft() },
+            onTrimClipRight = { clipId, delta -> viewModel.trimClipRightByDelta(clipId, delta) },
+            onTrimClipRightStart = { clipId -> viewModel.beginTrimClipRight(clipId) },
+            onTrimClipRightEnd = { _ -> viewModel.endTrimClipRight() },
+            onToggleTrackLock = { viewModel.timelineEngine.toggleTrackLock(it) },
+            onToggleTrackHide = { viewModel.timelineEngine.toggleTrackHide(it) },
+            onToggleTrackMute = { viewModel.timelineEngine.toggleTrackMute(it) },
+            onToggleTrackSolo = { viewModel.timelineEngine.toggleTrackSolo(it) },
+            onCycleTrackHeight = { viewModel.timelineEngine.cycleTrackHeight(it) },
+            onSelectKeyframe = { viewModel.timelineEngine.selectKeyframe(it) },
+            onMoveKeyframe = { kfId, newTime -> viewModel.timelineEngine.moveKeyframe(kfId, newTime) },
+            onAddAudioKeyframe = { clipId, relTime, vol ->
+              viewModel.timelineEngine.addAudioVolumeKeyframe(clipId, relTime, vol)
+            },
+            onUpdateAudioKeyframe = { clipId, kfId, relTime, vol ->
+              viewModel.timelineEngine.updateAudioVolumeKeyframe(clipId, kfId, relTime, vol)
+            },
+            onDeleteAudioKeyframe = { clipId, kfId ->
+              viewModel.timelineEngine.deleteAudioVolumeKeyframe(clipId, kfId)
+            },
+            modifier = Modifier.fillMaxSize()
+          )
+        } // End of timeline Box
+
+        // Bottom Navigation Bar is displayed at the bottom of the screen in normal editor mode
+        EditorBottomToolbar(
+          activeTab = activeTab,
+          onTabSelected = { tab ->
+            viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
+          },
+          onMoreClick = { showMoreToolsDialog = true }
+        )
+      } // End of Column (Timeline + Bottom Navigation Bar)
+    } // End of AnimatedVisibility(visible = activeTab == null)
+
+    // 2. ACTIVE SUB-TOOL PANEL: Completely replaces bottom nav & timeline, expanding seamlessly to the bottom of the screen
     AnimatedVisibility(
       visible = activeTab != null,
-      enter = slideInVertically { it } + fadeIn(),
-      exit = slideOutVertically { it } + fadeOut(),
-      modifier = Modifier.align(Alignment.BottomCenter)
+      enter = fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) +
+        expandVertically(animationSpec = tween(300, easing = FastOutSlowInEasing), expandFrom = Alignment.Bottom),
+      exit = fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing)) +
+        shrinkVertically(animationSpec = tween(260, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Bottom),
+      modifier = Modifier
+        .fillMaxWidth()
+        .weight(1f)
     ) {
       Surface(
         color = StudioSurface,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         tonalElevation = 8.dp,
-        shadowElevation = 20.dp,
+        shadowElevation = 16.dp,
         border = BorderStroke(1.dp, Color(0xFF1E283E)),
         modifier = Modifier
-          .fillMaxWidth()
-          .navigationBarsPadding()
-          .heightIn(max = (maxHeight * 0.46f).coerceAtMost(320.dp))
+          .fillMaxSize()
           .clickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null
-          ) {} // Consume touch events so they don't fall through to timeline underneath
+          ) {} // Consume touch events
       ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-          // Universal Tool Panel Header Bar with ❌ Cross Button
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .background(Color(0xFF0F1523))
-              .padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
+        Column(
+          modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding() // Ensures panel content stays safe from system gesture pill, while Surface background extends edge-to-edge
+        ) {
+          // Universal Tool Panel Header Bar with ❌ Cross Button (hidden for Audio Tools, Text Tools, and Effects which have their own sleek headers)
+          if (activeTab != EditorToolbarTab.AUDIO && activeTab != EditorToolbarTab.TEXT && activeTab != EditorToolbarTab.EFFECTS) {
             Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
+              modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0F1523))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
             ) {
-              Box(
-                modifier = Modifier
-                  .size(28.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFF1E283E)),
-                contentAlignment = Alignment.Center
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
-                Icon(
-                  imageVector = when (activeTab) {
-                    EditorToolbarTab.EFFECTS -> Icons.Default.AutoAwesome
-                    EditorToolbarTab.TEXT -> Icons.Default.TextFields
-                    EditorToolbarTab.FILTERS -> Icons.Default.FilterVintage
-                    EditorToolbarTab.ADJUST -> Icons.Default.Tune
-                    EditorToolbarTab.AUDIO -> Icons.Default.MusicNote
-                    EditorToolbarTab.EDIT -> Icons.Default.Edit
-                    EditorToolbarTab.TRIM -> Icons.Default.ContentCut
-                    EditorToolbarTab.SPEED -> Icons.Default.Speed
-                    EditorToolbarTab.TRANSITIONS -> Icons.Default.Transform
-                    EditorToolbarTab.STICKERS -> Icons.Default.EmojiEmotions
-                    EditorToolbarTab.OVERLAY -> Icons.Default.Layers
-                    EditorToolbarTab.MEDIA -> Icons.Default.VideoLibrary
-                    else -> Icons.Default.Build
+                Box(
+                  modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF1E283E)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = when (activeTab) {
+                      EditorToolbarTab.EFFECTS -> Icons.Default.AutoAwesome
+                      EditorToolbarTab.TEXT -> Icons.Default.TextFields
+                      EditorToolbarTab.FILTERS -> Icons.Default.FilterVintage
+                      EditorToolbarTab.ADJUST -> Icons.Default.Tune
+                      EditorToolbarTab.AUDIO -> Icons.Default.MusicNote
+                      EditorToolbarTab.EDIT -> Icons.Default.Edit
+                      EditorToolbarTab.TRIM -> Icons.Default.ContentCut
+                      EditorToolbarTab.SPEED -> Icons.Default.Speed
+                      EditorToolbarTab.TRANSITIONS -> Icons.Default.Transform
+                      EditorToolbarTab.STICKERS -> Icons.Default.EmojiEmotions
+                      EditorToolbarTab.OVERLAY -> Icons.Default.Layers
+                      EditorToolbarTab.MEDIA -> Icons.Default.VideoLibrary
+                      else -> Icons.Default.Build
+                    },
+                    contentDescription = null,
+                    tint = Color(0xFF00C2FF),
+                    modifier = Modifier.size(16.dp)
+                  )
+                }
+                Text(
+                  text = when (activeTab) {
+                    EditorToolbarTab.EFFECTS -> "Effects Tools"
+                    EditorToolbarTab.TEXT -> "Text Tools"
+                    EditorToolbarTab.FILTERS -> "Filters"
+                    EditorToolbarTab.ADJUST -> "Adjustments"
+                    EditorToolbarTab.AUDIO -> "Audio Tools"
+                    EditorToolbarTab.EDIT -> "Edit Clip"
+                    EditorToolbarTab.TRIM -> "Trimming"
+                    EditorToolbarTab.SPEED -> "Speed & Curve"
+                    EditorToolbarTab.TRANSITIONS -> "Transitions"
+                    EditorToolbarTab.STICKERS -> "Stickers"
+                    EditorToolbarTab.OVERLAY -> "Overlay / PIP"
+                    EditorToolbarTab.MEDIA -> "Import Media"
+                    EditorToolbarTab.MASK -> "Mask & Blend"
+                    EditorToolbarTab.AI -> "AI Suite"
+                    EditorToolbarTab.AI_MATTING -> "AI Matting"
+                    EditorToolbarTab.ASSET_STORE -> "Asset Store"
+                    EditorToolbarTab.VOLUME -> "Volume Control"
+                    EditorToolbarTab.CHROMA -> "Chroma Key"
+                    EditorToolbarTab.CANVAS -> "Canvas Background"
+                    EditorToolbarTab.KEYFRAME -> "Keyframe Animation"
+                    EditorToolbarTab.CAPTIONS -> "Auto Captions"
+                    EditorToolbarTab.ANIMATIONS -> "Animations"
+                    EditorToolbarTab.BACKGROUND -> "Background"
+                    EditorToolbarTab.AI_AVATAR -> "AI Avatar"
+                    null -> "Tools"
                   },
-                  contentDescription = null,
-                  tint = Color(0xFF00C2FF),
-                  modifier = Modifier.size(16.dp)
+                  style = MaterialTheme.typography.titleMedium.copy(
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                  )
                 )
               }
-              Text(
-                text = when (activeTab) {
-                  EditorToolbarTab.EFFECTS -> "Effects Tools"
-                  EditorToolbarTab.TEXT -> "Text Tools"
-                  EditorToolbarTab.FILTERS -> "Filters"
-                  EditorToolbarTab.ADJUST -> "Adjustments"
-                  EditorToolbarTab.AUDIO -> "Audio Studio"
-                  EditorToolbarTab.EDIT -> "Edit Clip"
-                  EditorToolbarTab.TRIM -> "Trimming"
-                  EditorToolbarTab.SPEED -> "Speed & Curve"
-                  EditorToolbarTab.TRANSITIONS -> "Transitions"
-                  EditorToolbarTab.STICKERS -> "Stickers"
-                  EditorToolbarTab.OVERLAY -> "Overlay / PIP"
-                  EditorToolbarTab.MEDIA -> "Import Media"
-                  EditorToolbarTab.MASK -> "Mask & Blend"
-                  EditorToolbarTab.AI -> "AI Suite"
-                  EditorToolbarTab.AI_MATTING -> "AI Matting"
-                  EditorToolbarTab.ASSET_STORE -> "Asset Store"
-                  EditorToolbarTab.VOLUME -> "Volume Control"
-                  EditorToolbarTab.CHROMA -> "Chroma Key"
-                  EditorToolbarTab.CANVAS -> "Canvas Background"
-                  EditorToolbarTab.KEYFRAME -> "Keyframe Animation"
-                  EditorToolbarTab.CAPTIONS -> "Auto Captions"
-                  EditorToolbarTab.ANIMATIONS -> "Animations"
-                  EditorToolbarTab.BACKGROUND -> "Background"
-                  EditorToolbarTab.AI_AVATAR -> "AI Avatar"
-                  null -> "Tools"
+
+              // ❌ Prominent Cross Button to close/exit all tool panels
+              IconButton(
+                onClick = {
+                  viewModel.setActiveToolbarTab(null)
                 },
-                style = MaterialTheme.typography.titleMedium.copy(
-                  color = Color.White,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 14.sp
+                modifier = Modifier
+                  .size(32.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF1E283E))
+                  .testTag("close_tool_panel_cross_button")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Close,
+                  contentDescription = "Close tool panel",
+                  tint = Color.White,
+                  modifier = Modifier.size(18.dp)
                 )
-              )
+              }
             }
 
-            // ❌ Prominent Cross Button to close/exit all tool panels
-            IconButton(
-              onClick = {
-                viewModel.setActiveToolbarTab(null)
-              },
+            Box(
               modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
+                .fillMaxWidth()
+                .height(1.dp)
                 .background(Color(0xFF1E283E))
-                .testTag("close_tool_panel_cross_button")
-            ) {
-              Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Close tool panel",
-                tint = Color.White,
-                modifier = Modifier.size(18.dp)
-              )
-            }
+            )
           }
-
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(1.dp)
-              .background(Color(0xFF1E283E))
-          )
 
           // Sub-Tool Content
           Box(
             modifier = Modifier
               .fillMaxWidth()
-              .weight(1f, fill = false)
+              .weight(1f)
           ) {
             when (activeTab) {
               EditorToolbarTab.MEDIA -> MediaImportPanel(
@@ -864,39 +891,12 @@ fun EditorScreen(
                 onStartDragTransition = { draggedTransitionType = it }
               )
               EditorToolbarTab.TEXT -> {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                  TextToolsSubBar(
-                    activeSubTool = activeTextSubTool,
-                    onSelectSubTool = { activeTextSubTool = it },
-                    onBackToMainMenu = { viewModel.setActiveToolbarTab(null) }
-                  )
-                  Box(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .weight(1f, fill = false)
-                  ) {
-                    when (activeTextSubTool) {
-                      TextSubTool.TEXT_TEMPLATES -> TextTemplatesBrowserPanel(
-                        viewModel = viewModel,
-                        onDismiss = { viewModel.setActiveToolbarTab(null) }
-                      )
-                      TextSubTool.TEXT_TO_AUDIO -> TextToAudioToolPanel(
-                        viewModel = viewModel,
-                        onDismiss = { viewModel.setActiveToolbarTab(null) }
-                      )
-                      TextSubTool.AUTO_LYRICS -> AutoLyricsToolPanel(
-                        viewModel = viewModel,
-                        onDismiss = { viewModel.setActiveToolbarTab(null) }
-                      )
-                      null -> TextTemplatesBrowserPanel(
-                        viewModel = viewModel,
-                        onDismiss = { viewModel.setActiveToolbarTab(null) }
-                      )
-                    }
-                  }
-                }
+                com.example.ui.components.text.ModernTextToolsPanel(
+                  viewModel = viewModel,
+                  onClose = { viewModel.setActiveToolbarTab(null) }
+                )
               }
-              EditorToolbarTab.AUDIO -> com.example.ui.components.AdvancedAudioToolPanel(
+              EditorToolbarTab.AUDIO -> com.example.ui.components.audio.AudioToolsContainerPanel(
                 viewModel = viewModel,
                 onClose = { viewModel.setActiveToolbarTab(null) }
               )
@@ -906,7 +906,6 @@ fun EditorScreen(
               EditorToolbarTab.CANVAS -> CanvasPanel(viewModel)
               EditorToolbarTab.KEYFRAME -> KeyframeAnimationPanel(viewModel)
               EditorToolbarTab.CAPTIONS -> CaptionsToolPanel(viewModel)
-              EditorToolbarTab.AI -> GenerateMediaToolPanel(viewModel)
               EditorToolbarTab.AI_AVATAR -> AIAvatarToolPanel(viewModel)
               EditorToolbarTab.BACKGROUND -> BackgroundToolPanel(viewModel)
               EditorToolbarTab.ANIMATIONS -> AnimationsToolPanel(viewModel)
@@ -915,7 +914,15 @@ fun EditorScreen(
           }
         }
       }
-    }
+    } // End of AnimatedVisibility (activeTab != null)
+
+    // HIDDEN SIDEBAR (Old layers panel - keep code but hide: 0% width, takes no space)
+    Box(
+      modifier = Modifier
+        .size(0.dp)
+        .testTag("layers_panel")
+    )
+    } // End of Column (Video Preview, Controls, Timeline, Tool Panel)
 
     // 3. Sliding Multi-Layer Studio Drawer
     AnimatedVisibility(
@@ -1362,10 +1369,12 @@ fun VideoPreviewSurface(
     }
   }
 
-  val activeTexts = remember(timeline.textClips, currentPosMs) {
+  val activeTexts = remember(timeline.textClips, currentPosMs, selectedElement) {
+    val selectedId = (selectedElement as? SelectedTrackElement.Text)?.clipId
     timeline.textClips.filter {
-      currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs
-    }
+      (it.id == selectedId) ||
+      (currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs)
+    }.sortedWith(compareBy({ it.trackIndex }, { it.timelineStartMs }))
   }
 
   val activeStickers = remember(timeline.stickerClips, currentPosMs) {
@@ -1419,8 +1428,12 @@ fun VideoPreviewSurface(
     resultMatrix
   }
 
-  val combinedColorFilter = remember(androidCombinedMatrix) {
-    ColorFilter.colorMatrix(ColorMatrix(androidCombinedMatrix.array))
+  val isIdentityFilter = remember(androidCombinedMatrix) {
+    com.example.engine.composition.ColorFilterGenerator.isIdentityMatrix(androidCombinedMatrix)
+  }
+
+  val combinedColorFilter = remember(androidCombinedMatrix, isIdentityFilter) {
+    if (isIdentityFilter) null else ColorFilter.colorMatrix(ColorMatrix(androidCombinedMatrix.array))
   }
 
   // Synchronize color filter directly with ExoPlayer's video effects pipeline
@@ -1549,7 +1562,24 @@ fun VideoPreviewSurface(
                 }
               }
 
-              Box(modifier = Modifier.fillMaxSize()) {
+              val realVideoFilterModifier = if (!isIdentityFilter && combinedColorFilter != null) {
+                Modifier
+                  .fillMaxSize()
+                  .drawWithContent {
+                    drawIntoCanvas { canvas ->
+                      val paint = androidx.compose.ui.graphics.Paint().apply {
+                        this.colorFilter = combinedColorFilter
+                      }
+                      canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height), paint)
+                      drawContent()
+                      canvas.restore()
+                    }
+                  }
+              } else {
+                Modifier.fillMaxSize()
+              }
+
+              Box(modifier = realVideoFilterModifier) {
                 val currentBmp = fallbackBitmap
                 if (currentBmp != null && !currentBmp.isRecycled) {
                   Image(
@@ -1575,6 +1605,29 @@ fun VideoPreviewSurface(
                   },
                   update = { pv ->
                     pv.player = player
+                    val paint = if (isIdentityFilter) {
+                      null
+                    } else {
+                      android.graphics.Paint().apply {
+                        colorFilter = android.graphics.ColorMatrixColorFilter(androidCombinedMatrix)
+                      }
+                    }
+                    val textureView = (pv.videoSurfaceView as? android.view.TextureView)
+                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.TextureView>().firstOrNull()
+
+                    if (textureView != null) {
+                      textureView.setLayerType(
+                        if (paint != null) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_NONE,
+                        paint
+                      )
+                      textureView.invalidate()
+                    } else {
+                      pv.setLayerType(
+                        if (paint != null) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_NONE,
+                        paint
+                      )
+                      pv.invalidate()
+                    }
                   },
                   modifier = Modifier.fillMaxSize()
                 )
@@ -2329,7 +2382,7 @@ private fun EditorBottomToolbar(
     ),
     FuturisticNavItemData(
       id = "audio",
-      label = "Audio",
+      label = "Audio Tools",
       icon = Icons.Default.GraphicEq,
       theme = NavItemThemes.Audio,
       isSelected = activeTab == EditorToolbarTab.AUDIO,

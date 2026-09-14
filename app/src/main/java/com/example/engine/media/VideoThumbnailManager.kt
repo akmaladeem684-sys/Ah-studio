@@ -275,7 +275,8 @@ object VideoThumbnailManager {
         }
         val rotationDegrees = rotationStr?.toIntOrNull() ?: 0
 
-        val orientedBitmap = if (rotationDegrees != 0) {
+        // MediaMetadataRetriever auto-rotates on API 27+ (Android 8.1+)
+        val orientedBitmap = if (rotationDegrees != 0 && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O_MR1) {
           val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
           val rotated = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
           if (rotated != rawBitmap) {

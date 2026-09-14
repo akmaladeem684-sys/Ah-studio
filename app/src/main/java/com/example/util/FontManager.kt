@@ -33,6 +33,23 @@ object FontManager {
     FontOption("kasheeda", "Kasheeda Calligraphy", "Urdu", "کشیدہ اردو")
   )
 
+  val HINDI_FONTS = listOf(
+    FontOption("hindi_devanagari_bold", "Hindi Devanagari Bold", "Hindi", "नमस्ते हिंदी"),
+    FontOption("hindi_modern_sans", "Hindi Modern Sans", "Hindi", "आधुनिक हिंदी"),
+    FontOption("hindi_classic_serif", "Hindi Classic Serif", "Hindi", "क्लासिक हिंदी"),
+    FontOption("hindi_calligraphy", "Hindi Calligraphy", "Hindi", "कलात्मक देवनागरी"),
+    FontOption("hindi_akshar", "Hindi Akshar", "Hindi", "अक्षर देवनागरी"),
+    FontOption("hindi_yatra", "Hindi Yatra", "Hindi", "यात्रा हिंदी")
+  )
+
+  val CHINESE_FONTS = listOf(
+    FontOption("chinese_sans", "Chinese Sans (黑体)", "Chinese", "你好世界"),
+    FontOption("chinese_serif", "Chinese Songti (宋体)", "Chinese", "汉字经典"),
+    FontOption("chinese_kaiti", "Chinese Kaiti (楷体)", "Chinese", "书法楷体"),
+    FontOption("chinese_modern", "Chinese Modern (现代)", "Chinese", "流媒体字幕"),
+    FontOption("chinese_bold", "Chinese Bold (大黑)", "Chinese", "醒目标题")
+  )
+
   val ENGLISH_FONTS = listOf(
     FontOption("Sans-Serif", "Modern Sans", "English", "Modern Sans"),
     FontOption("Serif", "Classic Serif", "English", "Classic Serif"),
@@ -46,7 +63,7 @@ object FontManager {
     FontOption("Futuristic", "Cyber Tech", "English", "CYBERPUNK")
   )
 
-  val BUILT_IN_FONTS = URDU_FONTS + ENGLISH_FONTS
+  val BUILT_IN_FONTS = URDU_FONTS + HINDI_FONTS + CHINESE_FONTS + ENGLISH_FONTS
 
   fun getAvailableFonts(context: Context): List<FontOption> {
     val fonts = mutableListOf<FontOption>()
@@ -190,6 +207,26 @@ object FontManager {
           Typeface.create("sans-serif-arabic", Typeface.NORMAL)
         } catch (_: Exception) {
           Typeface.SERIF
+        }
+      }
+      // Hindi / Devanagari font mappings
+      lower.contains("hindi") || lower.contains("devanagari") || lower.contains("yatra") || lower.contains("akshar") -> {
+        try {
+          Typeface.create("sans-serif-devanagari", if (lower.contains("serif") || lower.contains("classic")) Typeface.NORMAL else Typeface.BOLD)
+        } catch (_: Exception) {
+          Typeface.DEFAULT_BOLD
+        }
+      }
+      // Chinese / CJK font mappings
+      lower.contains("chinese") || lower.contains("cjk") || lower.contains("songti") || lower.contains("kaiti") || lower.contains("hei") -> {
+        try {
+          if (lower.contains("serif") || lower.contains("songti")) {
+            Typeface.create("serif-cjk", Typeface.NORMAL)
+          } else {
+            Typeface.create("sans-serif-cjk", Typeface.BOLD)
+          }
+        } catch (_: Exception) {
+          Typeface.DEFAULT
         }
       }
       // English font mappings

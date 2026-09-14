@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 // AH Video Studio Pro Dark Theme Palette
 val StudioBlack = Color(0xFF070B14)
+val StudioDark = Color(0xFF0F1523)
 val StudioDarkBg = Color(0xFF070B14) // Deep rich dark background
 val StudioSurface = Color(0xFF0F172A) // Clean slate dark card surface
 val StudioSurfaceVariant = Color(0xFF1E293B) // High-contrast slate surface / toolbar

@@ -56,7 +56,7 @@ class TimelineEngine {
   private val _clipboardClips = MutableStateFlow<List<Any>>(emptyList())
   val clipboardClips: StateFlow<List<Any>> = _clipboardClips.asStateFlow()
 
-  private val _timelineZoom = MutableStateFlow(1.0f) // 0.25f to 4.5f
+  private val _timelineZoom = MutableStateFlow(1.0f) // 0.25f to 8.0f
   val timelineZoom: StateFlow<Float> = _timelineZoom.asStateFlow()
 
   private val _isSnappingEnabled = MutableStateFlow(true)
@@ -207,7 +207,7 @@ class TimelineEngine {
   }
 
   fun setZoom(zoom: Float) {
-    _timelineZoom.value = zoom.coerceIn(0.25f, 4.5f)
+    _timelineZoom.value = zoom.coerceIn(0.25f, 8.0f)
   }
 
   fun toggleSnapping() {
@@ -3040,6 +3040,14 @@ class TimelineEngine {
       fadeOutMs = fadeOutMs.coerceIn(0L, maxFade),
       waveformData = waveformData ?: com.example.engine.audio.SoundEffectsCatalog.generateWaveform(title)
     )
+    val list = _timeline.value.audioClips.toMutableList()
+    list.add(newAudio)
+    _timeline.value = _timeline.value.copy(audioClips = list)
+    _selectedElement.value = SelectedTrackElement.Audio(newAudio.id)
+  }
+
+  fun addAudioClipObject(newAudio: AudioClip) {
+    recordHistory()
     val list = _timeline.value.audioClips.toMutableList()
     list.add(newAudio)
     _timeline.value = _timeline.value.copy(audioClips = list)

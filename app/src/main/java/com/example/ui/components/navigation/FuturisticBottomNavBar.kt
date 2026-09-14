@@ -145,7 +145,9 @@ fun FuturisticBottomNavBarContainer(
               imageVector = Icons.Default.ArrowBack,
               contentDescription = "Back",
               tint = Color.White,
-              modifier = Modifier.size(20.dp)
+              modifier = Modifier
+                .offset(y = (-4).dp)
+                .size(20.dp)
             )
           }
           Spacer(modifier = Modifier.width(4.dp))
@@ -190,6 +192,7 @@ fun FuturisticNavItemView(item: FuturisticNavItemData) {
   ) {
     Box(
       modifier = Modifier
+        .offset(y = (-4).dp)
         .size(34.dp)
         .clip(CircleShape)
         .background(

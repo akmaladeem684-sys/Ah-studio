@@ -61,19 +61,6 @@ class AudioEngine(private val context: Context) {
     }
   }
 
-  fun playPreviewSfx(sfxId: String) {
-    try {
-      // Generate or retrieve clean synthesized WAV sound effect file
-      val sfxFile = getOrCreateSfxWavFile(sfxId)
-      val mediaItem = MediaItem.fromUri(Uri.fromFile(sfxFile))
-      sfxPlayer.setMediaItem(mediaItem)
-      sfxPlayer.prepare()
-      sfxPlayer.play()
-    } catch (e: Exception) {
-      Log.e(tag, "Failed to play SFX $sfxId", e)
-    }
-  }
-
   fun playAudioUri(uriString: String) {
     try {
       val mediaItem = MediaItem.fromUri(Uri.parse(uriString))
@@ -275,42 +262,110 @@ class AudioEngine(private val context: Context) {
     }
   }
 
-  private fun getOrCreateSfxWavFile(sfxId: String): File {
+  fun getOrCreateSoundWavFile(sfxId: String, durationMs: Long = 2000L, category: String = ""): File {
     val sfxDir = File(context.cacheDir, "sfx_cache").apply { if (!exists()) mkdirs() }
-    val sfxFile = File(sfxDir, "$sfxId.wav")
+    val sfxFile = File(sfxDir, "${sfxId.replace(Regex("[^a-zA-Z0-9_]"), "_")}.wav")
     if (sfxFile.exists() && sfxFile.length() > 0L) return sfxFile
 
-    // Generate real clean PCM WAV audio corresponding to the sound effect
     val sampleRate = 44100
-    val durationSec = when {
-      sfxId.contains("whoosh") -> 0.6
-      sfxId.contains("pop") -> 0.2
-      sfxId.contains("ding") -> 0.7
-      sfxId.contains("bass") -> 0.8
-      else -> 0.4
-    }
+    val durationSec = (durationMs.coerceIn(300L, 12000L) / 1000.0)
     val numSamples = (sampleRate * durationSec).toInt()
     val pcm = ShortArray(numSamples)
 
-    val freq = when {
-      sfxId.contains("whoosh") -> 320.0
-      sfxId.contains("pop") -> 880.0
-      sfxId.contains("ding") -> 1200.0
-      sfxId.contains("bass") -> 95.0
-      else -> 440.0
+    val lower = sfxId.lowercase()
+    val catLower = category.lowercase()
+
+    when {
+      lower.contains("whoosh") || lower.contains("smooshe") -> {
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val env = sin(Math.PI * (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
+          val freq = 450.0 * (1.0 - (i.toDouble() / numSamples) * 0.7)
+          val noise = ((i % 17) - 8) / 8.0 * 0.15
+          val wave = sin(2.0 * Math.PI * freq * t) * 0.85 + noise
+          pcm[i] = (wave * env * 28000.0).toInt().coerceIn(-32768, 32767).toShort()
+        }
+      }
+      lower.contains("ding") || lower.contains("bell") || catLower.contains("ding") -> {
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val decay = kotlin.math.exp(-3.5 * t)
+          val wave = sin(2.0 * Math.PI * 1200.0 * t) * 0.7 + sin(2.0 * Math.PI * 2400.0 * t) * 0.3
+          pcm[i] = (wave * decay * 30000.0).toInt().coerceIn(-32768, 32767).toShort()
+        }
+      }
+      lower.contains("pop") || lower.contains("bubble") -> {
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val env = (1.0 - (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
+          val freq = 300.0 + 900.0 * (1.0 - env)
+          val wave = sin(2.0 * Math.PI * freq * t) * env
+          pcm[i] = (wave * 30000.0).toInt().toShort()
+        }
+      }
+      lower.contains("bass") || catLower.contains("tense") -> {
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val decay = (1.0 - (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
+          val wave = sin(2.0 * Math.PI * 80.0 * t) * 0.8 + sin(2.0 * Math.PI * 160.0 * t) * 0.2
+          pcm[i] = (wave * decay * 32000.0).toInt().toShort()
+        }
+      }
+      catLower.contains("gaming") -> {
+        for (i in 0 until numSamples) {
+          val step = (i / (sampleRate / 8)) % 4
+          val freq = when (step) { 0 -> 440.0; 1 -> 554.37; 2 -> 659.25; else -> 880.0 }
+          val wave = if ((i * freq / sampleRate).toInt() % 2 == 0) 0.6 else -0.6
+          pcm[i] = (wave * 24000.0).toInt().toShort()
+        }
+      }
+      catLower.contains("asmr") -> {
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val env = sin(Math.PI * (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
+          val noise = (((i * 73) % 256) - 128) / 128.0
+          val softWave = sin(2.0 * Math.PI * 220.0 * t) * 0.3 + noise * 0.4
+          pcm[i] = (softWave * env * 18000.0).toInt().toShort()
+        }
+      }
+      catLower.contains("cheers") || catLower.contains("funny") || catLower.contains("comedy") -> {
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val burst = (sin(2.0 * Math.PI * 4.0 * t) * 0.5 + 0.5)
+          val env = (1.0 - (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
+          val wave = sin(2.0 * Math.PI * 520.0 * t) * burst * env
+          pcm[i] = (wave * 26000.0).toInt().toShort()
+        }
+      }
+      else -> {
+        val baseFreq = 440.0 + (sfxId.hashCode() % 300).toDouble()
+        for (i in 0 until numSamples) {
+          val t = i.toDouble() / sampleRate
+          val env = (1.0 - (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
+          val wave = sin(2.0 * Math.PI * baseFreq * t) * env
+          pcm[i] = (wave * 26000.0).toInt().toShort()
+        }
+      }
     }
 
-    for (i in 0 until numSamples) {
-      val t = i.toDouble() / sampleRate
-      val envelope = (1.0 - (i.toDouble() / numSamples)).coerceIn(0.0, 1.0)
-      val sweep = if (sfxId.contains("whoosh")) (1.0 - t) else 1.0
-      val wave = sin(2.0 * Math.PI * freq * sweep * t) * envelope
-      pcm[i] = (wave * 32767.0).toInt().toShort()
-    }
-
-    // Write WAV header and PCM data
     writeWavFile(sfxFile, pcm, sampleRate)
     return sfxFile
+  }
+
+  fun playPreviewSfx(sfxId: String, durationMs: Long = 2000L, category: String = "") {
+    try {
+      val sfxFile = getOrCreateSoundWavFile(sfxId, durationMs, category)
+      val mediaItem = MediaItem.fromUri(Uri.fromFile(sfxFile))
+      sfxPlayer.setMediaItem(mediaItem)
+      sfxPlayer.prepare()
+      sfxPlayer.play()
+    } catch (e: Exception) {
+      Log.e(tag, "Failed to play SFX $sfxId", e)
+    }
+  }
+
+  private fun getOrCreateSfxWavFile(sfxId: String): File {
+    return getOrCreateSoundWavFile(sfxId)
   }
 
   private fun writeWavFile(file: File, pcm: ShortArray, sampleRate: Int) {

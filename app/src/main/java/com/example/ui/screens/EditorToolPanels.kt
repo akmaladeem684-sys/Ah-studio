@@ -843,8 +843,17 @@ fun FiltersToolPanel(
             videoUri = previewUri,
             sourceStartMs = previewSourceStartMs,
             onClick = {
-              currentFilter = currentFilter.copy(type = type)
-              viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
+              if (type == FilterType.NONE) {
+                currentFilter = FilterSettings(type = FilterType.NONE, intensity = 1.0f)
+                selectedPluginItemId = null
+                viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
+                viewModel.timelineEngine.updateAdjustments(VideoAdjustments())
+              } else {
+                val targetIntensity = if (currentFilter.intensity <= 0.05f) 1.0f else currentFilter.intensity
+                currentFilter = FilterSettings(type = type, intensity = targetIntensity)
+                selectedPluginItemId = null
+                viewModel.timelineEngine.updateFilter(currentFilter, selectedClip?.id)
+              }
             }
           )
         }

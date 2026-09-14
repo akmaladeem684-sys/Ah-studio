@@ -78,7 +78,18 @@ enum class VoiceEffect(val displayName: String) {
   ROBOT("Synthesized Robot"),
   ECHO_REVERB("Echo & Cathedral Reverb"),
   TELEPHONE("Vintage Radio / Telephone"),
-  ANONYMOUS("Anonymous Pitch Shift")
+  ANONYMOUS("Anonymous Pitch Shift"),
+  ALIEN("Alien Extra-Terrestrial"),
+  GIANT("Low Giant / Titan"),
+  ELF("Tiny Pixie / Elf"),
+  MEGAPHONE("Megaphone Bullhorn"),
+  AUTOTUNE("AutoTune Melodic"),
+  CHIPTUNE("8-Bit Chiptune"),
+  VOCODER("Cyberpunk Vocoder"),
+  SPEECH_TO_SONG("Speech to Song"),
+  DISCO("Disco Harmonizer"),
+  RADIO("Vintage AM Radio"),
+  CARTOON("Cartoon Character")
 }
 
 data class AudioEffectsSettings(
@@ -381,6 +392,12 @@ data class TextClip(
   val subtitleStyle: String = "Classic", // "Classic", "Bold", "HighlightWord", "Karaoke", "Animated"
   val highlightColor: Long = 0xFFFFEB3B,
   val words: List<WordTiming> = emptyList(),
+  val is3D: Boolean = false,
+  val depth3D: Float = 0f,
+  val bevelAngle3D: Float = 0f,
+  val color3D: Long = 0xFF1E293B,
+  val animation3D: String = "None",
+  val effectStyle: String = "None",
   val isLocked: Boolean = false,
   val isHidden: Boolean = false
 )
@@ -501,6 +518,12 @@ enum class EffectType(val category: String, val displayName: String) {
   HEART_TRAIL("Body Effects", "Cupid Heart Trail"),
   FLORAL_CROWN("Body Effects", "Goddess Floral Crown"),
   DRAGON_FLAME("Body Effects", "Dragon Breath Flame"),
+  FUNNY_BIG_EYES("Body Effects", "Funny Big Eyes"),
+  FUNNY_ALIEN_WARP("Body Effects", "Alien Warp"),
+  CYBER_VISOR("Body Effects", "Cyber Visor"),
+  NEON_SPARKLE_CHEEKS("Body Effects", "Sparkle Cheeks"),
+  DARK_SHADOW_AURA("Body Effects", "Dark Shadow Aura"),
+  BACKGROUND_NEON_GRID("Body Effects", "Neon Grid BG"),
 
   // Photo Effects
   POLAROID_VINTAGE("Photo Effects", "Polaroid 1984"),
@@ -517,6 +540,18 @@ enum class EffectType(val category: String, val displayName: String) {
   PASTEL_DREAM("Photo Effects", "Soft Pastel Dream"),
   COLOR_POP_SPLASH("Photo Effects", "Selective Color Pop"),
   STAMP_ART("Photo Effects", "Vintage Rubber Stamp"),
+  Y2K_CHROME("Photo Effects", "Y2K Chrome 2000s"),
+  DIGICAM_2004("Photo Effects", "Digicam 2004"),
+  FACE_SWAP_AI("Photo Effects", "AI Face Swap"),
+  SCREEN_SWAP_HOLO("Photo Effects", "Hologram Screen"),
+  SEPIA_VINTAGE("Photo Effects", "Sepia 1920"),
+  OLD_PAPER_TEXTURE("Photo Effects", "Worn Vintage Paper"),
+
+  // Video Effects - Celebrate & Party
+  CELEBRATE_CONFETTI("Video Effects", "Golden Confetti"),
+  CELEBRATE_FIREWORKS("Video Effects", "Neon Fireworks"),
+  PARTY_PRISM("Video Effects", "Prism Rainbow"),
+  PARTY_CONFUSED("Video Effects", "Confused Wobble"),
 
   // AI Effects
   AI_EXPANSION("AI Effects", "AI Canvas Expand"),

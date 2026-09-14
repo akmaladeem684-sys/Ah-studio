@@ -90,8 +90,44 @@ object VideoEffectRenderer {
           tX += sin(relTime * 0.002f) * 0.045f * intensity
           tY += cos(relTime * 0.003f) * 0.035f * intensity
         }
+        EffectType.WARP_SPEED -> {
+          val warpZoom = 1f + (sin(relTime * 0.005f) * 0.12f + 0.08f) * intensity
+          sX *= warpZoom
+          sY *= warpZoom
+        }
+        EffectType.PARTY_CONFUSED -> {
+          val wobble = sin(relTime * 0.012f) * 6f * intensity
+          rot += wobble
+          tX += cos(relTime * 0.009f) * 0.02f * intensity
+        }
+        EffectType.SLIM_SHAPE -> {
+          sX *= (1f - 0.08f * intensity)
+        }
+        EffectType.FISHEYE -> {
+          val bulge = 1f + 0.12f * intensity
+          sX *= bulge
+          sY *= bulge
+        }
         EffectType.MIRROR -> {
           sX *= -1f
+        }
+        EffectType.AI_GHOST_MOTION -> {
+          val step = ((relTime / 120L) % 4) * 0.015f * intensity
+          tX += step
+        }
+        EffectType.GLITCH, EffectType.AI_GLITCH_REALITY -> {
+          if ((relTime % 300L) < 70L) {
+            tX += (sin(relTime.toFloat()) * 0.025f) * intensity
+          }
+        }
+        EffectType.DISTORTION -> {
+          val distort = 1f + sin(relTime * 0.007f) * 0.06f * intensity
+          sX *= distort
+          sY *= distort
+        }
+        EffectType.FUNNY_ALIEN_WARP -> {
+          sX *= (1f - 0.1f * intensity)
+          sY *= (1f + 0.15f * intensity)
         }
         else -> {}
       }
@@ -165,9 +201,9 @@ object VideoEffectRenderer {
         }
         EffectType.PASTEL_DREAM -> {
           ColorMatrix(floatArrayOf(
-            0.8f, 0.1f, 0.1f, 0f, 40f * intensity,
-            0.1f, 0.75f, 0.15f, 0f, 25f * intensity,
-            0.15f, 0.1f, 0.85f, 0f, 45f * intensity,
+            0.85f + 0.15f * intensity, 0.1f * intensity, 0.1f * intensity, 0f, 40f * intensity,
+            0.1f * intensity, 0.8f + 0.2f * intensity, 0.15f * intensity, 0f, 25f * intensity,
+            0.15f * intensity, 0.1f * intensity, 0.9f + 0.1f * intensity, 0f, 45f * intensity,
             0f, 0f, 0f, 1f, 0f
           ))
         }
@@ -205,6 +241,165 @@ object VideoEffectRenderer {
             1.15f * intensity + (1f - intensity), 0f, 0f, 0f, 25f * intensity,
             0f, 1.15f * intensity + (1f - intensity), 0f, 0f, 25f * intensity,
             0f, 0f, 1.15f * intensity + (1f - intensity), 0f, 25f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.SEPIA_VINTAGE -> {
+          ColorMatrix(floatArrayOf(
+            0.393f * intensity + (1f - intensity), 0.769f * intensity, 0.189f * intensity, 0f, 0f,
+            0.349f * intensity, 0.686f * intensity + (1f - intensity), 0.168f * intensity, 0f, 0f,
+            0.272f * intensity, 0.534f * intensity, 0.131f * intensity + (1f - intensity), 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.DIGICAM_2004 -> {
+          ColorMatrix(floatArrayOf(
+            1.2f * intensity + (1f - intensity), 0.05f * intensity, 0f, 0f, 15f * intensity,
+            0f, 1.15f * intensity + (1f - intensity), 0.05f * intensity, 0f, 10f * intensity,
+            0.05f * intensity, 0f, 1.3f * intensity + (1f - intensity), 0f, 5f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.POLAROID_VINTAGE -> {
+          ColorMatrix(floatArrayOf(
+            1.1f * intensity + (1f - intensity), 0.05f * intensity, -0.05f * intensity, 0f, 18f * intensity,
+            -0.02f * intensity, 1.05f * intensity + (1f - intensity), 0.05f * intensity, 0f, 12f * intensity,
+            -0.05f * intensity, -0.05f * intensity, 0.9f * intensity + (1f - intensity), 0f, 8f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.OIL_PAINTING -> {
+          val cm = ColorMatrix()
+          cm.setSaturation(1f + 0.8f * intensity)
+          val contrast = ColorMatrix(floatArrayOf(
+            1.25f * intensity + (1f - intensity), 0f, 0f, 0f, -10f * intensity,
+            0f, 1.25f * intensity + (1f - intensity), 0f, 0f, -10f * intensity,
+            0f, 0f, 1.25f * intensity + (1f - intensity), 0f, -10f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+          cm.postConcat(contrast)
+          cm
+        }
+        EffectType.WATERCOLOR -> {
+          ColorMatrix(floatArrayOf(
+            0.95f, 0.1f * intensity, 0.1f * intensity, 0f, 25f * intensity,
+            0.05f * intensity, 0.95f, 0.1f * intensity, 0f, 25f * intensity,
+            0.1f * intensity, 0.05f * intensity, 1.05f, 0f, 35f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.COMIC_SKETCH -> {
+          ColorMatrix(floatArrayOf(
+            1.4f * intensity + (1f - intensity), 0f, 0f, 0f, -25f * intensity,
+            0f, 1.4f * intensity + (1f - intensity), 0f, 0f, -25f * intensity,
+            0f, 0f, 1.4f * intensity + (1f - intensity), 0f, -25f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.HALFTONE_DOT -> {
+          val inv = 1f - intensity
+          ColorMatrix(floatArrayOf(
+            0.3f * intensity + inv, 0.59f * intensity, 0.11f * intensity, 0f, 0f,
+            0.3f * intensity, 0.59f * intensity + inv, 0.11f * intensity, 0f, 0f,
+            0.3f * intensity, 0.59f * intensity, 0.11f * intensity + inv, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.SHARPEN -> {
+          ColorMatrix(floatArrayOf(
+            1.3f * intensity + (1f - intensity), -0.15f * intensity, -0.15f * intensity, 0f, 0f,
+            -0.15f * intensity, 1.3f * intensity + (1f - intensity), -0.15f * intensity, 0f, 0f,
+            -0.15f * intensity, -0.15f * intensity, 1.3f * intensity + (1f - intensity), 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.SOFT_FOCUS, EffectType.BLUR -> {
+          ColorMatrix(floatArrayOf(
+            0.95f, 0.05f * intensity, 0.05f * intensity, 0f, 15f * intensity,
+            0.05f * intensity, 0.95f, 0.05f * intensity, 0f, 15f * intensity,
+            0.05f * intensity, 0.05f * intensity, 0.95f, 0f, 15f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.AI_ANIME_WORLD -> {
+          ColorMatrix(floatArrayOf(
+            1.1f + 0.15f * intensity, 0f, 0f, 0f, 10f * intensity,
+            0f, 1.15f + 0.2f * intensity, 0f, 0f, 15f * intensity,
+            0f, 0f, 1.25f + 0.25f * intensity, 0f, 25f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.AI_STYLE_MORPH -> {
+          val phase = (relTime % 3000L).toFloat() / 3000f * 360f
+          val cm = ColorMatrix()
+          cm.setRotate(0, phase * intensity)
+          cm.setRotate(2, phase * 0.5f * intensity)
+          cm
+        }
+        EffectType.Y2K_CHROME -> {
+          ColorMatrix(floatArrayOf(
+            1.25f * intensity + (1f - intensity), 0.1f * intensity, 0.1f * intensity, 0f, 15f * intensity,
+            0.1f * intensity, 1.25f * intensity + (1f - intensity), 0.1f * intensity, 0f, 15f * intensity,
+            0.15f * intensity, 0.15f * intensity, 1.4f * intensity + (1f - intensity), 0f, 30f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.DARK_SHADOW_AURA -> {
+          val cm = ColorMatrix()
+          cm.setSaturation(1f - 0.6f * intensity)
+          val dark = ColorMatrix(floatArrayOf(
+            0.7f * intensity + (1f - intensity), 0f, 0f, 0f, -25f * intensity,
+            0f, 0.6f * intensity + (1f - intensity), 0f, 0f, -30f * intensity,
+            0f, 0f, 0.85f * intensity + (1f - intensity), 0f, -10f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+          cm.postConcat(dark)
+          cm
+        }
+        EffectType.PARTY_PRISM -> {
+          val cm = ColorMatrix()
+          val shift = sin(relTime * 0.005f) * 45f * intensity
+          cm.setRotate(0, shift)
+          cm.setRotate(1, -shift)
+          cm
+        }
+        EffectType.ANIME_SILHOUETTE -> {
+          ColorMatrix(floatArrayOf(
+            1.5f * intensity + (1f - intensity), 0f, 0f, 0f, -40f * intensity,
+            0f, 1.3f * intensity + (1f - intensity), 0f, 0f, -50f * intensity,
+            0f, 0f, 1.6f * intensity + (1f - intensity), 0f, -20f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.SCREEN_SWAP_HOLO -> {
+          ColorMatrix(floatArrayOf(
+            0.2f * (1f - intensity), 0.1f, 0.2f, 0f, 0f,
+            0.2f, 0.8f * intensity + 0.2f, 0.4f, 0f, 40f * intensity,
+            0.3f, 0.5f, 1.3f * intensity + 0.5f, 0f, 80f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.OLD_PAPER_TEXTURE -> {
+          ColorMatrix(floatArrayOf(
+            0.9f * intensity + (1f - intensity), 0.1f, 0f, 0f, 20f * intensity,
+            0.05f, 0.85f * intensity + (1f - intensity), 0f, 0f, 15f * intensity,
+            0f, 0.05f, 0.7f * intensity + (1f - intensity), 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.AI_GOLDEN_GOD, EffectType.AI_LIQUID_GOLD -> {
+          ColorMatrix(floatArrayOf(
+            1.3f * intensity + (1f - intensity), 0.1f, 0f, 0f, 35f * intensity,
+            0.1f, 1.2f * intensity + (1f - intensity), 0f, 0f, 25f * intensity,
+            0f, 0f, 0.7f * intensity + (1f - intensity), 0f, -15f * intensity,
+            0f, 0f, 0f, 1f, 0f
+          ))
+        }
+        EffectType.FUNNY_ALIEN_WARP -> {
+          ColorMatrix(floatArrayOf(
+            0.7f * intensity + (1f - intensity), 0f, 0f, 0f, -10f * intensity,
+            0f, 1.4f * intensity + (1f - intensity), 0f, 0f, 40f * intensity,
+            0f, 0f, 0.8f * intensity + (1f - intensity), 0f, 0f,
             0f, 0f, 0f, 1f, 0f
           ))
         }
@@ -277,28 +472,24 @@ object VideoEffectRenderer {
         val cycle = relTime % 400L
         val flashAlpha = if (cycle < 180L) {
           (1f - (cycle / 180f)) * intensity
-        } else 0f
-        if (flashAlpha > 0.01f) {
-          val paint = Paint().apply {
-            color = Color.WHITE
-            alpha = (flashAlpha * 255).toInt().coerceIn(0, 255)
-          }
-          canvas.drawRect(0f, 0f, w, h, paint)
+        } else (0.15f * intensity)
+        val paint = Paint().apply {
+          color = Color.WHITE
+          alpha = (flashAlpha * 255).toInt().coerceIn(0, 255)
         }
+        canvas.drawRect(0f, 0f, w, h, paint)
       }
 
       EffectType.STROBE -> {
         val isStrobeOn = (relTime % 160L) < 80L
-        if (isStrobeOn) {
-          val paint = Paint().apply {
-            color = if ((relTime % 320L) < 160L) Color.WHITE else Color.CYAN
-            alpha = (intensity * 230).toInt().coerceIn(0, 255)
-          }
-          canvas.drawRect(0f, 0f, w, h, paint)
+        val paint = Paint().apply {
+          color = if ((relTime % 320L) < 160L) Color.WHITE else Color.CYAN
+          alpha = if (isStrobeOn) (intensity * 230).toInt().coerceIn(0, 255) else (intensity * 50).toInt().coerceIn(0, 255)
         }
+        canvas.drawRect(0f, 0f, w, h, paint)
       }
 
-      EffectType.LENS_FLARE, EffectType.SOLAR_FLARE -> {
+      EffectType.LENS_FLARE -> {
         val flareX = cx + cos(relTime * 0.002f) * (w * 0.35f)
         val flareY = cy * 0.6f + sin(relTime * 0.0025f) * (h * 0.2f)
 
@@ -335,6 +526,32 @@ object VideoEffectRenderer {
         val dy = (cy - flareY) * 0.6f
         canvas.drawCircle(cx + dx, cy + dy, 24f * intensity, ghostPaint)
         canvas.drawCircle(cx - dx * 0.5f, cy - dy * 0.5f, 16f * intensity, ghostPaint)
+      }
+
+      EffectType.SOLAR_FLARE -> {
+        val sunX = w * 0.8f
+        val sunY = h * 0.2f
+        val sunPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = RadialGradient(
+            sunX, sunY, w * 0.6f,
+            intArrayOf(Color.WHITE, Color.parseColor("#FFFACC15"), Color.parseColor("#80FF6A00"), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.2f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+          )
+          alpha = (intensity * 255).toInt().coerceIn(0, 255)
+        }
+        canvas.drawRect(0f, 0f, w, h, sunPaint)
+
+        // Rotating rays
+        val rayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#50FFF7D6")
+          strokeWidth = 4f * intensity
+        }
+        val count = 16
+        for (i in 0 until count) {
+          val angle = (i.toFloat() / count) * 6.283185f + relTime * 0.001f
+          canvas.drawLine(sunX, sunY, sunX + cos(angle) * w, sunY + sin(angle) * w, rayPaint)
+        }
       }
 
       EffectType.LIGHT_LEAK, EffectType.GOLDEN_HOUR -> {
@@ -387,7 +604,7 @@ object VideoEffectRenderer {
         }
       }
 
-      EffectType.LASER_GRID -> {
+      EffectType.LASER_GRID, EffectType.BACKGROUND_NEON_GRID -> {
         val gridHorizonY = h * 0.65f
         val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = Color.parseColor("#CC00C2FF")
@@ -408,6 +625,35 @@ object VideoEffectRenderer {
           val bottomX = cx + (i * (w / 7f))
           canvas.drawLine(cx, gridHorizonY, bottomX, h, gridPaint)
         }
+
+        // Neon Horizon Sun
+        val sunPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = RadialGradient(
+            cx, gridHorizonY, w * 0.25f,
+            intArrayOf(Color.parseColor("#FFFF007F"), Color.TRANSPARENT),
+            floatArrayOf(0.3f, 1f),
+            Shader.TileMode.CLAMP
+          )
+        }
+        canvas.drawCircle(cx, gridHorizonY, w * 0.25f, sunPaint)
+      }
+
+      EffectType.HALO_GLOW -> {
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.STROKE
+          strokeWidth = 10f * intensity
+          shader = RadialGradient(
+            cx, cy * 0.7f, w * 0.35f,
+            intArrayOf(Color.parseColor("#AA00E5FF"), Color.parseColor("#508B5CF6"), Color.TRANSPARENT),
+            floatArrayOf(0.4f, 0.8f, 1f),
+            Shader.TileMode.CLAMP
+          )
+        }
+        val pulse = 1f + sin(relTime * 0.006f) * 0.08f
+        canvas.save()
+        canvas.scale(pulse, pulse, cx, cy * 0.7f)
+        canvas.drawCircle(cx, cy * 0.7f, w * 0.28f, haloPaint)
+        canvas.restore()
       }
 
       // 2. RETRO, VHS, CRT & GLITCH
@@ -561,7 +807,7 @@ object VideoEffectRenderer {
         }
       }
 
-      EffectType.MANGA_LINE -> {
+      EffectType.MANGA_LINE, EffectType.AI_MANGA_UNIVERSE -> {
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = Color.BLACK
           strokeWidth = 4f * intensity
@@ -583,7 +829,7 @@ object VideoEffectRenderer {
         }
       }
 
-      EffectType.RIPPLE, EffectType.WAVE -> {
+      EffectType.RIPPLE, EffectType.WAVE, EffectType.DISTORTION -> {
         val rippleRadius = ((relTime % 1400L).toFloat() / 1400f) * (w * 0.7f)
         val alphaNorm = (1f - (rippleRadius / (w * 0.7f))).coerceIn(0f, 1f)
         val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -596,11 +842,20 @@ object VideoEffectRenderer {
         canvas.drawCircle(cx, cy, (rippleRadius * 0.65f), ripplePaint.apply { strokeWidth = 5f * intensity })
       }
 
+      EffectType.FISHEYE -> {
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.STROKE
+          strokeWidth = 20f * intensity
+          color = Color.parseColor("#80000000")
+        }
+        canvas.drawCircle(cx, cy, w * 0.48f, borderPaint)
+      }
+
       // 4. BODY & FIGURE EFFECTS
       EffectType.BODY_AURA, EffectType.FIRE_AURA -> {
         val auraPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
           style = Paint.Style.STROKE
-          strokeWidth = 14f * intensity
+          strokeWidth = 16f * intensity
           shader = RadialGradient(
             cx, cy, w * 0.45f,
             intArrayOf(
@@ -660,13 +915,11 @@ object VideoEffectRenderer {
         }
 
         val wingFlap = sin(relTime * 0.005f) * 15f
-        // Left Wing Path
         val leftPath = Path().apply {
           moveTo(cx - 30f, cy)
           cubicTo(cx - w * 0.25f, cy - h * 0.25f + wingFlap, cx - w * 0.45f, cy - h * 0.15f + wingFlap, cx - w * 0.48f, cy + h * 0.1f)
           cubicTo(cx - w * 0.35f, cy + h * 0.05f, cx - w * 0.2f, cy + h * 0.08f, cx - 20f, cy + 20f)
         }
-        // Right Wing Path
         val rightPath = Path().apply {
           moveTo(cx + 30f, cy)
           cubicTo(cx + w * 0.25f, cy - h * 0.25f + wingFlap, cx + w * 0.45f, cy - h * 0.15f + wingFlap, cx + w * 0.48f, cy + h * 0.1f)
@@ -711,19 +964,35 @@ object VideoEffectRenderer {
         }
       }
 
+      EffectType.FLORAL_CROWN -> {
+        val crownPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#FF4D80")
+          style = Paint.Style.FILL
+        }
+        val leafPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#10B981")
+          style = Paint.Style.FILL
+        }
+        val crownY = cy - h * 0.28f
+        for (i in -4..4) {
+          val flowerX = cx + i * (w * 0.07f)
+          val flowerY = crownY + cos(i * 0.4f) * 12f
+          canvas.drawCircle(flowerX, flowerY, 8f * intensity, crownPaint)
+          canvas.drawCircle(flowerX + 4f, flowerY + 4f, 4f * intensity, leafPaint)
+        }
+      }
+
       EffectType.CYBER_FACE -> {
         val hudPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = Color.parseColor("#00E5FF")
           style = Paint.Style.STROKE
           strokeWidth = 3f * intensity
         }
-        // Target Box
         val boxR = w * 0.22f
         canvas.drawCircle(cx, cy, boxR, hudPaint)
         canvas.drawLine(cx - boxR - 20f, cy, cx + boxR + 20f, cy, hudPaint)
         canvas.drawLine(cx, cy - boxR - 20f, cx, cy + boxR + 20f, hudPaint)
 
-        // Coordinates Text
         val txtPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = Color.parseColor("#00E5FF")
           textSize = 14f
@@ -733,8 +1002,292 @@ object VideoEffectRenderer {
         canvas.drawText("RADAR: ACTIVE", cx - boxR, cy + boxR + 24f, txtPaint)
       }
 
-      // 5. AI EFFECTS
-      EffectType.AI_CYBERPUNK_CITY -> {
+      EffectType.CYBER_VISOR -> {
+        val visorY = cy - h * 0.08f
+        val visorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, visorY, w, visorY,
+            intArrayOf(Color.TRANSPARENT, Color.parseColor("#00E5FF"), Color.parseColor("#9D4EDD"), Color.parseColor("#00E5FF"), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.2f, 0.5f, 0.8f, 1f),
+            Shader.TileMode.CLAMP
+          )
+          strokeWidth = 14f * intensity
+          style = Paint.Style.STROKE
+        }
+        canvas.drawLine(cx - w * 0.35f, visorY, cx + w * 0.35f, visorY, visorPaint)
+      }
+
+      EffectType.NEON_SPARKLE_CHEEKS -> {
+        val cheekY = cy + h * 0.02f
+        val cheekPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#FF66B2")
+          style = Paint.Style.FILL
+          alpha = (intensity * 180).toInt().coerceIn(0, 255)
+        }
+        canvas.drawCircle(cx - w * 0.18f, cheekY, 16f * intensity, cheekPaint)
+        canvas.drawCircle(cx + w * 0.18f, cheekY, 16f * intensity, cheekPaint)
+
+        val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#FFD700")
+          style = Paint.Style.FILL
+        }
+        drawStar(canvas, cx - w * 0.18f, cheekY, 10f * intensity, starPaint)
+        drawStar(canvas, cx + w * 0.18f, cheekY, 10f * intensity, starPaint)
+      }
+
+      EffectType.DRAGON_FLAME -> {
+        val flamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = RadialGradient(
+            cx, h, w * 0.6f,
+            intArrayOf(Color.parseColor("#FFEE2200"), Color.parseColor("#FF8800"), Color.TRANSPARENT),
+            floatArrayOf(0.2f, 0.6f, 1f),
+            Shader.TileMode.CLAMP
+          )
+          alpha = (intensity * 240).toInt().coerceIn(0, 255)
+        }
+        canvas.drawRect(0f, h * 0.4f, w, h, flamePaint)
+      }
+
+      EffectType.MUSCLE_GLOW -> {
+        val musclePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.STROKE
+          strokeWidth = 8f * intensity
+          color = Color.parseColor("#00E5FF")
+          setShadowLayer(15f, 0f, 0f, Color.CYAN)
+        }
+        canvas.drawOval(RectF(cx - w * 0.22f, cy - h * 0.25f, cx + w * 0.22f, cy + h * 0.25f), musclePaint)
+      }
+
+      EffectType.GHOST_CLONE, EffectType.AI_GHOST_MOTION -> {
+        val ghostPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#668B5CF6")
+          style = Paint.Style.STROKE
+          strokeWidth = 10f * intensity
+        }
+        val shiftX = sin(relTime * 0.005f) * 30f * intensity
+        canvas.drawRect(cx - w * 0.25f + shiftX, cy - h * 0.35f, cx + w * 0.25f + shiftX, cy + h * 0.35f, ghostPaint)
+      }
+
+      EffectType.FUNNY_BIG_EYES -> {
+        val eyeY = cy - h * 0.08f
+        val lensPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.STROKE
+          strokeWidth = 6f * intensity
+          color = Color.parseColor("#FFD700")
+        }
+        val leftX = cx - w * 0.12f
+        val rightX = cx + w * 0.12f
+        canvas.drawCircle(leftX, eyeY, 32f * intensity, lensPaint)
+        canvas.drawCircle(rightX, eyeY, 32f * intensity, lensPaint)
+
+        val gleamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.WHITE
+          style = Paint.Style.FILL
+        }
+        canvas.drawCircle(leftX - 8f, eyeY - 8f, 6f, gleamPaint)
+        canvas.drawCircle(rightX - 8f, eyeY - 8f, 6f, gleamPaint)
+      }
+
+      EffectType.DARK_SHADOW_AURA -> {
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, h, 0f, 0f,
+            intArrayOf(Color.parseColor("#E61A0033"), Color.parseColor("#803B0066"), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+          )
+          alpha = (intensity * 240).toInt().coerceIn(0, 255)
+        }
+        canvas.drawRect(0f, 0f, w, h, shadowPaint)
+      }
+
+      // 5. PHOTO & CELEBRATE EFFECTS
+      EffectType.POLAROID_VINTAGE -> {
+        val framePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#FDFBF7")
+          style = Paint.Style.STROKE
+          strokeWidth = 24f * intensity
+        }
+        canvas.drawRect(12f, 12f, w - 12f, h - 12f, framePaint)
+        // Thick bottom polaroid bar
+        val bottomPaint = Paint().apply {
+          color = Color.parseColor("#FDFBF7")
+          style = Paint.Style.FILL
+        }
+        canvas.drawRect(0f, h - 70f * intensity, w, h, bottomPaint)
+      }
+
+      EffectType.DOUBLE_EXPOSURE -> {
+        val doublePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, 0f, w, h,
+            intArrayOf(Color.parseColor("#50A855F7"), Color.parseColor("#4000C2FF"), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+          )
+        }
+        canvas.drawRect(0f, 0f, w, h, doublePaint)
+      }
+
+      EffectType.COMIC_SKETCH, EffectType.HALFTONE_DOT -> {
+        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.BLACK
+          style = Paint.Style.FILL
+          alpha = (intensity * 120).toInt().coerceIn(0, 255)
+        }
+        val step = 14f
+        var x = 0f
+        while (x < w) {
+          var y = 0f
+          while (y < h) {
+            canvas.drawCircle(x, y, 2.5f * intensity, dotPaint)
+            y += step
+          }
+          x += step
+        }
+      }
+
+      EffectType.CELEBRATE_CONFETTI -> {
+        val confettiColors = intArrayOf(
+          Color.parseColor("#FFD700"),
+          Color.parseColor("#FF007F"),
+          Color.parseColor("#00E5FF"),
+          Color.parseColor("#10B981"),
+          Color.parseColor("#8B5CF6")
+        )
+        val rng = Random(88)
+        val confettiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.FILL
+        }
+        for (i in 0 until 50) {
+          val speed = 0.0006f + (i * 0.00005f)
+          val cy_c = (relTime * speed * h + (i * 35f)) % h
+          val cx_c = (w * rng.nextFloat() + sin((relTime + i * 150) * 0.005f) * 20f).coerceIn(0f, w)
+          confettiPaint.color = confettiColors[i % confettiColors.size]
+          val cWidth = (8f + rng.nextFloat() * 10f) * intensity
+          val cHeight = (14f + rng.nextFloat() * 12f) * intensity
+          canvas.save()
+          canvas.rotate((relTime * 0.2f + i * 45f) % 360f, cx_c, cy_c)
+          canvas.drawRect(cx_c - cWidth / 2f, cy_c - cHeight / 2f, cx_c + cWidth / 2f, cy_c + cHeight / 2f, confettiPaint)
+          canvas.restore()
+        }
+      }
+
+      EffectType.CELEBRATE_FIREWORKS -> {
+        val fireworkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.FILL
+        }
+        val colors = intArrayOf(Color.parseColor("#FF3366"), Color.parseColor("#FFD700"), Color.parseColor("#00E5FF"), Color.parseColor("#9D4EDD"))
+        val fwX = cx + sin(relTime * 0.002f) * (w * 0.25f)
+        val fwY = cy * 0.6f
+        val count = 28
+        val radius = ((relTime % 1000L).toFloat() / 1000f) * (w * 0.35f)
+        val alphaF = (1f - (radius / (w * 0.35f))).coerceIn(0f, 1f)
+        for (i in 0 until count) {
+          val angle = (i.toFloat() / count) * 6.283185f
+          val px = fwX + cos(angle) * radius
+          val py = fwY + sin(angle) * radius
+          fireworkPaint.color = colors[i % colors.size]
+          fireworkPaint.alpha = (alphaF * intensity * 255).toInt().coerceIn(0, 255)
+          canvas.drawCircle(px, py, 4f * intensity, fireworkPaint)
+        }
+      }
+
+      EffectType.PARTY_PRISM -> {
+        val prismPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, 0f, w, h,
+            intArrayOf(
+              Color.parseColor("#4DFF0000"),
+              Color.parseColor("#4DFFFF00"),
+              Color.parseColor("#4D00FF00"),
+              Color.parseColor("#4D00FFFF"),
+              Color.parseColor("#4D0000FF"),
+              Color.parseColor("#4DFF00FF")
+            ),
+            null,
+            Shader.TileMode.MIRROR
+          )
+        }
+        canvas.drawRect(0f, 0f, w, h, prismPaint)
+      }
+
+      EffectType.PARTY_CONFUSED -> {
+        val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#FFD700")
+          style = Paint.Style.FILL
+        }
+        for (i in 0 until 4) {
+          val angle = (relTime * 0.005f) + (i * 1.57f)
+          val orbitX = cx + cos(angle) * (w * 0.25f)
+          val orbitY = (cy - h * 0.2f) + sin(angle) * (h * 0.08f)
+          drawStar(canvas, orbitX, orbitY, 14f * intensity, starPaint)
+        }
+      }
+
+      EffectType.DIGICAM_2004 -> {
+        val osdPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#FF9900")
+          textSize = (h * 0.038f).coerceIn(16f, 28f)
+          isFakeBoldText = true
+          setShadowLayer(3f, 1f, 1f, Color.BLACK)
+        }
+        canvas.drawText("'04  09  14", w * 0.65f, h * 0.94f, osdPaint)
+      }
+
+      EffectType.Y2K_CHROME -> {
+        val chromePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, 0f, w, h,
+            intArrayOf(Color.TRANSPARENT, Color.parseColor("#66C0C0C0"), Color.parseColor("#6600E5FF"), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.4f, 0.7f, 1f),
+            Shader.TileMode.CLAMP
+          )
+        }
+        canvas.drawRect(0f, 0f, w, h, chromePaint)
+      }
+
+      EffectType.STAMP_ART -> {
+        val stampPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#B91C1C")
+          style = Paint.Style.STROKE
+          strokeWidth = 6f * intensity
+        }
+        val stampRect = RectF(w * 0.55f, h * 0.75f, w * 0.92f, h * 0.92f)
+        canvas.drawRoundRect(stampRect, 10f, 10f, stampPaint)
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#B91C1C")
+          textSize = 14f
+          isFakeBoldText = true
+        }
+        canvas.drawText("STUDIO FX", w * 0.62f, h * 0.84f, textPaint)
+      }
+
+      EffectType.SCREEN_SWAP_HOLO, EffectType.FACE_SWAP_AI -> {
+        val holoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#5000E5FF")
+          strokeWidth = 2f
+        }
+        var y = 0f
+        while (y < h) {
+          canvas.drawLine(0f, y, w, y, holoPaint)
+          y += 10f
+        }
+        // Scanning laser bar
+        val scanY = (relTime * 0.2f) % h
+        val laserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          shader = LinearGradient(
+            0f, scanY, 0f, scanY + 12f,
+            intArrayOf(Color.TRANSPARENT, Color.parseColor("#CC00E5FF"), Color.TRANSPARENT),
+            null,
+            Shader.TileMode.CLAMP
+          )
+        }
+        canvas.drawRect(0f, scanY, w, scanY + 12f, laserPaint)
+      }
+
+      // 6. AI EFFECTS
+      EffectType.AI_CYBERPUNK_CITY, EffectType.AI_BG_SWAP -> {
         // Neon rain streaks
         val rainPaint = Paint().apply {
           color = Color.parseColor("#9900E5FF")
@@ -812,7 +1365,6 @@ object VideoEffectRenderer {
       }
 
       EffectType.AI_FREEZE_TIME -> {
-        // Crystalline ice frame frost
         val frostPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
           color = Color.parseColor("#80B8E2F2")
           strokeWidth = 3f
@@ -840,6 +1392,38 @@ object VideoEffectRenderer {
         }
       }
 
+      EffectType.AI_EXPANSION, EffectType.AI_STYLE_MORPH -> {
+        val expandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          style = Paint.Style.STROKE
+          strokeWidth = 4f * intensity
+          color = Color.parseColor("#00C2FF")
+        }
+        val pad = 30f * intensity
+        canvas.drawRoundRect(RectF(pad, pad, w - pad, h - pad), 16f, 16f, expandPaint)
+      }
+
+      EffectType.AI_ANIME_WORLD, EffectType.AI_FANTASY_KINGDOM -> {
+        val sporePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#99FFF7D6")
+          style = Paint.Style.FILL
+        }
+        val rng = Random(66)
+        for (i in 0 until 30) {
+          val speed = 0.0003f + (i * 0.00005f)
+          val sy = h - ((relTime * speed * h + (i * 50f)) % h)
+          val sx = (w * rng.nextFloat() + sin((relTime + i * 200) * 0.004f) * 25f).coerceIn(0f, w)
+          canvas.drawCircle(sx, sy, (3f + rng.nextFloat() * 4f) * intensity, sporePaint)
+        }
+      }
+
+      EffectType.BLUR, EffectType.SOFT_FOCUS -> {
+        val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+          color = Color.parseColor("#4DFFFFFF")
+          alpha = (intensity * 90).toInt().coerceIn(0, 255)
+        }
+        canvas.drawRect(0f, 0f, w, h, blurPaint)
+      }
+
       else -> {
         // Generic fallback luminous ambient overlay for any unlisted effect
         val ambientPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -861,6 +1445,21 @@ object VideoEffectRenderer {
     path.moveTo(cx, cy - size * 0.2f)
     path.cubicTo(cx - size * 0.5f, cy - size * 0.8f, cx - size, cy - size * 0.2f, cx, cy + size * 0.6f)
     path.cubicTo(cx + size, cy - size * 0.2f, cx + size * 0.5f, cy - size * 0.8f, cx, cy - size * 0.2f)
+    path.close()
+    canvas.drawPath(path, paint)
+  }
+
+  private fun drawStar(canvas: Canvas, cx: Float, cy: Float, radius: Float, paint: Paint) {
+    val path = Path()
+    val count = 5
+    val innerRadius = radius * 0.45f
+    for (i in 0 until (count * 2)) {
+      val r = if (i % 2 == 0) radius else innerRadius
+      val angle = i * Math.PI / count - Math.PI / 2.0
+      val x = cx + (cos(angle) * r).toFloat()
+      val y = cy + (sin(angle) * r).toFloat()
+      if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
     path.close()
     canvas.drawPath(path, paint)
   }

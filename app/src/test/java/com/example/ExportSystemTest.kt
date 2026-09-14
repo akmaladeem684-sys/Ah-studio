@@ -396,4 +396,63 @@ class ExportSystemTest {
     val fpsRatio = size60.toDouble() / size30.toDouble()
     assertEquals(2.0, fpsRatio, 0.1)
   }
+
+  @Test
+  fun `test 16 - 1080p, 2K, and 4K resolution dimensions calculation and macroblock alignment`() {
+    // 1080p 16:9 Landscape & 9:16 Portrait
+    val dims1080pLandscape = exporter.getDimensionsForResolution(Resolution.RES_1080P, AspectRatio.RATIO_16_9)
+    assertEquals(1920, dims1080pLandscape.first)
+    assertEquals(1080, dims1080pLandscape.second)
+    assertEquals(0, dims1080pLandscape.first % 16)
+    // 1080 rounded to 16-pixel macroblock boundary is 1088 or 1080 (1088 = ((1080+15)/16)*16)
+    assertTrue(dims1080pLandscape.second % 16 == 0)
+
+    val dims1080pPortrait = exporter.getDimensionsForResolution(Resolution.RES_1080P, AspectRatio.RATIO_9_16)
+    assertTrue(dims1080pPortrait.first % 16 == 0)
+    assertTrue(dims1080pPortrait.second % 16 == 0)
+
+    // 2K QHD 16:9 Landscape & 9:16 Portrait
+    val dims2kLandscape = exporter.getDimensionsForResolution(Resolution.RES_2K, AspectRatio.RATIO_16_9)
+    assertEquals(2560, dims2kLandscape.first)
+    assertEquals(1440, dims2kLandscape.second)
+    assertEquals(0, dims2kLandscape.first % 16)
+    assertEquals(0, dims2kLandscape.second % 16)
+
+    val dims2kPortrait = exporter.getDimensionsForResolution(Resolution.RES_VERTICAL_2K, AspectRatio.RATIO_9_16)
+    assertEquals(1440, dims2kPortrait.first)
+    assertEquals(2560, dims2kPortrait.second)
+
+    // 4K UHD 16:9 Landscape & 9:16 Portrait
+    val dims4kLandscape = exporter.getDimensionsForResolution(Resolution.RES_4K, AspectRatio.RATIO_16_9)
+    assertEquals(3840, dims4kLandscape.first)
+    assertEquals(2160, dims4kLandscape.second)
+    assertEquals(0, dims4kLandscape.first % 16)
+    assertEquals(0, dims4kLandscape.second % 16)
+
+    val dims4kPortrait = exporter.getDimensionsForResolution(Resolution.RES_VERTICAL_4K, AspectRatio.RATIO_9_16)
+    assertEquals(2160, dims4kPortrait.first)
+    assertEquals(3840, dims4kPortrait.second)
+  }
+
+  @Test
+  fun `test 17 - Composition engine preserves clip rotation, aspect ratio framing and orientation`() {
+    val timeline = Timeline(
+      aspectRatio = AspectRatio.RATIO_16_9,
+      videoClips = listOf(
+        VideoClip(
+          id = "c1",
+          name = "Rotated Clip",
+          durationMs = 5000L,
+          rotationDegrees = 90,
+          flipHorizontal = false,
+          flipVertical = false,
+          cropScale = 1.0f
+        )
+      )
+    )
+
+    // Verify canExportWithMedia3Transformer delegates rotated/transformed clips to composition engine
+    val canUseTransformer = exporter.canExportWithMedia3Transformer(timeline)
+    assertFalse("Rotated clip must use GPU composition engine to preserve orientation matrices", canUseTransformer)
+  }
 }

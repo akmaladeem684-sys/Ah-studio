@@ -208,7 +208,7 @@ class VideoCompositionEngine(private val context: Context) {
     val texts = if (!isTextHidden) {
       timeline.textClips.filter {
         !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-      }.map { clip ->
+      }.sortedWith(compareBy({ it.trackIndex }, { it.timelineStartMs })).map { clip ->
         val state = TextLayerRenderer.evaluateAnimation(clip, posMs)
         ComposedText(
           clip = clip,
@@ -313,7 +313,7 @@ class VideoCompositionEngine(private val context: Context) {
       val clip = frame.activeClip
       val scaleX = canvasWidth.toFloat() / mainBitmap.width
       val scaleY = canvasHeight.toFloat() / mainBitmap.height
-      val baseScale = max(scaleX, scaleY)
+      val baseScale = min(scaleX, scaleY)
 
       val matrix = Matrix()
       // Center bitmap

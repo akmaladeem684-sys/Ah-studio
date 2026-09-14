@@ -319,10 +319,22 @@ fun InteractiveTransformOverlay(
             )
           }
       ) {
+        val overlayColorFilter = remember(overlay.filter) {
+          val f = overlay.filter
+          if (f == null || f.type == com.example.domain.model.FilterType.NONE) {
+            null
+          } else {
+            com.example.engine.composition.ColorFilterGenerator.getFilterMatrix(f.type, f.intensity)?.let { m ->
+              androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix(m.array))
+            }
+          }
+        }
+
         AsyncImage(
           model = overlay.uri,
           contentDescription = overlay.name,
           contentScale = ContentScale.Crop,
+          colorFilter = overlayColorFilter,
           modifier = Modifier.fillMaxSize()
         )
 
@@ -496,8 +508,27 @@ fun InteractiveTransformOverlay(
       }
     }
 
-    // 3. Render Active Text Layers
-    activeTexts.filter { !it.isHidden }.forEach { textClip ->
+    // 3. Render Active Text Layers (Single unified high-performance Canvas pass for 50+ layers)
+    val visibleTexts = activeTexts.filter { !it.isHidden }
+    if (visibleTexts.isNotEmpty()) {
+      Canvas(modifier = Modifier.fillMaxSize()) {
+        drawIntoCanvas { canvas ->
+          visibleTexts.forEach { textClip ->
+            TextLayerRenderer.draw(
+              canvas = canvas.nativeCanvas,
+              clip = textClip,
+              currentPosMs = currentPosMs,
+              width = parentWidthPx.toInt(),
+              height = parentHeightPx.toInt(),
+              context = context
+            )
+          }
+        }
+      }
+    }
+
+    // Touch Target Bounding Boxes and Transform Handles for Text Layers
+    visibleTexts.forEach { textClip ->
       val isSelected = selectedElement is SelectedTrackElement.Text &&
         (selectedElement as SelectedTrackElement.Text).clipId == textClip.id
 
@@ -525,20 +556,6 @@ fun InteractiveTransformOverlay(
 
       val centerXDp = with(density) { centerXPx.toDp() }
       val centerYDp = with(density) { centerYPx.toDp() }
-
-      // Custom Canvas for crisp TextLayerRenderer
-      Canvas(modifier = Modifier.fillMaxSize()) {
-        drawIntoCanvas { canvas ->
-          TextLayerRenderer.draw(
-            canvas = canvas.nativeCanvas,
-            clip = textClip,
-            currentPosMs = currentPosMs,
-            width = parentWidthPx.toInt(),
-            height = parentHeightPx.toInt(),
-            context = context
-          )
-        }
-      }
 
       // Touch Target Bounding Box positioned at exact text coordinates
       Box(

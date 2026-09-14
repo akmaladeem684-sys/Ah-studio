@@ -86,7 +86,9 @@ fun HomeBottomNavigationBar(
           ) {
             Box(
               contentAlignment = Alignment.Center,
-              modifier = Modifier.size(28.dp)
+              modifier = Modifier
+                .offset(y = (-4).dp)
+                .size(28.dp)
             ) {
               Icon(
                 imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,

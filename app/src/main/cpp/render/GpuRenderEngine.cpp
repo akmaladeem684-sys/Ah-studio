@@ -130,13 +130,15 @@ void GpuRenderEngine::setupShaders() {
 }
 
 void GpuRenderEngine::setupQuadGeometry() {
-    // Standard Quad Geometry: Position (X, Y, Z), TexCoord (U, V)
+    // Full-screen Quad Geometry: Position (X, Y, Z), TexCoord (U, V)
+    // Coords span [-1.0f, 1.0f] for full viewport coverage
+    // FBO textures in OpenGL ES have V=1.0 at the top and V=0.0 at the bottom
     const float quadData[] = {
         // Position           // TexCoord
-        -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, // Top-Left
-        -0.5f, -0.5f, 0.0f,   0.0f, 1.0f, // Bottom-Left
-         0.5f,  0.5f, 0.0f,   1.0f, 0.0f, // Top-Right
-         0.5f, -0.5f, 0.0f,   1.0f, 1.0f  // Bottom-Right
+        -1.0f,  1.0f, 0.0f,   0.0f, 1.0f, // Top-Left
+        -1.0f, -1.0f, 0.0f,   0.0f, 0.0f, // Bottom-Left
+         1.0f,  1.0f, 0.0f,   1.0f, 1.0f, // Top-Right
+         1.0f, -1.0f, 0.0f,   1.0f, 0.0f  // Bottom-Right
     };
 
     glGenVertexArrays(1, &mVao);
