@@ -404,12 +404,11 @@ class ExportSystemTest {
     assertEquals(1920, dims1080pLandscape.first)
     assertEquals(1080, dims1080pLandscape.second)
     assertEquals(0, dims1080pLandscape.first % 16)
-    // 1080 rounded to 16-pixel macroblock boundary is 1088 or 1080 (1088 = ((1080+15)/16)*16)
-    assertTrue(dims1080pLandscape.second % 16 == 0)
+    assertTrue(dims1080pLandscape.second % 2 == 0)
 
     val dims1080pPortrait = exporter.getDimensionsForResolution(Resolution.RES_1080P, AspectRatio.RATIO_9_16)
-    assertTrue(dims1080pPortrait.first % 16 == 0)
-    assertTrue(dims1080pPortrait.second % 16 == 0)
+    assertTrue(dims1080pPortrait.first % 2 == 0)
+    assertTrue(dims1080pPortrait.second % 2 == 0)
 
     // 2K QHD 16:9 Landscape & 9:16 Portrait
     val dims2kLandscape = exporter.getDimensionsForResolution(Resolution.RES_2K, AspectRatio.RATIO_16_9)

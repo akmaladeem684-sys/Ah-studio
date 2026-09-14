@@ -97,7 +97,6 @@ suspend fun PointerInputScope.detectElementTouchGestures(
 
   awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
-    onSelect()
 
     var isDrag = false
     var totalDragDist = 0f
@@ -119,7 +118,10 @@ suspend fun PointerInputScope.detectElementTouchGestures(
         totalDragDist += dragDist
 
         if (totalDragDist > touchSlop) {
-          isDrag = true
+          if (!isDrag) {
+            isDrag = true
+            onSelect()
+          }
         }
 
         if (isDrag && (localDelta.x != 0f || localDelta.y != 0f)) {
@@ -136,7 +138,10 @@ suspend fun PointerInputScope.detectElementTouchGestures(
         prevAngle = 0f
       } else if (pointerCount >= 2 && onTwoFingerTransform != null) {
         // TWO FINGERS: SCALE & ROTATE ONLY
-        isDrag = true
+        if (!isDrag) {
+          isDrag = true
+          onSelect()
+        }
         val p1 = pressedPointers[0]
         val p2 = pressedPointers[1]
         val dx = p2.position.x - p1.position.x
@@ -165,6 +170,7 @@ suspend fun PointerInputScope.detectElementTouchGestures(
     if (!isDrag && totalDragDist <= touchSlop) {
       val now = System.currentTimeMillis()
       if (now - downTime < 400L) {
+        onSelect()
         if (onDoubleTap != null && (now - lastTapTime < 350L)) {
           onDoubleTap()
           lastTapTime = 0L
@@ -211,12 +217,18 @@ fun InteractiveTransformOverlay(
   BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
-      .pointerInput(Unit) {
-        // Tap on empty canvas background to deselect active transform frame
-        detectTapGestures {
-          currentOnSelectElement(SelectedTrackElement.None)
+      .then(
+        if (selectedElement != SelectedTrackElement.None) {
+          Modifier.pointerInput(selectedElement) {
+            // Tap on empty canvas background to deselect active transform frame
+            detectTapGestures {
+              currentOnSelectElement(SelectedTrackElement.None)
+            }
+          }
+        } else {
+          Modifier
         }
-      }
+      )
   ) {
     val parentWidthPx = constraints.maxWidth.toFloat()
     val parentHeightPx = constraints.maxHeight.toFloat()

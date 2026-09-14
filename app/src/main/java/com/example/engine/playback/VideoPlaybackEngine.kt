@@ -42,30 +42,20 @@ class VideoPlaybackEngine(
     private const val FRAME_INTERVAL_60FPS_MS = 16L
   }
 
-  val player: ExoPlayer = ExoPlayer.Builder(
-    context.applicationContext,
-    DefaultRenderersFactory(context.applicationContext)
-      .setEnableDecoderFallback(true)
-      .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-  )
-    .setLoadControl(
-      DefaultLoadControl.Builder()
-        .setBufferDurationsMs(
-          /* minBufferMs = */ 1000,
-          /* maxBufferMs = */ 5000,
-          /* bufferForPlaybackMs = */ 200,
-          /* bufferForPlaybackAfterRebufferMs = */ 500
-        )
-        .build()
+  val engineController: com.example.engine.controller.CustomVideoEngineController =
+    com.example.engine.controller.CustomVideoEngineController(
+      context = context,
+      onTimelinePositionChanged = onTimelinePositionChanged,
+      onPlaybackEnded = onPlaybackEnded
     )
-    .setSeekParameters(SeekParameters.CLOSEST_SYNC)
-    .build().apply {
-      playWhenReady = false
-      repeatMode = Player.REPEAT_MODE_OFF
-    }
+
+  val player: ExoPlayer = engineController.playbackManager.player
 
   private val _isPlaying = MutableStateFlow(false)
   val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+  private val _currentPositionMs = MutableStateFlow(0L)
+  val currentPositionMs: StateFlow<Long> = _currentPositionMs.asStateFlow()
 
   private val _activeClip = MutableStateFlow<VideoClip?>(null)
   val activeClip: StateFlow<VideoClip?> = _activeClip.asStateFlow()
@@ -176,6 +166,7 @@ class VideoPlaybackEngine(
     this.currentTimeline = timeline
     val boundedPos = currentPosMs.coerceIn(0L, timeline.totalDurationMs.coerceAtLeast(0L))
     currentPosMs = boundedPos
+    _currentPositionMs.value = boundedPos
     val clip = findClipAt(boundedPos)
     _activeClip.value = clip
     val matrix = ColorFilterGenerator.createCombinedMatrix(
@@ -211,6 +202,7 @@ class VideoPlaybackEngine(
 
     val boundedPos = targetPos.coerceIn(0L, currentTimeline.totalDurationMs)
     currentPosMs = boundedPos
+    _currentPositionMs.value = boundedPos
 
     val active = findClipAt(boundedPos)
     _activeClip.value = active
@@ -242,6 +234,7 @@ class VideoPlaybackEngine(
     val seq = proxyEngine?.nextSeekSequence() ?: seekSequence.incrementAndGet()
     val boundedPos = timelinePosMs.coerceIn(0L, currentTimeline.totalDurationMs)
     currentPosMs = boundedPos
+    _currentPositionMs.value = boundedPos
 
     val active = findClipAt(boundedPos)
     _activeClip.value = active
@@ -279,6 +272,7 @@ class VideoPlaybackEngine(
     val seq = proxyEngine?.nextSeekSequence() ?: seekSequence.incrementAndGet()
     val boundedPos = timelinePosMs.coerceIn(0L, currentTimeline.totalDurationMs)
     currentPosMs = boundedPos
+    _currentPositionMs.value = boundedPos
 
     val active = findClipAt(boundedPos)
     _activeClip.value = active
@@ -323,6 +317,7 @@ class VideoPlaybackEngine(
     }
     if (currentPosMs >= currentTimeline.totalDurationMs) {
       currentPosMs = 0L
+      _currentPositionMs.value = 0L
       seekTo(0L)
       onTimelinePositionChanged(0L)
     }
@@ -348,9 +343,19 @@ class VideoPlaybackEngine(
   }
 
   fun pause() {
-    player.pause()
-    progressSyncJob?.cancel()
     _isPlaying.value = false
+    progressSyncJob?.cancel()
+    player.pause()
+    val active = _activeClip.value
+    if (active != null && active.isVideo && isPlayableInPlayer(active.uri) && player.playbackState != Player.STATE_IDLE) {
+      val playerPos = player.currentPosition
+      val speed = active.speed.coerceAtLeast(0.01f)
+      val offsetInClip = ((playerPos - active.sourceStartMs) / speed).toLong()
+      val calculatedTimeline = (active.timelineStartMs + offsetInClip).coerceIn(active.timelineStartMs, active.timelineStartMs + active.durationMs)
+      currentPosMs = calculatedTimeline
+      _currentPositionMs.value = currentPosMs
+      onTimelinePositionChanged(currentPosMs)
+    }
   }
 
   fun togglePlayPause() {
@@ -583,42 +588,63 @@ class VideoPlaybackEngine(
     if (nextPos >= currentTimeline.totalDurationMs) {
       pause()
       seekTo(0L)
+      _currentPositionMs.value = 0L
       onTimelinePositionChanged(0L)
       onPlaybackEnded()
     } else {
-      seekTo(nextPos)
+      currentPosMs = nextPos
+      _currentPositionMs.value = nextPos
       onTimelinePositionChanged(nextPos)
-      play()
+      val nextClip = findClipAt(nextPos)
+      _activeClip.value = nextClip
+      if (nextClip != null && nextClip.isVideo && isPlayableInPlayer(nextClip.uri)) {
+        ensureClipLoaded(nextClip)
+        val sourcePosMs = nextClip.timelineToSourceMs(nextPos)
+        player.seekTo(sourcePosMs)
+        player.play()
+        _isPlaying.value = true
+        startProgressSync()
+      } else {
+        startSyntheticPlaybackLoop()
+      }
     }
   }
 
   private fun startProgressSync() {
     progressSyncJob?.cancel()
     progressSyncJob = scope.launch {
-      while (isActive && player.isPlaying) {
+      while (isActive && (_isPlaying.value || player.isPlaying || player.playWhenReady)) {
         if (isTrimPreviewMode) {
           val pos = player.currentPosition
-          _trimPlaybackPositionMs.value = (trimRangeStartMs + pos).coerceAtMost(trimRangeEndMs)
+          val calculated = (trimRangeStartMs + pos).coerceIn(trimRangeStartMs, trimRangeEndMs)
+          _trimPlaybackPositionMs.value = calculated
+          _currentPositionMs.value = calculated
+          onTimelinePositionChanged(calculated)
         } else {
           val active = _activeClip.value
-          if (active != null && active.isVideo) {
+          if (active != null && active.isVideo && isPlayableInPlayer(active.uri)) {
             val playerPos = player.currentPosition
             val speed = active.speed.coerceAtLeast(0.01f)
             val offsetInClip = ((playerPos - active.sourceStartMs) / speed).toLong()
-            val calculatedTimeline = (active.timelineStartMs + offsetInClip).coerceAtLeast(active.timelineStartMs)
+            val calculatedTimeline = (active.timelineStartMs + offsetInClip)
             
             if (calculatedTimeline >= active.timelineStartMs + active.durationMs) {
               handleClipEnded()
               break
             } else {
+              val bounded = calculatedTimeline.coerceIn(active.timelineStartMs, currentTimeline.totalDurationMs.coerceAtLeast(0L))
               isSyncingFromPlayer = true
-              currentPosMs = calculatedTimeline
-              onTimelinePositionChanged(currentPosMs)
+              currentPosMs = bounded
+              _currentPositionMs.value = bounded
+              onTimelinePositionChanged(bounded)
               isSyncingFromPlayer = false
             }
+          } else {
+            startSyntheticPlaybackLoop()
+            break
           }
         }
-        delay(FRAME_INTERVAL_60FPS_MS) // Smooth 60 FPS target sync
+        delay(FRAME_INTERVAL_60FPS_MS) // ~16ms smooth UI sync loop
       }
     }
   }
@@ -632,17 +658,20 @@ class VideoPlaybackEngine(
         if (next >= currentTimeline.totalDurationMs) {
           pause()
           seekTo(0L)
+          _currentPositionMs.value = 0L
           onTimelinePositionChanged(0L)
           onPlaybackEnded()
           break
         } else {
           currentPosMs = next
+          _currentPositionMs.value = next
           onTimelinePositionChanged(currentPosMs)
           val nextClip = findClipAt(currentPosMs)
           if (nextClip != null && nextClip.id != _activeClip.value?.id) {
             syncWithPosition(currentPosMs)
             if (nextClip.isVideo && isPlayableInPlayer(nextClip.uri)) {
               player.play()
+              startProgressSync()
               break
             }
           }
@@ -653,9 +682,10 @@ class VideoPlaybackEngine(
   }
 
   fun release() {
+    _isPlaying.value = false
     coalescedSeekJob?.cancel()
     progressSyncJob?.cancel()
     scope.cancel()
-    player.release()
+    engineController.release()
   }
 }

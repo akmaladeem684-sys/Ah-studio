@@ -172,12 +172,12 @@ class VideoEffectsTest {
 
   @Test
   fun testEffectsCatalogAndLiveThumbnailConsistency() {
-    val allEffects = com.example.ui.components.effects.EffectsLibraryCatalog.ALL_EFFECTS
-    assertTrue(allEffects.size > 20)
+    val allEffects = com.example.ui.components.effects.EffectsCatalog.VIDEO_EFFECTS
+    assertTrue(allEffects.size > 10)
 
     // First item is None / Original
     val firstItem = allEffects.first()
-    assertEquals("none", firstItem.id)
+    assertEquals("ve_none", firstItem.id)
     assertNull(firstItem.effectType)
 
     // Select target video clip

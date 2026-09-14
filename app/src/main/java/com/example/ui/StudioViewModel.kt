@@ -104,7 +104,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     context = application,
     onTimelinePositionChanged = { posMs ->
       isSyncingFromPlayback = true
-      timelineEngine.setPosition(posMs)
+      timelineEngine.setPosition(posMs, snap = false)
       isSyncingFromPlayback = false
     },
     onPlaybackEnded = {
@@ -112,6 +112,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     },
     proxyEngine = proxyMediaEngine
   )
+
+  val engineController: com.example.engine.controller.CustomVideoEngineController = playbackEngine.engineController
+  val engineState: StateFlow<com.example.engine.controller.VideoEngineState> = engineController.engineState
 
   val allProjects: StateFlow<List<ProjectEntity>> = repository.allProjects
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

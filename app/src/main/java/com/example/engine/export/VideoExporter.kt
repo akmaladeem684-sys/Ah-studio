@@ -1426,9 +1426,9 @@ class VideoExporter(private val context: Context) {
       }
     }
 
-    // Align dimensions to 16-pixel macroblock boundaries for standard hardware encoder compatibility
-    val alignedW = ((w + 15) / 16) * 16
-    val alignedH = ((h + 15) / 16) * 16
+    // Align dimensions to 2-pixel boundaries (even numbers) for standard YUV420 encoder compatibility
+    val alignedW = (w / 2) * 2
+    val alignedH = (h / 2) * 2
     return Pair(alignedW.coerceIn(320, 3840), alignedH.coerceIn(320, 3840))
   }
 

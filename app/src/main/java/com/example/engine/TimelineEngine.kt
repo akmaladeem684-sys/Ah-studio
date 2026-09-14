@@ -113,16 +113,16 @@ class TimelineEngine {
     _isFrameSnapping.value = enabled
   }
 
-  fun setPosition(positionMs: Long) {
+  fun setPosition(positionMs: Long, snap: Boolean = _isSnappingEnabled.value) {
     val total = _timeline.value.totalDurationMs
-    val targetPos = if (_isFrameSnapping.value) {
+    val targetPos = if (_isFrameSnapping.value && snap) {
       val frameDuration = 1000.0 / _timelineFps.value
       val frameIndex = Math.round(positionMs / frameDuration)
       (frameIndex * frameDuration).toLong()
     } else {
       positionMs
     }
-    val snapped = if (_isSnappingEnabled.value) snapPosition(targetPos) else targetPos
+    val snapped = if (snap) snapPosition(targetPos) else targetPos
     _currentPositionMs.value = snapped.coerceIn(0L, total)
   }
 

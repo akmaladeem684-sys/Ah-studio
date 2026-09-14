@@ -1601,10 +1601,54 @@ fun VideoPreviewSurface(
                       ViewGroup.LayoutParams.MATCH_PARENT,
                       ViewGroup.LayoutParams.MATCH_PARENT
                     )
+
+                    // SurfaceHolder callback for SurfaceView mode
+                    val surfaceView = (pv.videoSurfaceView as? android.view.SurfaceView)
+                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.SurfaceView>().firstOrNull()
+                    surfaceView?.holder?.addCallback(object : android.view.SurfaceHolder.Callback {
+                      override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                        if (holder.surface.isValid) {
+                          player?.setVideoSurface(holder.surface)
+                        }
+                      }
+                      override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+                        if (holder.surface.isValid) {
+                          player?.setVideoSurface(holder.surface)
+                        }
+                      }
+                      override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                        // Cleanly detach surface without releasing player or resetting timeline
+                        player?.clearVideoSurface(holder.surface)
+                      }
+                    })
+
+                    // SurfaceTexture listener for TextureView mode
+                    val textureView = (pv.videoSurfaceView as? android.view.TextureView)
+                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.TextureView>().firstOrNull()
+                    textureView?.surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
+                      override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
+                        val s = android.view.Surface(surface)
+                        player?.setVideoSurface(s)
+                      }
+                      override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {}
+                      override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
+                        player?.clearVideoSurface()
+                        return true
+                      }
+                      override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
+                    }
+
                     pv
                   },
                   update = { pv ->
-                    pv.player = player
+                    if (pv.player != player) {
+                      pv.player = player
+                    }
+                    val surfaceView = (pv.videoSurfaceView as? android.view.SurfaceView)
+                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.SurfaceView>().firstOrNull()
+                    if (surfaceView != null && surfaceView.holder.surface.isValid) {
+                      player?.setVideoSurface(surfaceView.holder.surface)
+                    }
                     val paint = if (isIdentityFilter) {
                       null
                     } else {
@@ -1628,6 +1672,10 @@ fun VideoPreviewSurface(
                       )
                       pv.invalidate()
                     }
+                  },
+                  onReset = { /* Preserve player across recomposition */ },
+                  onRelease = { pv ->
+                    pv.player = null
                   },
                   modifier = Modifier.fillMaxSize()
                 )
