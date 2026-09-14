@@ -73,97 +73,87 @@ data class FuturisticNavItemData(
  */
 @Composable
 fun FuturisticBottomNavBarContainer(
-  onBackClick: () -> Unit,
+  onBackClick: (() -> Unit)? = null,
   items: List<FuturisticNavItemData>,
   modifier: Modifier = Modifier,
-  showDividers: Boolean = true
+  showDividers: Boolean = false
 ) {
   Box(
     modifier = modifier
       .fillMaxWidth()
-      .padding(horizontal = 8.dp, vertical = 6.dp)
+      .padding(horizontal = 8.dp, vertical = 4.dp)
       .navigationBarsPadding(),
     contentAlignment = Alignment.Center
   ) {
     Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .height(68.dp)
+        .height(60.dp)
         .shadow(
-          elevation = 12.dp,
-          shape = RoundedCornerShape(26.dp),
-          ambientColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
-          spotColor = Color(0xFF7C4DFF).copy(alpha = 0.3f)
+          elevation = 8.dp,
+          shape = RoundedCornerShape(22.dp),
+          ambientColor = Color(0xFF00E5FF).copy(alpha = 0.15f),
+          spotColor = Color(0xFF7C4DFF).copy(alpha = 0.2f)
         )
         .border(
-          width = 1.25.dp,
+          width = 1.dp,
           brush = Brush.horizontalGradient(
             colors = listOf(
-              Color(0xFF00E5FF).copy(alpha = 0.45f),
-              Color(0xFF7C4DFF).copy(alpha = 0.55f),
-              Color(0xFF00E5FF).copy(alpha = 0.45f)
+              Color(0xFF00E5FF).copy(alpha = 0.35f),
+              Color(0xFF7C4DFF).copy(alpha = 0.45f),
+              Color(0xFF00E5FF).copy(alpha = 0.35f)
             )
           ),
-          shape = RoundedCornerShape(26.dp)
+          shape = RoundedCornerShape(22.dp)
         ),
-      shape = RoundedCornerShape(26.dp),
-      color = Color(0xFF090D18).copy(alpha = 0.94f)
+      shape = RoundedCornerShape(22.dp),
+      color = Color(0xFF090D18).copy(alpha = 0.96f)
     ) {
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 8.dp, vertical = 7.dp)
+          .padding(horizontal = 6.dp, vertical = 4.dp)
           .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
       ) {
-        // 1. Dedicated Glowing Left Back Arrow Button
-        Box(
-          modifier = Modifier
-            .size(width = 50.dp, height = 54.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-              Brush.linearGradient(
-                colors = listOf(
-                  Color(0xFF16294A),
-                  Color(0xFF0E1A33)
+        if (onBackClick != null) {
+          Box(
+            modifier = Modifier
+              .size(width = 42.dp, height = 48.dp)
+              .clip(RoundedCornerShape(14.dp))
+              .background(
+                Brush.linearGradient(
+                  colors = listOf(
+                    Color(0xFF16294A),
+                    Color(0xFF0E1A33)
+                  )
                 )
               )
-            )
-            .border(
-              BorderStroke(
-                width = 1.5.dp,
-                color = Color(0xFF00B0FF).copy(alpha = 0.85f)
-              ),
-              shape = RoundedCornerShape(18.dp)
-            )
-            .clickable(onClick = onBackClick)
-            .testTag("nav_back_arrow_button"),
-          contentAlignment = Alignment.Center
-        ) {
-          Icon(
-            imageVector = Icons.Default.ArrowBack,
-            contentDescription = "Back",
-            tint = Color.White,
-            modifier = Modifier.size(22.dp)
-          )
-        }
-
-        Spacer(modifier = Modifier.width(2.dp))
-
-        // 2. Navigation Items with Optional Dividers
-        items.forEachIndexed { index, item ->
-          FuturisticNavItemView(item = item)
-
-          if (showDividers && (index == 3 || index == 5 || index == 6)) {
-            Box(
-              modifier = Modifier
-                .padding(horizontal = 2.dp)
-                .width(1.dp)
-                .height(30.dp)
-                .background(Color(0xFF1E2638))
+              .border(
+                BorderStroke(
+                  width = 1.25.dp,
+                  color = Color(0xFF00B0FF).copy(alpha = 0.75f)
+                ),
+                shape = RoundedCornerShape(14.dp)
+              )
+              .clickable(onClick = onBackClick)
+              .testTag("nav_back_arrow_button"),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.ArrowBack,
+              contentDescription = "Back",
+              tint = Color.White,
+              modifier = Modifier.size(20.dp)
             )
           }
+          Spacer(modifier = Modifier.width(4.dp))
+        }
+
+        // Navigation Items
+        items.forEachIndexed { index, item ->
+          FuturisticNavItemView(item = item)
         }
       }
     }

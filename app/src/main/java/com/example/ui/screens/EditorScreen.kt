@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -144,6 +145,7 @@ fun EditorScreen(
   var showRelinkMediaDialog by remember { mutableStateOf(false) }
   var isFullscreenPreview by remember { mutableStateOf(false) }
   var showDiagnosticOverlay by remember { mutableStateOf(false) }
+  var showMoreToolsDialog by remember { mutableStateOf(false) }
   var pendingReplaceClipId by remember { mutableStateOf<String?>(null) }
   var draggedTransitionType by remember { mutableStateOf<TransitionType?>(null) }
   var activeTextSubTool by remember { mutableStateOf(TextSubTool.TEXT_TEMPLATES) }
@@ -261,10 +263,7 @@ fun EditorScreen(
           onTabSelected = { tab ->
             viewModel.setActiveToolbarTab(if (activeTab == tab) null else tab)
           },
-          onNavigateHome = {
-            viewModel.setActiveToolbarTab(null)
-            viewModel.timelineEngine.selectElement(SelectedTrackElement.None)
-          }
+          onMoreClick = { showMoreToolsDialog = true }
         )
       }
     },
@@ -1039,6 +1038,17 @@ fun EditorScreen(
     )
   }
 
+  // More Tools Dialog
+  if (showMoreToolsDialog) {
+    MoreToolsDialog(
+      onDismiss = { showMoreToolsDialog = false },
+      onSelectTab = { tab ->
+        showMoreToolsDialog = false
+        viewModel.setActiveToolbarTab(tab)
+      }
+    )
+  }
+
   // Immersive Fullscreen Video Preview Dialog
   if (isFullscreenPreview) {
     Dialog(
@@ -1364,9 +1374,14 @@ fun VideoPreviewSurface(
     }
   }
 
-  val activeEffects = remember(timeline.effectClips, currentPosMs) {
-    timeline.effectClips.filter {
-      currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs
+  val activeEffects = remember(timeline.effectClips, currentPosMs, selectedElement, activeClip) {
+    timeline.effectClips.filter { clip ->
+      val isSelected = (selectedElement as? SelectedTrackElement.Effect)?.clipId == clip.id
+      !clip.isHidden && (
+        isSelected ||
+        (currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs) ||
+        (clip.targetClipId != null && activeClip != null && clip.targetClipId == activeClip.id)
+      )
     }.sortedBy { it.timelineStartMs }
   }
 
@@ -1414,18 +1429,15 @@ fun VideoPreviewSurface(
       try {
         if (com.example.engine.composition.ColorFilterGenerator.isIdentityMatrix(androidCombinedMatrix)) {
           player.setVideoEffects(emptyList())
-          if (!player.isPlaying && player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
-            player.seekTo(player.currentPosition)
-          }
         } else {
           val glMatrix = com.example.engine.composition.ColorFilterGenerator.colorMatrixToGlMatrix(androidCombinedMatrix)
           val rgbMatrix = object : androidx.media3.effect.RgbMatrix {
             override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = glMatrix
           }
           player.setVideoEffects(listOf(rgbMatrix))
-          if (!player.isPlaying && player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
-            player.seekTo(player.currentPosition)
-          }
+        }
+        if (player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
+          player.seekTo(player.currentPosition)
         }
       } catch (e: Exception) {
         android.util.Log.w("VideoPreviewSurface", "Failed to apply video effects to ExoPlayer: ${e.message}")
@@ -2298,14 +2310,32 @@ private fun FilmstripThumbnailCell(
   }
 }
 
-// BOTTOM TOOLBAR: Modern futuristic pill navigation matching CapCut editor screenshot
+// BOTTOM TOOLBAR: 8 Main Tools + More Dialog
 @Composable
 private fun EditorBottomToolbar(
   activeTab: EditorToolbarTab?,
   onTabSelected: (EditorToolbarTab) -> Unit,
-  onNavigateHome: () -> Unit
+  onMoreClick: () -> Unit
 ) {
   val navItems = listOf(
+    FuturisticNavItemData(
+      id = "edit",
+      label = "Edit",
+      icon = Icons.Default.ContentCut,
+      theme = NavItemThemes.Edit,
+      isSelected = activeTab == EditorToolbarTab.EDIT,
+      testTag = "edit_btn",
+      onClick = { onTabSelected(EditorToolbarTab.EDIT) }
+    ),
+    FuturisticNavItemData(
+      id = "audio",
+      label = "Audio",
+      icon = Icons.Default.GraphicEq,
+      theme = NavItemThemes.Audio,
+      isSelected = activeTab == EditorToolbarTab.AUDIO,
+      testTag = "audio_btn",
+      onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
+    ),
     FuturisticNavItemData(
       id = "text",
       label = "Text",
@@ -2325,78 +2355,6 @@ private fun EditorBottomToolbar(
       onClick = { onTabSelected(EditorToolbarTab.EFFECTS) }
     ),
     FuturisticNavItemData(
-      id = "filters",
-      label = "Filters",
-      icon = Icons.Default.ColorLens,
-      theme = NavItemThemes.Filters,
-      isSelected = activeTab == EditorToolbarTab.FILTERS,
-      testTag = "filters_btn",
-      onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
-    ),
-    FuturisticNavItemData(
-      id = "edit",
-      label = "Smart Split",
-      icon = Icons.Default.ContentCut,
-      theme = NavItemThemes.Edit,
-      isSelected = activeTab == EditorToolbarTab.EDIT,
-      testTag = "edit_btn",
-      onClick = { onTabSelected(EditorToolbarTab.EDIT) }
-    ),
-    FuturisticNavItemData(
-      id = "audio",
-      label = "Audio Beat",
-      icon = Icons.Default.GraphicEq,
-      theme = NavItemThemes.Audio,
-      isSelected = activeTab == EditorToolbarTab.AUDIO,
-      testTag = "audio_btn",
-      onClick = { onTabSelected(EditorToolbarTab.AUDIO) }
-    ),
-    FuturisticNavItemData(
-      id = "speed",
-      label = "Speed Curve",
-      icon = Icons.Default.Speed,
-      theme = NavItemThemes.Speed,
-      isSelected = activeTab == EditorToolbarTab.SPEED,
-      testTag = "speed_btn",
-      onClick = { onTabSelected(EditorToolbarTab.SPEED) }
-    ),
-    FuturisticNavItemData(
-      id = "mask",
-      label = "Mask & Blend",
-      icon = Icons.Default.Layers,
-      theme = NavItemThemes.Overlay,
-      isSelected = activeTab == EditorToolbarTab.MASK,
-      testTag = "mask_btn",
-      onClick = { onTabSelected(EditorToolbarTab.MASK) }
-    ),
-    FuturisticNavItemData(
-      id = "ai_matting",
-      label = "AI Cutout",
-      icon = Icons.Default.AutoAwesome,
-      theme = NavItemThemes.AI,
-      isSelected = activeTab == EditorToolbarTab.AI_MATTING,
-      testTag = "ai_matting_btn",
-      onClick = { onTabSelected(EditorToolbarTab.AI_MATTING) }
-    ),
-    FuturisticNavItemData(
-      id = "asset_store",
-      label = "Asset Store",
-      icon = Icons.Default.Download,
-      theme = NavItemThemes.Effects,
-      isSelected = activeTab == EditorToolbarTab.ASSET_STORE,
-      testTag = "asset_store_btn",
-      onClick = { onTabSelected(EditorToolbarTab.ASSET_STORE) }
-    ),
-    FuturisticNavItemData(
-      id = "animations",
-      label = "Animations",
-      icon = Icons.Default.Animation,
-      theme = NavItemThemes.Animations,
-      isSelected = activeTab == EditorToolbarTab.ANIMATIONS,
-      testTag = "animations_btn",
-      onClick = { onTabSelected(EditorToolbarTab.ANIMATIONS) }
-    ),
-    FuturisticNavItemData(
       id = "overlay",
       label = "Overlay",
       icon = Icons.Default.Layers,
@@ -2406,110 +2364,119 @@ private fun EditorBottomToolbar(
       onClick = { onTabSelected(EditorToolbarTab.OVERLAY) }
     ),
     FuturisticNavItemData(
-      id = "transitions",
-      label = "Transitions",
-      icon = Icons.Default.Transform,
-      theme = NavItemThemes.Transitions,
-      isSelected = activeTab == EditorToolbarTab.TRANSITIONS,
-      testTag = "transitions_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TRANSITIONS) }
-    ),
-    FuturisticNavItemData(
-      id = "adjust",
-      label = "Adjust",
-      icon = Icons.Default.Tune,
-      theme = NavItemThemes.DefaultSlate,
-      isSelected = activeTab == EditorToolbarTab.ADJUST,
-      testTag = "adjust_btn",
-      onClick = { onTabSelected(EditorToolbarTab.ADJUST) }
-    ),
-    FuturisticNavItemData(
-      id = "trim",
-      label = "Trim",
-      icon = Icons.Default.Crop,
-      theme = NavItemThemes.DefaultSlate,
-      isSelected = activeTab == EditorToolbarTab.TRIM,
-      testTag = "trim_btn",
-      onClick = { onTabSelected(EditorToolbarTab.TRIM) }
-    ),
-    FuturisticNavItemData(
-      id = "volume",
-      label = "Volume",
-      icon = Icons.Default.VolumeUp,
-      theme = NavItemThemes.DefaultSlate,
-      isSelected = activeTab == EditorToolbarTab.VOLUME,
-      testTag = "volume_btn",
-      onClick = { onTabSelected(EditorToolbarTab.VOLUME) }
-    ),
-    FuturisticNavItemData(
-      id = "ai_media",
-      label = "AI Media",
-      icon = Icons.Default.VideoLibrary,
-      theme = NavItemThemes.AddText,
-      isSelected = activeTab == EditorToolbarTab.AI,
-      testTag = "generate_media_btn",
-      onClick = { onTabSelected(EditorToolbarTab.AI) }
-    ),
-    FuturisticNavItemData(
-      id = "ai_avatar",
-      label = "AI Avatar",
-      icon = Icons.Default.AccountBox,
+      id = "captions",
+      label = "Captions",
+      icon = Icons.Default.ClosedCaption,
       theme = NavItemThemes.Captions,
-      isSelected = activeTab == EditorToolbarTab.AI_AVATAR,
-      testTag = "ai_avatar_btn",
-      onClick = { onTabSelected(EditorToolbarTab.AI_AVATAR) }
+      isSelected = activeTab == EditorToolbarTab.CAPTIONS,
+      testTag = "captions_btn",
+      onClick = { onTabSelected(EditorToolbarTab.CAPTIONS) }
     ),
     FuturisticNavItemData(
-      id = "canvas",
-      label = "Canvas",
-      icon = Icons.Default.CropSquare,
+      id = "filters",
+      label = "Filters",
+      icon = Icons.Default.ColorLens,
+      theme = NavItemThemes.Filters,
+      isSelected = activeTab == EditorToolbarTab.FILTERS,
+      testTag = "filters_btn",
+      onClick = { onTabSelected(EditorToolbarTab.FILTERS) }
+    ),
+    FuturisticNavItemData(
+      id = "more",
+      label = "More",
+      icon = Icons.Default.MoreHoriz,
       theme = NavItemThemes.DefaultSlate,
-      isSelected = activeTab == EditorToolbarTab.CANVAS,
-      testTag = "aspect_ratio_btn",
-      onClick = { onTabSelected(EditorToolbarTab.CANVAS) }
-    ),
-    FuturisticNavItemData(
-      id = "background",
-      label = "Background",
-      icon = Icons.Default.Texture,
-      theme = NavItemThemes.DefaultSlate,
-      isSelected = activeTab == EditorToolbarTab.BACKGROUND,
-      testTag = "background_btn",
-      onClick = { onTabSelected(EditorToolbarTab.BACKGROUND) }
-    ),
-    FuturisticNavItemData(
-      id = "chroma",
-      label = "Chroma",
-      icon = Icons.Default.FilterFrames,
-      theme = NavItemThemes.Stickers,
-      isSelected = activeTab == EditorToolbarTab.CHROMA,
-      testTag = "chroma_btn",
-      onClick = { onTabSelected(EditorToolbarTab.CHROMA) }
-    ),
-    FuturisticNavItemData(
-      id = "keyframe",
-      label = "Keyframe",
-      icon = Icons.Default.Diamond,
-      theme = NavItemThemes.TextTemplateTheme,
-      isSelected = activeTab == EditorToolbarTab.KEYFRAME,
-      testTag = "keyframe_btn",
-      onClick = { onTabSelected(EditorToolbarTab.KEYFRAME) }
-    ),
-    FuturisticNavItemData(
-      id = "media",
-      label = "Media",
-      icon = Icons.Default.AddPhotoAlternate,
-      theme = NavItemThemes.AddText,
-      isSelected = activeTab == EditorToolbarTab.MEDIA,
-      testTag = "add_btn",
-      onClick = { onTabSelected(EditorToolbarTab.MEDIA) }
+      isSelected = false,
+      testTag = "more_btn",
+      onClick = onMoreClick
     )
   )
 
   FuturisticBottomNavBarContainer(
-    onBackClick = onNavigateHome,
     items = navItems,
-    showDividers = true
+    showDividers = false
+  )
+}
+
+@Composable
+private fun MoreToolsDialog(
+  onDismiss: () -> Unit,
+  onSelectTab: (EditorToolbarTab) -> Unit
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF0F1523),
+    title = {
+      Text(
+        text = "More Editor Tools",
+        color = Color.White,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+      )
+    },
+    text = {
+      val tools = listOf(
+        Triple("Speed", Icons.Default.Speed, EditorToolbarTab.SPEED),
+        Triple("Trim", Icons.Default.Crop, EditorToolbarTab.TRIM),
+        Triple("Adjust", Icons.Default.Tune, EditorToolbarTab.ADJUST),
+        Triple("Volume", Icons.Default.VolumeUp, EditorToolbarTab.VOLUME),
+        Triple("Mask", Icons.Default.Layers, EditorToolbarTab.MASK),
+        Triple("Animations", Icons.Default.Animation, EditorToolbarTab.ANIMATIONS),
+        Triple("Keyframe", Icons.Default.Diamond, EditorToolbarTab.KEYFRAME),
+        Triple("Transitions", Icons.Default.Transform, EditorToolbarTab.TRANSITIONS),
+        Triple("Canvas", Icons.Default.CropSquare, EditorToolbarTab.CANVAS),
+        Triple("Background", Icons.Default.Texture, EditorToolbarTab.BACKGROUND),
+        Triple("Chroma", Icons.Default.FilterFrames, EditorToolbarTab.CHROMA),
+        Triple("AI Media", Icons.Default.VideoLibrary, EditorToolbarTab.AI),
+        Triple("AI Avatar", Icons.Default.AccountBox, EditorToolbarTab.AI_AVATAR),
+        Triple("Asset Store", Icons.Default.Download, EditorToolbarTab.ASSET_STORE),
+        Triple("Media", Icons.Default.AddPhotoAlternate, EditorToolbarTab.MEDIA)
+      )
+
+      LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(320.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        items(tools) { (label, icon, tab) ->
+          Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF1B2233),
+            border = BorderStroke(1.dp, Color(0xFF2E3852)),
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(72.dp)
+              .clickable { onSelectTab(tab) }
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(6.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center
+            ) {
+              Icon(imageVector = icon, contentDescription = label, tint = CyanAccent, modifier = Modifier.size(24.dp))
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = label,
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Close", color = CyanAccent, fontWeight = FontWeight.Bold)
+      }
+    }
   )
 }
 

@@ -241,11 +241,13 @@ class VideoCompositionEngine(private val context: Context) {
     // Visual Effects with Keyframes
     val isEffectHidden = timeline.trackSettings[TrackType.EFFECT]?.isHidden == true
     val activeEffects = if (!isEffectHidden) {
-      timeline.effectClips.filter {
-        !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs &&
-        (it.targetClipId == null || activeClip == null || it.targetClipId == activeClip.id)
+      timeline.effectClips.filter { clip ->
+        !clip.isHidden && (
+          (posMs >= clip.timelineStartMs && posMs < clip.timelineStartMs + clip.durationMs) ||
+          (clip.targetClipId != null && activeClip != null && clip.targetClipId == activeClip.id)
+        )
       }.sortedBy { it.timelineStartMs }.map { clip ->
-        val relTime = posMs - clip.timelineStartMs
+        val relTime = (posMs - clip.timelineStartMs).coerceAtLeast(0L)
         val intensity = KeyframeInterpolator.interpolateEffectIntensity(clip, relTime)
         ComposedEffect(
           clip = clip,

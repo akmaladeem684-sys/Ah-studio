@@ -11,6 +11,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.effect.DefaultVideoFrameProcessor
 import com.example.domain.model.Timeline
 import com.example.domain.model.VideoClip
 import com.example.engine.composition.ColorFilterGenerator
