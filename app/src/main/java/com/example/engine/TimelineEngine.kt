@@ -3075,7 +3075,7 @@ class TimelineEngine {
       hasGradient = true,
       gradientColorStart = 0xFF00E5FF,
       gradientColorEnd = 0xFF8B5CF6,
-      animationType = "Pop"
+      animationType = "None"
     )
     val list = _timeline.value.textClips.toMutableList()
     list.add(newText)

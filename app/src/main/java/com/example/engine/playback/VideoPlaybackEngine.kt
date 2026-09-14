@@ -301,6 +301,7 @@ class VideoPlaybackEngine(
     if (currentPosMs >= currentTimeline.totalDurationMs) {
       currentPosMs = 0L
       seekTo(0L)
+      onTimelinePositionChanged(0L)
     }
     val clip = findClipAt(currentPosMs)
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
@@ -311,8 +312,12 @@ class VideoPlaybackEngine(
       }
       val sourcePosMs = clip.timelineToSourceMs(currentPosMs)
       player.seekTo(sourcePosMs)
+      if (player.playbackState == Player.STATE_IDLE) {
+        player.prepare()
+      }
       player.play()
       _isPlaying.value = true
+      startProgressSync()
     } else {
       player.pause()
       startSyntheticPlaybackLoop()

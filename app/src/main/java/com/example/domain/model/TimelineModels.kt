@@ -730,10 +730,6 @@ data class Timeline(
       val textDur = textClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
       val stickerDur = stickerClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
       val effectDur = effectClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-      return if (videoClips.isNotEmpty()) {
-        videoDur
-      } else {
-        maxOf(overlayDur, audioDur, textDur, stickerDur, effectDur)
-      }
+      return maxOf(videoDur, overlayDur, audioDur, textDur, stickerDur, effectDur)
     }
 }

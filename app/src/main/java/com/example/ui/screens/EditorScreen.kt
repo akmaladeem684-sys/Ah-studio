@@ -1365,7 +1365,7 @@ fun VideoPreviewSurface(
 
   val activeOverlays = remember(timeline.overlayClips, currentPosMs) {
     timeline.overlayClips.filter {
-      currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs
+      currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs
     }
   }
 
@@ -1373,13 +1373,13 @@ fun VideoPreviewSurface(
     val selectedId = (selectedElement as? SelectedTrackElement.Text)?.clipId
     timeline.textClips.filter {
       (it.id == selectedId) ||
-      (currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs)
+      (currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs)
     }.sortedWith(compareBy({ it.trackIndex }, { it.timelineStartMs }))
   }
 
   val activeStickers = remember(timeline.stickerClips, currentPosMs) {
     timeline.stickerClips.filter {
-      currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs
+      currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs
     }
   }
 
@@ -1388,7 +1388,7 @@ fun VideoPreviewSurface(
       val isSelected = (selectedElement as? SelectedTrackElement.Effect)?.clipId == clip.id
       !clip.isHidden && (
         isSelected ||
-        (currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs) ||
+        (currentPosMs >= clip.timelineStartMs && currentPosMs <= clip.timelineStartMs + clip.durationMs) ||
         (clip.targetClipId != null && activeClip != null && clip.targetClipId == activeClip.id)
       )
     }.sortedBy { it.timelineStartMs }
@@ -1649,7 +1649,7 @@ fun VideoPreviewSurface(
               )
             }
           }
-        } else {
+        } else if (timeline.videoClips.isEmpty() && timeline.overlayClips.isEmpty() && timeline.textClips.isEmpty() && timeline.stickerClips.isEmpty() && timeline.audioClips.isEmpty()) {
           Box(
             modifier = Modifier
               .fillMaxSize()
