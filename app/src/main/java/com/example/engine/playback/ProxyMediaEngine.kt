@@ -121,6 +121,20 @@ class BoundedFrameCache(private val maxMemoryMb: Int = 48) {
   }
 
   @Synchronized
+  fun invalidateClip(clipId: String) {
+    val toRemove = cache.filter { it.value.clipId == clipId }.keys
+    for (k in toRemove) {
+      val evicted = cache.remove(k) ?: continue
+      currentSizeByte -= evicted.byteSize
+      if (!evicted.bitmap.isRecycled) {
+        try {
+          evicted.bitmap.recycle()
+        } catch (ignored: Exception) {}
+      }
+    }
+  }
+
+  @Synchronized
   fun clear() {
     for ((_, item) in cache) {
       if (!item.bitmap.isRecycled) {
@@ -385,6 +399,10 @@ class ProxyMediaEngine(private val context: Context) {
         pos += 250L // prefetch every 250ms interval
       }
     }
+  }
+
+  fun invalidateClip(clipId: String) {
+    frameCache.invalidateClip(clipId)
   }
 
   fun clearCache() {

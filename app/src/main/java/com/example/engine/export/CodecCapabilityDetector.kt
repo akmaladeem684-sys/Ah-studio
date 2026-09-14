@@ -10,6 +10,11 @@ import com.example.domain.model.Resolution
 data class DeviceCodecCapabilities(
   val supportsH264Hardware: Boolean = true,
   val supportsH265Hardware: Boolean = false,
+  val supportsVp9Hardware: Boolean = false,
+  val supportsAv1Hardware: Boolean = false,
+  val supports4kDecoding: Boolean = true,
+  val supports2kDecoding: Boolean = true,
+  val supports1080pDecoding: Boolean = true,
   val maxSupportedWidth: Int = 1920,
   val maxSupportedHeight: Int = 1080,
   val maxSupportedFps: Int = 60,
@@ -24,6 +29,8 @@ object CodecCapabilityDetector {
   fun detectCapabilities(): DeviceCodecCapabilities {
     var h264Hw = false
     var h265Hw = false
+    var vp9Hw = false
+    var av1Hw = false
     var maxWidth = 1920
     var maxHeight = 1080
     var maxFps = 30
@@ -34,14 +41,12 @@ object CodecCapabilityDetector {
       val codecInfos = codecList.codecInfos
 
       for (info in codecInfos) {
-        if (!info.isEncoder) continue
-
         val types = info.supportedTypes
+        val isHw = isHardwareCodec(info)
+
         for (type in types) {
           if (type.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true)) {
-            val isHw = isHardwareCodec(info)
             if (isHw) h264Hw = true
-
             try {
               val caps = info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
               val videoCaps = caps.videoCapabilities
@@ -53,8 +58,11 @@ object CodecCapabilityDetector {
               }
             } catch (ignored: Exception) {}
           } else if (type.equals(MediaFormat.MIMETYPE_VIDEO_HEVC, ignoreCase = true)) {
-            val isHw = isHardwareCodec(info)
             if (isHw) h265Hw = true
+          } else if (type.equals(MediaFormat.MIMETYPE_VIDEO_VP9, ignoreCase = true)) {
+            if (isHw) vp9Hw = true
+          } else if (type.equals("video/av01", ignoreCase = true)) {
+            if (isHw) av1Hw = true
           }
         }
       }
@@ -71,12 +79,17 @@ object CodecCapabilityDetector {
 
     Log.d(
       TAG,
-      "Codec capability scan complete: H264_HW=$h264Hw, H265_HW=$h265Hw, MaxRes=${maxWidth}x${maxHeight}, MaxFps=$maxFps, LowEnd=$isLowEnd"
+      "Codec capability scan complete: H264_HW=$h264Hw, H265_HW=$h265Hw, VP9_HW=$vp9Hw, AV1_HW=$av1Hw, MaxRes=${maxWidth}x${maxHeight}, MaxFps=$maxFps, LowEnd=$isLowEnd"
     )
 
     return DeviceCodecCapabilities(
       supportsH264Hardware = h264Hw,
       supportsH265Hardware = h265Hw,
+      supportsVp9Hardware = vp9Hw,
+      supportsAv1Hardware = av1Hw,
+      supports4kDecoding = maxWidth >= 3840,
+      supports2kDecoding = maxWidth >= 2560,
+      supports1080pDecoding = maxWidth >= 1920,
       maxSupportedWidth = maxWidth,
       maxSupportedHeight = maxHeight,
       maxSupportedFps = maxFps,
@@ -86,7 +99,22 @@ object CodecCapabilityDetector {
     )
   }
 
-  private fun isHardwareCodec(info: MediaCodecInfo): Boolean {
+  fun isDecoderHardwareAccelerated(mimeType: String): Boolean {
+    return try {
+      val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+      for (info in codecList.codecInfos) {
+        if (info.isEncoder) continue
+        if (info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }) {
+          if (isHardwareCodec(info)) return true
+        }
+      }
+      false
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  fun isHardwareCodec(info: MediaCodecInfo): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       return info.isHardwareAccelerated
     }

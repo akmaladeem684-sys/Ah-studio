@@ -10,7 +10,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.effect.DefaultVideoFrameProcessor
 import com.example.domain.model.Timeline
 import com.example.domain.model.VideoClip
@@ -39,10 +42,27 @@ class VideoPlaybackEngine(
     private const val FRAME_INTERVAL_60FPS_MS = 16L
   }
 
-  val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
-    playWhenReady = false
-    repeatMode = Player.REPEAT_MODE_OFF
-  }
+  val player: ExoPlayer = ExoPlayer.Builder(
+    context.applicationContext,
+    DefaultRenderersFactory(context.applicationContext)
+      .setEnableDecoderFallback(true)
+      .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+  )
+    .setLoadControl(
+      DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+          /* minBufferMs = */ 1000,
+          /* maxBufferMs = */ 5000,
+          /* bufferForPlaybackMs = */ 200,
+          /* bufferForPlaybackAfterRebufferMs = */ 500
+        )
+        .build()
+    )
+    .setSeekParameters(SeekParameters.CLOSEST_SYNC)
+    .build().apply {
+      playWhenReady = false
+      repeatMode = Player.REPEAT_MODE_OFF
+    }
 
   private val _isPlaying = MutableStateFlow(false)
   val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -154,14 +174,17 @@ class VideoPlaybackEngine(
 
   fun updateTimeline(timeline: Timeline) {
     this.currentTimeline = timeline
-    val clip = findClipAt(currentPosMs)
+    val boundedPos = currentPosMs.coerceIn(0L, timeline.totalDurationMs.coerceAtLeast(0L))
+    currentPosMs = boundedPos
+    val clip = findClipAt(boundedPos)
+    _activeClip.value = clip
     val matrix = ColorFilterGenerator.createCombinedMatrix(
       timeline.adjustments,
       timeline.filter,
       clip?.filter
     )
     applyVideoFilter(matrix)
-    syncWithPosition(currentPosMs, forceReload = false)
+    syncWithPosition(boundedPos, forceReload = false)
   }
 
   /**
@@ -529,9 +552,12 @@ class VideoPlaybackEngine(
       }
       val mediaItem = MediaItem.fromUri(normalizedUri)
       player.setMediaItem(mediaItem)
-      player.playbackParameters = PlaybackParameters(clip.speed)
+      player.playbackParameters = PlaybackParameters(clip.speed.coerceAtLeast(0.01f))
       player.volume = if (clip.isMuted) 0f else clip.volume
       player.prepare()
+      if (_isPlaying.value) {
+        player.play()
+      }
       loadedClipId = clip.id
       loadedUri = effectiveUri
     } catch (e: Exception) {
@@ -577,7 +603,8 @@ class VideoPlaybackEngine(
           val active = _activeClip.value
           if (active != null && active.isVideo) {
             val playerPos = player.currentPosition
-            val offsetInClip = ((playerPos - active.sourceStartMs) / active.speed).toLong()
+            val speed = active.speed.coerceAtLeast(0.01f)
+            val offsetInClip = ((playerPos - active.sourceStartMs) / speed).toLong()
             val calculatedTimeline = (active.timelineStartMs + offsetInClip).coerceAtLeast(active.timelineStartMs)
             
             if (calculatedTimeline >= active.timelineStartMs + active.durationMs) {

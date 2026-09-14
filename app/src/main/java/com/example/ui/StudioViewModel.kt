@@ -109,7 +109,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     },
     onPlaybackEnded = {
       timelineEngine.pause()
-    }
+    },
+    proxyEngine = proxyMediaEngine
   )
 
   val allProjects: StateFlow<List<ProjectEntity>> = repository.allProjects

@@ -429,6 +429,18 @@ object VideoThumbnailManager {
   }
 
   /**
+   * Invalidates memory-cached thumbnails for a specific media URI.
+   */
+  fun invalidateClip(uriString: String) {
+    val snapshot = memoryCache.snapshot()
+    for ((k, _) in snapshot) {
+      if (k.startsWith(uriString)) {
+        memoryCache.remove(k)
+      }
+    }
+  }
+
+  /**
    * Clears in-memory cache to release RAM if needed.
    */
   fun clearMemoryCache() {

@@ -873,4 +873,37 @@ class GpuCompositionRenderer(private val context: Context) {
 
     drawQuad(programEffect)
   }
+
+  fun invalidateClip(clipId: String) {
+    textTextureCache.remove(clipId)?.let {
+      if (it.texId > 0) {
+        GLES20.glDeleteTextures(1, intArrayOf(it.texId), 0)
+      }
+    }
+    stickerTextureCache.remove(clipId)?.let {
+      if (it.texId > 0) {
+        GLES20.glDeleteTextures(1, intArrayOf(it.texId), 0)
+      }
+    }
+    imageTextureCache.remove(clipId)?.let {
+      if (it.texId > 0) {
+        GLES20.glDeleteTextures(1, intArrayOf(it.texId), 0)
+      }
+    }
+  }
+
+  fun invalidateAll() {
+    for ((_, item) in textTextureCache) {
+      if (item.texId > 0) GLES20.glDeleteTextures(1, intArrayOf(item.texId), 0)
+    }
+    textTextureCache.clear()
+    for ((_, item) in stickerTextureCache) {
+      if (item.texId > 0) GLES20.glDeleteTextures(1, intArrayOf(item.texId), 0)
+    }
+    stickerTextureCache.clear()
+    for ((_, item) in imageTextureCache) {
+      if (item.texId > 0) GLES20.glDeleteTextures(1, intArrayOf(item.texId), 0)
+    }
+    imageTextureCache.clear()
+  }
 }
