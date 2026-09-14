@@ -94,6 +94,32 @@ fun TextTemplatesBrowserPanel(
     } else null
   }
 
+  // Ensure a text clip exists and is selected on load
+  LaunchedEffect(Unit) {
+    if (selectedTextClip == null) {
+      val playhead = viewModel.timelineEngine.currentPositionMs.value
+      val existingAtPos = timeline.textClips.find { playhead >= it.timelineStartMs && playhead < it.timelineStartMs + it.durationMs }
+      if (existingAtPos != null) {
+        viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(existingAtPos.id))
+      } else if (timeline.textClips.isNotEmpty()) {
+        val last = timeline.textClips.last()
+        viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(last.id))
+      } else {
+        val newClip = TextClip(
+          id = java.util.UUID.randomUUID().toString(),
+          text = "Your Text Here",
+          timelineStartMs = playhead,
+          durationMs = 3000L,
+          fontSizeSp = 30f,
+          textColor = 0xFFFFFFFF,
+          animationType = "Pop"
+        )
+        viewModel.timelineEngine.addTextClipObject(newClip)
+        viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
+      }
+    }
+  }
+
   // Active top tab (Templates, Fonts, Styles, Effects, Animations)
   var activeMainTab by remember { mutableStateOf(TextStudioMainTab.TEMPLATES) }
 
@@ -428,6 +454,19 @@ fun TextTemplatesBrowserPanel(
         userText = newText
         if (selectedTextClip != null) {
           viewModel.timelineEngine.updateTextClip(selectedTextClip.copy(text = newText))
+        } else {
+          val playhead = viewModel.timelineEngine.currentPositionMs.value
+          val newClip = TextClip(
+            id = java.util.UUID.randomUUID().toString(),
+            text = if (newText.isNotBlank()) newText else "Your Text Here",
+            timelineStartMs = playhead,
+            durationMs = 3000L,
+            fontSizeSp = 30f,
+            textColor = 0xFFFFFFFF,
+            animationType = "Pop"
+          )
+          viewModel.timelineEngine.addTextClipObject(newClip)
+          viewModel.timelineEngine.selectElement(SelectedTrackElement.Text(newClip.id))
         }
       },
       label = {

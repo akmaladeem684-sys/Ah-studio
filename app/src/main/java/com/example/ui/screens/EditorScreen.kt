@@ -298,9 +298,9 @@ fun EditorScreen(
 
       val responsiveSpacerHeight = remember(screenHeight) {
         when {
-          screenHeight < 650.dp -> 6.dp
-          screenHeight < 850.dp -> 16.dp
-          else -> 24.dp
+          screenHeight < 650.dp -> 2.dp
+          screenHeight < 850.dp -> 4.dp
+          else -> 6.dp
         }
       }
 
@@ -1176,40 +1176,40 @@ private fun EditorTopBar(
     modifier = Modifier
       .fillMaxWidth()
       .statusBarsPadding()
-      .height(52.dp)
+      .height(40.dp)
       .background(Color.Black)
-      .padding(horizontal = 12.dp),
+      .padding(horizontal = 10.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
     // Left: Close (X) + Undo + Redo + Diagnostics Speed HUD
     IconButton(
       onClick = onBackClick,
       modifier = Modifier
-        .size(40.dp)
+        .size(34.dp)
         .testTag("close_btn")
     ) {
       Icon(
         imageVector = Icons.Default.Close,
         contentDescription = "Close",
         tint = Color.White,
-        modifier = Modifier.size(22.dp)
+        modifier = Modifier.size(20.dp)
       )
     }
 
-    Spacer(modifier = Modifier.width(4.dp))
+    Spacer(modifier = Modifier.width(2.dp))
 
     IconButton(
       onClick = onUndoClick,
       enabled = canUndo,
       modifier = Modifier
-        .size(38.dp)
+        .size(34.dp)
         .testTag("top_undo_btn")
     ) {
       Icon(
         imageVector = Icons.AutoMirrored.Filled.Undo,
         contentDescription = "Undo",
         tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.35f),
-        modifier = Modifier.size(20.dp)
+        modifier = Modifier.size(18.dp)
       )
     }
 
@@ -1217,43 +1217,43 @@ private fun EditorTopBar(
       onClick = onRedoClick,
       enabled = canRedo,
       modifier = Modifier
-        .size(38.dp)
+        .size(34.dp)
         .testTag("top_redo_btn")
     ) {
       Icon(
         imageVector = Icons.AutoMirrored.Filled.Redo,
         contentDescription = "Redo",
         tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.35f),
-        modifier = Modifier.size(20.dp)
+        modifier = Modifier.size(18.dp)
       )
     }
 
     IconButton(
       onClick = onToggleDiagnostics,
       modifier = Modifier
-        .size(38.dp)
+        .size(34.dp)
         .testTag("top_diagnostics_btn")
     ) {
       Icon(
         imageVector = Icons.Default.Speed,
         contentDescription = "Diagnostic Overlay",
         tint = if (isDiagnosticActive) CyanAccent else Color.White.copy(alpha = 0.8f),
-        modifier = Modifier.size(20.dp)
+        modifier = Modifier.size(18.dp)
       )
     }
 
     Spacer(modifier = Modifier.weight(1f))
 
-    // Right: Modern Blue + Black Professional "Export" Button
+    // Right: Modern Blue + Black Professional "Export" Button (Smaller & closer to top edge)
     val isRendering = exportState is ExportState.Rendering
     Surface(
       onClick = { if (!isRendering) onExportClick() },
-      shape = RoundedCornerShape(10.dp),
+      shape = RoundedCornerShape(8.dp),
       color = Color.Transparent,
       enabled = !isRendering,
       modifier = Modifier
-        .height(36.dp)
-        .clip(RoundedCornerShape(10.dp))
+        .height(30.dp)
+        .clip(RoundedCornerShape(8.dp))
         .background(
           Brush.horizontalGradient(
             colors = if (!isRendering) listOf(
@@ -1273,20 +1273,20 @@ private fun EditorTopBar(
               Color(0xFF00E5FF)
             )
           ),
-          shape = RoundedCornerShape(10.dp)
+          shape = RoundedCornerShape(8.dp)
         )
         .testTag("export_btn")
     ) {
       Row(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
       ) {
         if (isRendering) {
           val progress = (exportState as ExportState.Rendering).progressPercent
           CircularProgressIndicator(
             progress = { progress },
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(12.dp),
             strokeWidth = 2.dp,
             color = Color.White
           )
@@ -1295,7 +1295,7 @@ private fun EditorTopBar(
             style = MaterialTheme.typography.labelSmall.copy(
               fontWeight = FontWeight.Bold,
               color = Color.White,
-              fontSize = 12.sp
+              fontSize = 11.sp
             )
           )
         } else {
@@ -1303,15 +1303,15 @@ private fun EditorTopBar(
             imageVector = Icons.Default.FileUpload,
             contentDescription = null,
             tint = Color.White,
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(14.dp)
           )
           Text(
             text = "Export",
             style = MaterialTheme.typography.labelMedium.copy(
               fontWeight = FontWeight.Bold,
               color = Color.White,
-              fontSize = 13.sp,
-              letterSpacing = 0.3.sp
+              fontSize = 12.sp,
+              letterSpacing = 0.2.sp
             )
           )
         }

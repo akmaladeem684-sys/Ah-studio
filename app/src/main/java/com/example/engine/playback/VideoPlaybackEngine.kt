@@ -100,9 +100,13 @@ class VideoPlaybackEngine(
           player.clearMediaItems()
         } catch (ignored: Exception) {}
         loadedClipId = null
+        loadedUri = null
         progressSyncJob?.cancel()
         if (_isPlaying.value) {
-          startSyntheticPlaybackLoop()
+          scope.launch {
+            delay(100)
+            play()
+          }
         }
       }
     })
@@ -294,14 +298,20 @@ class VideoPlaybackEngine(
       return
     }
     if (currentPosMs >= currentTimeline.totalDurationMs) {
+      currentPosMs = 0L
       seekTo(0L)
     }
     val clip = findClipAt(currentPosMs)
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
-      ensureClipLoaded(clip)
+      val effectiveUri = proxyEngine?.getProxyUri(clip) ?: clip.uri
+      val isLoaded = loadedClipId == clip.id && loadedUri == effectiveUri && player.mediaItemCount > 0 && player.playbackState != Player.STATE_IDLE
+      if (!isLoaded) {
+        ensureClipLoaded(clip)
+      }
       val sourcePosMs = clip.timelineToSourceMs(currentPosMs)
       player.seekTo(sourcePosMs)
       player.play()
+      _isPlaying.value = true
     } else {
       player.pause()
       startSyntheticPlaybackLoop()
@@ -464,7 +474,7 @@ class VideoPlaybackEngine(
 
     if (clip != null && clip.isVideo && isPlayableInPlayer(clip.uri)) {
       val effectiveUri = proxyEngine?.getProxyUri(clip) ?: clip.uri
-      val needsReload = forceReload || loadedUri != effectiveUri || player.mediaItemCount == 0
+      val needsReload = forceReload || loadedClipId != clip.id || loadedUri != effectiveUri || player.mediaItemCount == 0 || player.playbackState == Player.STATE_IDLE
       if (needsReload) {
         ensureClipLoaded(clip)
       } else {
@@ -476,10 +486,6 @@ class VideoPlaybackEngine(
       }
       player.playbackParameters = PlaybackParameters(clip.speed)
       player.volume = if (clip.isMuted) 0f else clip.volume
-
-      if (player.playbackState == Player.STATE_IDLE) {
-        player.prepare()
-      }
     } else {
       player.pause()
     }
@@ -487,6 +493,10 @@ class VideoPlaybackEngine(
 
   private fun ensureClipLoaded(clip: VideoClip) {
     val effectiveUri = proxyEngine?.getProxyUri(clip) ?: clip.uri
+    if (loadedClipId == clip.id && loadedUri == effectiveUri && player.mediaItemCount > 0 && player.playbackState != Player.STATE_IDLE) {
+      return
+    }
+
     if (!isPlayableInPlayer(effectiveUri)) {
       try {
         player.stop()
