@@ -37,7 +37,12 @@ jobs:
 
       - name: Generate Debug Keystore
         run: |
-          cd ${{ env.WORK_DIR }}
+          SETTINGS_FILE=$(find . -maxdepth 3 -name "settings.gradle.kts" | head -n 1)
+
+          if [ -n "$SETTINGS_FILE" ]; then
+            cd "$(dirname "$SETTINGS_FILE")"
+          fi
+
           if [ ! -f debug.keystore ]; then
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
