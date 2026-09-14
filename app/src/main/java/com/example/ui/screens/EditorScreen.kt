@@ -2382,8 +2382,8 @@ private fun EditorBottomToolbar(
     ),
     FuturisticNavItemData(
       id = "audio",
-      label = "Audio Tools",
-      icon = Icons.Default.GraphicEq,
+      label = "Audio",
+      icon = Icons.Default.MusicNote,
       theme = NavItemThemes.Audio,
       isSelected = activeTab == EditorToolbarTab.AUDIO,
       testTag = "audio_btn",
@@ -2392,7 +2392,7 @@ private fun EditorBottomToolbar(
     FuturisticNavItemData(
       id = "text",
       label = "Text",
-      icon = Icons.Default.TextFields,
+      icon = Icons.Default.Title,
       theme = NavItemThemes.AddText,
       isSelected = activeTab == EditorToolbarTab.TEXT,
       testTag = "text_btn",
@@ -2401,7 +2401,7 @@ private fun EditorBottomToolbar(
     FuturisticNavItemData(
       id = "effects",
       label = "Effects",
-      icon = Icons.Default.AutoAwesome,
+      icon = Icons.Default.StarBorder,
       theme = NavItemThemes.Effects,
       isSelected = activeTab == EditorToolbarTab.EFFECTS,
       testTag = "effects_btn",
@@ -2419,7 +2419,7 @@ private fun EditorBottomToolbar(
     FuturisticNavItemData(
       id = "captions",
       label = "Captions",
-      icon = Icons.Default.ClosedCaption,
+      icon = Icons.Default.Subtitles,
       theme = NavItemThemes.Captions,
       isSelected = activeTab == EditorToolbarTab.CAPTIONS,
       testTag = "captions_btn",
@@ -2436,8 +2436,8 @@ private fun EditorBottomToolbar(
     ),
     FuturisticNavItemData(
       id = "more",
-      label = "More",
-      icon = Icons.Default.MoreHoriz,
+      label = "Adjust",
+      icon = Icons.Default.Tune,
       theme = NavItemThemes.DefaultSlate,
       isSelected = false,
       testTag = "more_btn",
@@ -2447,7 +2447,7 @@ private fun EditorBottomToolbar(
 
   FuturisticBottomNavBarContainer(
     items = navItems,
-    showDividers = false
+    showDividers = true
   )
 }
 

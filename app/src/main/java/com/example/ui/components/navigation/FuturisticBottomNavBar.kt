@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Custom Theme Colors for Nav Items matching exact CapCut / Pro Editor design screenshot
+ * Custom Theme Colors for Nav Items
  */
 data class NavItemColorTheme(
   val bgCircle: Color,
@@ -39,23 +39,23 @@ data class NavItemColorTheme(
 )
 
 object NavItemThemes {
-  val AddText = NavItemColorTheme(Color(0xFF102A45), Color(0xFF00E5FF))
-  val Captions = NavItemColorTheme(Color(0xFF321B60), Color(0xFFB388FF))
-  val Stickers = NavItemColorTheme(Color(0xFF0B4D3C), Color(0xFF00E676))
-  val DrawTheme = NavItemColorTheme(Color(0xFF421C6E), Color(0xFFD500F9))
+  val AddText = NavItemColorTheme(Color(0xFF102A45), Color.White)
+  val Captions = NavItemColorTheme(Color(0xFF321B60), Color.White)
+  val Stickers = NavItemColorTheme(Color(0xFF0B4D3C), Color.White)
+  val DrawTheme = NavItemColorTheme(Color(0xFF421C6E), Color.White)
   val Draw = DrawTheme
-  val TextTemplateTheme = NavItemColorTheme(Color(0xFF5A380A), Color(0xFFFFAB40))
+  val TextTemplateTheme = NavItemColorTheme(Color(0xFF5A380A), Color.White)
   val TextTemplate = TextTemplateTheme
-  val Effects = NavItemColorTheme(Color(0xFF5C103C), Color(0xFFFF4081))
-  val Filters = NavItemColorTheme(Color(0xFF0F3B66), Color(0xFF40C4FF))
-  val Edit = NavItemColorTheme(Color(0xFF521217), Color(0xFFFF5252))
-  val Audio = NavItemColorTheme(Color(0xFF094D52), Color(0xFF18FFFF))
-  val Speed = NavItemColorTheme(Color(0xFF264D12), Color(0xFFB2FF59))
-  val Animations = NavItemColorTheme(Color(0xFF54420A), Color(0xFFFFD740))
-  val Overlay = NavItemColorTheme(Color(0xFF1A2350), Color(0xFF8C9EFF))
-  val Transitions = NavItemColorTheme(Color(0xFF59220F), Color(0xFFFF6E40))
-  val AI = NavItemColorTheme(Color(0xFF381A6E), Color(0xFFE040FB))
-  val DefaultSlate = NavItemColorTheme(Color(0xFF1E293B), Color(0xFF94A3B8))
+  val Effects = NavItemColorTheme(Color(0xFF5C103C), Color.White)
+  val Filters = NavItemColorTheme(Color(0xFF0F3B66), Color.White)
+  val Edit = NavItemColorTheme(Color(0xFF165DFF), Color.White)
+  val Audio = NavItemColorTheme(Color(0xFF094D52), Color.White)
+  val Speed = NavItemColorTheme(Color(0xFF264D12), Color.White)
+  val Animations = NavItemColorTheme(Color(0xFF54420A), Color.White)
+  val Overlay = NavItemColorTheme(Color(0xFF1A2350), Color.White)
+  val Transitions = NavItemColorTheme(Color(0xFF59220F), Color.White)
+  val AI = NavItemColorTheme(Color(0xFF381A6E), Color.White)
+  val DefaultSlate = NavItemColorTheme(Color(0xFF1E293B), Color.White)
 }
 
 data class FuturisticNavItemData(
@@ -69,14 +69,14 @@ data class FuturisticNavItemData(
 )
 
 /**
- * Futuristic Floating Capsule Bottom Navigation Bar (Matching exact user screenshot)
+ * Clean, modern floating capsule bottom navigation bar matching the reference design
  */
 @Composable
 fun FuturisticBottomNavBarContainer(
   onBackClick: (() -> Unit)? = null,
   items: List<FuturisticNavItemData>,
   modifier: Modifier = Modifier,
-  showDividers: Boolean = false
+  showDividers: Boolean = true
 ) {
   Box(
     modifier = modifier
@@ -88,54 +88,38 @@ fun FuturisticBottomNavBarContainer(
     Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .height(60.dp)
+        .height(64.dp)
         .shadow(
-          elevation = 8.dp,
-          shape = RoundedCornerShape(22.dp),
-          ambientColor = Color(0xFF00E5FF).copy(alpha = 0.15f),
-          spotColor = Color(0xFF7C4DFF).copy(alpha = 0.2f)
+          elevation = 6.dp,
+          shape = RoundedCornerShape(18.dp),
+          ambientColor = Color.Black.copy(alpha = 0.5f),
+          spotColor = Color.Black.copy(alpha = 0.6f)
         )
         .border(
           width = 1.dp,
-          brush = Brush.horizontalGradient(
-            colors = listOf(
-              Color(0xFF00E5FF).copy(alpha = 0.35f),
-              Color(0xFF7C4DFF).copy(alpha = 0.45f),
-              Color(0xFF00E5FF).copy(alpha = 0.35f)
-            )
-          ),
-          shape = RoundedCornerShape(22.dp)
+          color = Color(0xFF222B38).copy(alpha = 0.85f),
+          shape = RoundedCornerShape(18.dp)
         ),
-      shape = RoundedCornerShape(22.dp),
-      color = Color(0xFF090D18).copy(alpha = 0.96f)
+      shape = RoundedCornerShape(18.dp),
+      color = Color(0xFF070B14).copy(alpha = 0.98f)
     ) {
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 6.dp, vertical = 4.dp)
+          .padding(horizontal = 4.dp, vertical = 4.dp)
           .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
+        horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally)
       ) {
         if (onBackClick != null) {
           Box(
             modifier = Modifier
-              .size(width = 42.dp, height = 48.dp)
-              .clip(RoundedCornerShape(14.dp))
-              .background(
-                Brush.linearGradient(
-                  colors = listOf(
-                    Color(0xFF16294A),
-                    Color(0xFF0E1A33)
-                  )
-                )
-              )
+              .size(width = 44.dp, height = 54.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF141C2B))
               .border(
-                BorderStroke(
-                  width = 1.25.dp,
-                  color = Color(0xFF00B0FF).copy(alpha = 0.75f)
-                ),
-                shape = RoundedCornerShape(14.dp)
+                BorderStroke(1.dp, Color(0xFF2A374A)),
+                shape = RoundedCornerShape(12.dp)
               )
               .clickable(onClick = onBackClick)
               .testTag("nav_back_arrow_button"),
@@ -145,17 +129,34 @@ fun FuturisticBottomNavBarContainer(
               imageVector = Icons.Default.ArrowBack,
               contentDescription = "Back",
               tint = Color.White,
-              modifier = Modifier
-                .offset(y = (-4).dp)
-                .size(20.dp)
+              modifier = Modifier.size(20.dp)
             )
           }
-          Spacer(modifier = Modifier.width(4.dp))
+          
+          Box(
+            modifier = Modifier
+              .width(1.dp)
+              .height(24.dp)
+              .background(Color(0x18FFFFFF))
+          )
         }
 
         // Navigation Items
         items.forEachIndexed { index, item ->
           FuturisticNavItemView(item = item)
+          
+          // Subtle divider between items when neither is selected and dividers are enabled
+          if (showDividers && index < items.size - 1) {
+            val nextItem = items[index + 1]
+            if (!item.isSelected && !nextItem.isSelected) {
+              Box(
+                modifier = Modifier
+                  .width(1.dp)
+                  .height(20.dp)
+                  .background(Color(0x14FFFFFF))
+              )
+            }
+          }
         }
       }
     }
@@ -166,70 +167,60 @@ fun FuturisticBottomNavBarContainer(
 fun FuturisticNavItemView(item: FuturisticNavItemData) {
   val interactionSource = remember { MutableInteractionSource() }
 
+  val itemModifier = if (item.isSelected) {
+    Modifier
+      .width(62.dp)
+      .height(54.dp)
+      .clip(RoundedCornerShape(14.dp))
+      .background(
+        Brush.verticalGradient(
+          colors = listOf(
+            Color(0xFF165DFF),
+            Color(0xFF0F47D6)
+          )
+        )
+      )
+      .border(
+        BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(14.dp)
+      )
+  } else {
+    Modifier
+      .width(58.dp)
+      .height(54.dp)
+      .clip(RoundedCornerShape(12.dp))
+      .background(Color.Transparent)
+  }
+
   Column(
-    modifier = Modifier
-      .width(66.dp)
-      .height(60.dp)
-      .clip(RoundedCornerShape(16.dp))
+    modifier = itemModifier
       .clickable(
         interactionSource = interactionSource,
         indication = null,
         onClick = item.onClick
       )
-      .background(
-        if (item.isSelected) Color(0xFF0E1A2E)
-        else Color.Transparent
-      )
-      .border(
-        width = if (item.isSelected) 1.75.dp else 0.dp,
-        color = if (item.isSelected) Color(0xFF00E5FF) else Color.Transparent,
-        shape = RoundedCornerShape(16.dp)
-      )
       .padding(vertical = 4.dp, horizontal = 2.dp)
       .testTag(item.testTag),
     horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.SpaceBetween
+    verticalArrangement = Arrangement.Center
   ) {
-    Box(
-      modifier = Modifier
-        .offset(y = (-4).dp)
-        .size(34.dp)
-        .clip(CircleShape)
-        .background(
-          if (item.isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f)
-          else item.theme.bgCircle
-        ),
-      contentAlignment = Alignment.Center
-    ) {
-      Icon(
-        imageVector = item.icon,
-        contentDescription = item.label,
-        tint = if (item.isSelected) Color(0xFF00E5FF) else item.theme.iconTint,
-        modifier = Modifier.size(19.dp)
-      )
-    }
+    Icon(
+      imageVector = item.icon,
+      contentDescription = item.label,
+      tint = Color.White,
+      modifier = Modifier.size(22.dp)
+    )
+
+    Spacer(modifier = Modifier.height(3.dp))
 
     Text(
       text = item.label,
-      fontSize = 10.sp,
-      fontWeight = if (item.isSelected) FontWeight.Bold else FontWeight.Medium,
-      color = if (item.isSelected) Color.White else Color(0xFF94A3B8),
+      fontSize = 11.sp,
+      fontWeight = if (item.isSelected) FontWeight.SemiBold else FontWeight.Medium,
+      color = if (item.isSelected) Color.White else Color(0xFFE2E8F0),
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
       textAlign = TextAlign.Center
     )
-
-    // Selection Indicator bar at bottom
-    if (item.isSelected) {
-      Box(
-        modifier = Modifier
-          .width(20.dp)
-          .height(3.dp)
-          .clip(CircleShape)
-          .background(Color(0xFF00E5FF))
-      )
-    } else {
-      Spacer(modifier = Modifier.height(3.dp))
-    }
   }
 }
