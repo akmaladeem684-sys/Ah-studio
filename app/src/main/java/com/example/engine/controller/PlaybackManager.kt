@@ -120,6 +120,14 @@ class PlaybackManager(
     player.seekTo(positionMs.coerceAtLeast(0L))
   }
 
+  fun setVolume(volume: Float) {
+    player.volume = volume.coerceIn(0f, 2f)
+  }
+
+  fun setMuted(isMuted: Boolean) {
+    player.volume = if (isMuted) 0f else 1f
+  }
+
   fun setPlaybackSpeed(speed: Float) {
     val clampedSpeed = speed.coerceIn(0.1f, 10.0f)
     if (player.playbackParameters.speed != clampedSpeed) {

@@ -109,7 +109,7 @@ class CustomVideoEngineController(
   val trimPlaybackPositionMs: StateFlow<Long> = _trimPlaybackPositionMs.asStateFlow()
 
   val isScrubbing: Boolean get() = isScrubbingMode
-  val isPlaying: Boolean get() = playbackManager.isPlaying
+  val isPlaying: Boolean get() = _engineState.value.isPlaying || playbackManager.isPlaying
   val currentPosition: Long get() = _engineState.value.currentPosition
 
   init {
@@ -122,7 +122,6 @@ class CustomVideoEngineController(
         playbackManager.seekTo(sourcePosMs)
       }
     }
-    gpuRenderManager.initialize()
   }
 
   fun updateTimeline(timeline: Timeline) {
@@ -144,6 +143,7 @@ class CustomVideoEngineController(
       val sourcePosMs = clip.timelineToSourceMs(boundedPos)
       playbackManager.seekTo(sourcePosMs)
       playbackManager.setPlaybackSpeed(clip.speed)
+      playbackManager.setVolume(if (clip.isMuted) 0f else clip.volume)
       _engineState.value = _engineState.value.copy(
         playbackState = if (playbackManager.isPlaying) EnginePlaybackState.PLAYING else EnginePlaybackState.READY,
         isReady = true
@@ -304,6 +304,7 @@ class CustomVideoEngineController(
       val sourcePosMs = nextClip.timelineToSourceMs(nextTimelinePos)
       playbackManager.seekTo(sourcePosMs)
       playbackManager.setPlaybackSpeed(nextClip.speed)
+      playbackManager.setVolume(if (nextClip.isMuted) 0f else nextClip.volume)
       if (isPlaying || _engineState.value.isPlaying) {
         playbackManager.play()
       }
