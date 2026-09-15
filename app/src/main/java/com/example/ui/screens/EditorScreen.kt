@@ -1542,21 +1542,17 @@ fun VideoPreviewSurface(
 
               AndroidView(
                 factory = { ctx ->
-                  PlayerView(ctx).apply {
-                    this.player = player
-                    useController = false
-                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    setKeepContentOnPlayerReset(true)
+                  android.view.TextureView(ctx).apply {
                     layoutParams = FrameLayout.LayoutParams(
                       ViewGroup.LayoutParams.MATCH_PARENT,
                       ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    player.setVideoTextureView(this)
+                    android.util.Log.d("VideoPreviewSurface", "TextureView created and attached to ExoPlayer")
                   }
                 },
-                update = { pv ->
-                  if (pv.player != player) {
-                    pv.player = player
-                  }
+                update = { tv ->
+                  player.setVideoTextureView(tv)
                   val paint = if (isIdentityFilter) {
                     null
                   } else {
@@ -1564,16 +1560,14 @@ fun VideoPreviewSurface(
                       colorFilter = android.graphics.ColorMatrixColorFilter(androidCombinedMatrix)
                     }
                   }
-                  pv.setLayerType(
+                  tv.setLayerType(
                     if (paint != null) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_NONE,
                     paint
                   )
-                  pv.invalidate()
+                  tv.invalidate()
                 },
-                onReset = { /* Preserve player across recomposition */ },
-                onRelease = { pv ->
-                  pv.player = null
-                },
+                onReset = { /* Preserve texture view across recompositions */ },
+                onRelease = { /* Keep player instance intact */ },
                 modifier = realVideoFilterModifier
               )
             } else if (!activeClip.isVideo && activeClip.uri.isNotBlank() && !activeClip.uri.startsWith("stock://") && !activeClip.uri.startsWith("sample://")) {

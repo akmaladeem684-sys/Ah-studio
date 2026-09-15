@@ -37,7 +37,7 @@ class PlaybackManager(
     context.applicationContext,
     DefaultRenderersFactory(context.applicationContext)
       .setEnableDecoderFallback(true)
-      .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+      .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
   )
     .setLoadControl(
       DefaultLoadControl.Builder()
@@ -70,25 +70,42 @@ class PlaybackManager(
 
   private val playerListener = object : Player.Listener {
     override fun onPlaybackStateChanged(state: Int) {
-      Log.d(TAG, "ExoPlayer playback state changed: $state")
+      val stateName = when (state) {
+        Player.STATE_IDLE -> "STATE_IDLE"
+        Player.STATE_BUFFERING -> "STATE_BUFFERING"
+        Player.STATE_READY -> "STATE_READY"
+        Player.STATE_ENDED -> "STATE_ENDED"
+        else -> "UNKNOWN($state)"
+      }
+      Log.d(TAG, "ExoPlayer playback state changed: $stateName (playWhenReady=${player.playWhenReady})")
       this@PlaybackManager.onPlaybackStateChanged(state)
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
-      Log.d(TAG, "ExoPlayer isPlaying changed: $isPlaying")
+      Log.d(TAG, "ExoPlayer isPlaying changed: $isPlaying, pos=${player.currentPosition}ms")
       this@PlaybackManager.onIsPlayingChanged(isPlaying)
     }
 
     override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-      Log.d(TAG, "ExoPlayer videoSize: ${videoSize.width}x${videoSize.height} unappliedRotation=${videoSize.unappliedRotationDegrees}")
+      Log.d(TAG, "ExoPlayer videoSize: ${videoSize.width}x${videoSize.height}, unappliedRotation=${videoSize.unappliedRotationDegrees}, pixelAspectRatio=${videoSize.pixelWidthHeightRatio}")
+    }
+
+    override fun onSurfaceSizeChanged(width: Int, height: Int) {
+      Log.d(TAG, "ExoPlayer surfaceSizeChanged: ${width}x${height}")
     }
 
     override fun onRenderedFirstFrame() {
-      Log.d(TAG, "ExoPlayer rendered FIRST video frame to surface!")
+      Log.d(TAG, "ExoPlayer rendered FIRST video frame to active surface successfully!")
+    }
+
+    override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+      val hasVideo = tracks.groups.any { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO && it.isSelected }
+      val hasAudio = tracks.groups.any { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO && it.isSelected }
+      Log.d(TAG, "ExoPlayer tracks changed: hasSelectedVideo=$hasVideo, hasSelectedAudio=$hasAudio")
     }
 
     override fun onPlayerError(error: PlaybackException) {
-      Log.e(TAG, "ExoPlayer playback exception: ${error.errorCodeName} (${error.message})", error)
+      Log.e(TAG, "ExoPlayer playback exception: [${error.errorCodeName}] ${error.message}", error)
       this@PlaybackManager.onPlayerError(error)
     }
   }

@@ -237,14 +237,16 @@ fun VideoTrimmingToolPanel(
         if (activeClip.isVideo && isRealPlayable) {
           AndroidView(
             factory = { ctx ->
-              PlayerView(ctx).apply {
-                this.player = viewModel.playbackEngine.player
-                useController = false
+              android.view.TextureView(ctx).apply {
                 layoutParams = FrameLayout.LayoutParams(
                   ViewGroup.LayoutParams.MATCH_PARENT,
                   ViewGroup.LayoutParams.MATCH_PARENT
                 )
+                viewModel.playbackEngine.player.setVideoTextureView(this)
               }
+            },
+            update = { tv ->
+              viewModel.playbackEngine.player.setVideoTextureView(tv)
             },
             modifier = Modifier
               .fillMaxSize()
