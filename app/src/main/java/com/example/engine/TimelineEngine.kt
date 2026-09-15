@@ -51,6 +51,82 @@ class TimelineEngine {
   private val _currentPositionMs = MutableStateFlow(0L)
   val currentPositionMs: StateFlow<Long> = _currentPositionMs.asStateFlow()
 
+  val currentPositionUs: Long get() = _currentPositionMs.value * 1000L
+
+  fun setPositionUs(positionUs: Long, snap: Boolean = _isSnappingEnabled.value) {
+    setPosition(positionUs / 1000L, snap)
+  }
+
+  fun getActiveClipsAt(timeMs: Long): List<TimelineClip> = _timeline.value.getActiveClipsAt(timeMs)
+  fun getActiveClipsAtUs(timeUs: Long): List<TimelineClip> = _timeline.value.getActiveClipsAtUs(timeUs)
+  fun findClipById(clipId: String): TimelineClip? = _timeline.value.findClipById(clipId)
+
+  fun updateVideoClip(clipId: String, mutate: (VideoClip) -> VideoClip) = withStateLock {
+    val currentVideos = _timeline.value.videoClips
+    val index = currentVideos.indexOfFirst { it.id == clipId }
+    if (index != -1) {
+      val updated = mutate(currentVideos[index])
+      val newVideos = currentVideos.toMutableList()
+      newVideos[index] = updated
+      _timeline.value = _timeline.value.copy(videoClips = newVideos)
+    }
+  }
+
+  fun updateOverlayClip(clipId: String, mutate: (VideoClip) -> VideoClip) = withStateLock {
+    val currentOverlays = _timeline.value.overlayClips
+    val index = currentOverlays.indexOfFirst { it.id == clipId }
+    if (index != -1) {
+      val updated = mutate(currentOverlays[index])
+      val newOverlays = currentOverlays.toMutableList()
+      newOverlays[index] = updated
+      _timeline.value = _timeline.value.copy(overlayClips = newOverlays)
+    }
+  }
+
+  fun updateAudioClip(clipId: String, mutate: (AudioClip) -> AudioClip) = withStateLock {
+    val currentAudios = _timeline.value.audioClips
+    val index = currentAudios.indexOfFirst { it.id == clipId }
+    if (index != -1) {
+      val updated = mutate(currentAudios[index])
+      val newAudios = currentAudios.toMutableList()
+      newAudios[index] = updated
+      _timeline.value = _timeline.value.copy(audioClips = newAudios)
+    }
+  }
+
+  fun updateTextClip(clipId: String, mutate: (TextClip) -> TextClip) = withStateLock {
+    val currentTexts = _timeline.value.textClips
+    val index = currentTexts.indexOfFirst { it.id == clipId }
+    if (index != -1) {
+      val updated = mutate(currentTexts[index])
+      val newTexts = currentTexts.toMutableList()
+      newTexts[index] = updated
+      _timeline.value = _timeline.value.copy(textClips = newTexts)
+    }
+  }
+
+  fun updateStickerClip(clipId: String, mutate: (StickerClip) -> StickerClip) = withStateLock {
+    val currentStickers = _timeline.value.stickerClips
+    val index = currentStickers.indexOfFirst { it.id == clipId }
+    if (index != -1) {
+      val updated = mutate(currentStickers[index])
+      val newStickers = currentStickers.toMutableList()
+      newStickers[index] = updated
+      _timeline.value = _timeline.value.copy(stickerClips = newStickers)
+    }
+  }
+
+  fun updateEffectClip(clipId: String, mutate: (EffectClip) -> EffectClip) = withStateLock {
+    val currentEffects = _timeline.value.effectClips
+    val index = currentEffects.indexOfFirst { it.id == clipId }
+    if (index != -1) {
+      val updated = mutate(currentEffects[index])
+      val newEffects = currentEffects.toMutableList()
+      newEffects[index] = updated
+      _timeline.value = _timeline.value.copy(effectClips = newEffects)
+    }
+  }
+
   private val _isPlaying = MutableStateFlow(false)
   val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
@@ -609,6 +685,7 @@ class TimelineEngine {
       val clip = _timeline.value.videoClips.getOrNull(tr.clipIndexBefore)
       if (clip != null) {
         val cutMs = clip.timelineStartMs + clip.durationMs
+        snapPoints.add(cutMs)
         snapPoints.add(cutMs - tr.durationMs / 2)
         snapPoints.add(cutMs + tr.durationMs / 2)
       }

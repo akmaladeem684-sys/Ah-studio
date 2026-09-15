@@ -1364,30 +1364,32 @@ fun VideoPreviewSurface(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  // Find current active video clip
+  // Find current active video clip strictly at time T respecting visibility
   val activeClip = remember(timeline.videoClips, currentPosMs) {
-    timeline.videoClips.find {
-      currentPosMs >= it.timelineStartMs && currentPosMs < it.timelineStartMs + it.durationMs
-    } ?: timeline.videoClips.lastOrNull()
+    timeline.videoClips.find { clip ->
+      !clip.isHidden && currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs
+    }
   }
 
   val activeOverlays = remember(timeline.overlayClips, currentPosMs) {
-    timeline.overlayClips.filter {
-      currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs
+    timeline.overlayClips.filter { clip ->
+      !clip.isHidden && currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs
     }
   }
 
   val activeTexts = remember(timeline.textClips, currentPosMs, selectedElement) {
     val selectedId = (selectedElement as? SelectedTrackElement.Text)?.clipId
-    timeline.textClips.filter {
-      (it.id == selectedId) ||
-      (currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs)
+    timeline.textClips.filter { clip ->
+      !clip.isHidden && (
+        (clip.id == selectedId) ||
+        (currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs)
+      )
     }.sortedWith(compareBy({ it.trackIndex }, { it.timelineStartMs }))
   }
 
   val activeStickers = remember(timeline.stickerClips, currentPosMs) {
-    timeline.stickerClips.filter {
-      currentPosMs >= it.timelineStartMs && currentPosMs <= it.timelineStartMs + it.durationMs
+    timeline.stickerClips.filter { clip ->
+      !clip.isHidden && currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs
     }
   }
 
@@ -1396,7 +1398,7 @@ fun VideoPreviewSurface(
       val isSelected = (selectedElement as? SelectedTrackElement.Effect)?.clipId == clip.id
       !clip.isHidden && (
         isSelected ||
-        (currentPosMs >= clip.timelineStartMs && currentPosMs <= clip.timelineStartMs + clip.durationMs) ||
+        (currentPosMs >= clip.timelineStartMs && currentPosMs < clip.timelineStartMs + clip.durationMs) ||
         (clip.targetClipId != null && activeClip != null && clip.targetClipId == activeClip.id)
       )
     }.sortedBy { it.timelineStartMs }

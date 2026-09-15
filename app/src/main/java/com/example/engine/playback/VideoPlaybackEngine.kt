@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.effect.DefaultVideoFrameProcessor
+import com.example.domain.model.AudioClip
 import com.example.domain.model.Timeline
 import com.example.domain.model.VideoClip
 import com.example.engine.composition.ColorFilterGenerator
@@ -144,8 +145,128 @@ class VideoPlaybackEngine(
   private val overlayPlayers = java.util.concurrent.ConcurrentHashMap<String, ExoPlayer>()
   private val overlayLoadedUris = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+  // Multi-Track Audio ExoPlayer Management (clipId -> ExoPlayer)
+  private val audioPlayers = java.util.concurrent.ConcurrentHashMap<String, ExoPlayer>()
+  private val audioLoadedUris = java.util.concurrent.ConcurrentHashMap<String, String>()
+
   fun getOverlayPlayer(clipId: String): ExoPlayer? {
     return overlayPlayers[clipId]
+  }
+
+  fun syncAudioPlayers(posMs: Long) {
+    if (isTrimPreviewMode) return
+
+    val activeAudios = currentTimeline.audioClips.filter { clip ->
+      !clip.isMuted && !clip.isHidden && MediaRelinkManager.isRealPlayableMedia(context, clip.uri)
+    }
+
+    val activeIds = activeAudios.map { it.id }.toSet()
+
+    val existingIds = audioPlayers.keys.toList()
+    for (id in existingIds) {
+      if (!activeIds.contains(id)) {
+        audioPlayers.remove(id)?.let { p ->
+          try {
+            p.stop()
+            p.release()
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to release audio player $id", e)
+          }
+        }
+        audioLoadedUris.remove(id)
+      }
+    }
+
+    for (audio in activeAudios) {
+      var p = audioPlayers[audio.id]
+      if (p == null) {
+        try {
+          p = ExoPlayer.Builder(
+            context.applicationContext,
+            DefaultRenderersFactory(context.applicationContext)
+              .setEnableDecoderFallback(true)
+          ).setLoadControl(
+            DefaultLoadControl.Builder()
+              .setBufferDurationsMs(1000, 5000, 200, 500)
+              .build()
+          ).build().apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+          }
+          audioPlayers[audio.id] = p
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to create audio ExoPlayer for ${audio.id}", e)
+          continue
+        }
+      }
+
+      val loadedUri = audioLoadedUris[audio.id]
+      if (loadedUri != audio.uri || p.mediaItemCount == 0 || p.playbackState == Player.STATE_IDLE) {
+        try {
+          val parsedUri = Uri.parse(audio.uri)
+          val normalizedUri = if (parsedUri.scheme == "asset") {
+            var path = parsedUri.path ?: ""
+            if (path.startsWith("/")) path = path.substring(1)
+            if (path.isEmpty()) path = parsedUri.authority ?: ""
+            Uri.parse("asset:///$path")
+          } else if (parsedUri.scheme == null || parsedUri.scheme == "file") {
+            val path = parsedUri.path ?: audio.uri
+            val f = java.io.File(path)
+            if (f.exists()) Uri.fromFile(f) else parsedUri
+          } else {
+            parsedUri
+          }
+          p.setMediaItem(MediaItem.fromUri(normalizedUri))
+          p.prepare()
+          audioLoadedUris[audio.id] = audio.uri
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to set media item for audio ${audio.id}", e)
+        }
+      }
+
+      p.playbackParameters = PlaybackParameters(audio.speed.coerceAtLeast(0.01f))
+      val relPos = posMs - audio.timelineStartMs
+      val effectiveVolume = calculateAudioClipVolume(audio, relPos)
+      p.volume = if (audio.isMuted) 0f else effectiveVolume
+
+      val isTimeActive = posMs >= audio.timelineStartMs && posMs < (audio.timelineStartMs + audio.durationMs)
+      val targetSourceMs = audio.timelineToSourceMs(posMs)
+
+      if (isTimeActive) {
+        val projectIsPlaying = _isPlaying.value || player.isPlaying
+        if (projectIsPlaying) {
+          val curPos = p.currentPosition
+          if (Math.abs(curPos - targetSourceMs) > 100L || !p.isPlaying) {
+            p.seekTo(targetSourceMs)
+            p.play()
+          }
+        } else {
+          if (p.isPlaying) {
+            p.pause()
+          }
+          p.seekTo(targetSourceMs)
+        }
+      } else {
+        if (p.isPlaying) {
+          p.pause()
+        }
+        p.seekTo(targetSourceMs.coerceIn(0L, audio.durationMs))
+      }
+    }
+  }
+
+  private fun calculateAudioClipVolume(clip: AudioClip, relPosMs: Long): Float {
+    if (clip.isMuted) return 0f
+    var vol = clip.volume.coerceIn(0f, 2f)
+    if (clip.fadeInMs > 0L && relPosMs < clip.fadeInMs) {
+      val progress = (relPosMs.toFloat() / clip.fadeInMs.toFloat()).coerceIn(0f, 1f)
+      vol *= progress
+    }
+    val distToEnd = clip.durationMs - relPosMs
+    if (clip.fadeOutMs > 0L && distToEnd < clip.fadeOutMs) {
+      val progress = (distToEnd.toFloat() / clip.fadeOutMs.toFloat()).coerceIn(0f, 1f)
+      vol *= progress
+    }
+    return vol.coerceIn(0f, 2f)
   }
 
   fun syncOverlayPlayers(posMs: Long) {
@@ -268,6 +389,7 @@ class VideoPlaybackEngine(
     applyVideoFilter(matrix)
     syncWithPosition(boundedPos, forceReload = false)
     syncOverlayPlayers(boundedPos)
+    syncAudioPlayers(boundedPos)
   }
 
   /**
@@ -310,6 +432,9 @@ class VideoPlaybackEngine(
       player.pause()
     }
 
+    syncOverlayPlayers(boundedPos)
+    syncAudioPlayers(boundedPos)
+
     if (wasPlayingBeforeScrub) {
       wasPlayingBeforeScrub = false
       play()
@@ -347,6 +472,9 @@ class VideoPlaybackEngine(
     } else {
       player.pause()
     }
+
+    syncOverlayPlayers(boundedPos)
+    syncAudioPlayers(boundedPos)
   }
 
   /**
@@ -385,6 +513,9 @@ class VideoPlaybackEngine(
     } else {
       player.pause()
     }
+
+    syncOverlayPlayers(boundedPos)
+    syncAudioPlayers(boundedPos)
   }
 
   private fun scheduleCoalescedSeek(clip: VideoClip, targetSourcePosMs: Long, sequence: Long = 0L) {
@@ -452,7 +583,11 @@ class VideoPlaybackEngine(
     for (p in overlayPlayers.values) {
       try { p.pause() } catch (ignored: Exception) {}
     }
+    for (p in audioPlayers.values) {
+      try { p.pause() } catch (ignored: Exception) {}
+    }
     syncOverlayPlayers(currentPosMs)
+    syncAudioPlayers(currentPosMs)
     val active = _activeClip.value
     if (active != null && active.isVideo && isPlayableInPlayer(active.uri) && player.playbackState == Player.STATE_READY) {
       val playerPos = player.currentPosition
@@ -599,9 +734,9 @@ class VideoPlaybackEngine(
   }
 
   private fun findClipAt(posMs: Long): VideoClip? {
-    return currentTimeline.videoClips.find {
-      posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
-    } ?: currentTimeline.videoClips.lastOrNull()
+    return currentTimeline.videoClips.find { clip ->
+      !clip.isHidden && posMs >= clip.timelineStartMs && posMs < clip.timelineStartMs + clip.durationMs
+    }
   }
 
   private fun syncWithPosition(posMs: Long, forceReload: Boolean = false) {
@@ -764,6 +899,7 @@ class VideoPlaybackEngine(
               _currentPositionMs.value = bounded
               onTimelinePositionChanged(bounded)
               syncOverlayPlayers(bounded)
+              syncAudioPlayers(bounded)
               isSyncingFromPlayer = false
             }
           } else {
@@ -797,6 +933,7 @@ class VideoPlaybackEngine(
           _currentPositionMs.value = next
           onTimelinePositionChanged(currentPosMs)
           syncOverlayPlayers(currentPosMs)
+          syncAudioPlayers(currentPosMs)
           val nextClip = findClipAt(currentPosMs)
           if (nextClip != null && nextClip.id != _activeClip.value?.id) {
             syncWithPosition(currentPosMs)
@@ -825,6 +962,14 @@ class VideoPlaybackEngine(
     }
     overlayPlayers.clear()
     overlayLoadedUris.clear()
+    for (p in audioPlayers.values) {
+      try {
+        p.stop()
+        p.release()
+      } catch (ignored: Exception) {}
+    }
+    audioPlayers.clear()
+    audioLoadedUris.clear()
     engineController.release()
   }
 }

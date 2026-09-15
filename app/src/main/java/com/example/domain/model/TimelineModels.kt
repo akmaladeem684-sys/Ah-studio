@@ -238,17 +238,67 @@ data class ClipAnimationSettings(
     get() = inType != InAnimationType.NONE || outType != OutAnimationType.NONE || comboType != ComboAnimationType.NONE
 }
 
+data class ClipTransform(
+  val posX: Float = 0f,
+  val posY: Float = 0f,
+  val scale: Float = 1f,
+  val rotation: Float = 0f
+)
+
+data class TrimState(
+  val sourceInMs: Long = 0L,
+  val sourceOutMs: Long = 0L,
+  val totalSourceDurationMs: Long = 0L
+) {
+  val sourceInUs: Long get() = sourceInMs * 1000L
+  val sourceOutUs: Long get() = sourceOutMs * 1000L
+  val totalSourceDurationUs: Long get() = totalSourceDurationMs * 1000L
+}
+
+interface TimelineClip {
+  val id: String
+  val sourceMediaId: String
+  val trackId: String
+  val trackIndex: Int
+  val timelineStartMs: Long
+  val durationMs: Long
+  val sourceStartMs: Long
+  val sourceEndMs: Long
+  val opacity: Float
+  val speed: Float
+  val volume: Float
+  val isLocked: Boolean
+  val isHidden: Boolean
+
+  val timelineStartUs: Long get() = timelineStartMs * 1000L
+  val durationUs: Long get() = durationMs * 1000L
+  val timelineEndMs: Long get() = timelineStartMs + durationMs
+  val timelineEndUs: Long get() = (timelineStartMs + durationMs) * 1000L
+  val sourceStartUs: Long get() = sourceStartMs * 1000L
+  val sourceEndUs: Long get() = sourceEndMs * 1000L
+  val ptsStartUs: Long get() = timelineStartUs
+  val ptsEndUs: Long get() = timelineEndUs
+  val transform: ClipTransform
+  val trimState: TrimState
+
+  fun isTimeActive(posMs: Long): Boolean = !isHidden && posMs >= timelineStartMs && posMs < (timelineStartMs + durationMs)
+  fun isTimeActiveUs(posUs: Long): Boolean = !isHidden && posUs >= timelineStartUs && posUs < timelineEndUs
+}
+
 data class VideoClip(
-  val id: String = UUID.randomUUID().toString(),
+  override val id: String = UUID.randomUUID().toString(),
   val uri: String = "",
+  override val sourceMediaId: String = uri,
+  override val trackId: String = "video_0",
+  override val trackIndex: Int = 0,
   val name: String,
   val isVideo: Boolean = true,
-  val timelineStartMs: Long = 0L,
-  val durationMs: Long = 3000L,
-  val sourceStartMs: Long = 0L,
-  val sourceEndMs: Long = 3000L,
-  val speed: Float = 1.0f,
-  val volume: Float = 1.0f,
+  override val timelineStartMs: Long = 0L,
+  override val durationMs: Long = 3000L,
+  override val sourceStartMs: Long = 0L,
+  override val sourceEndMs: Long = 3000L,
+  override val speed: Float = 1.0f,
+  override val volume: Float = 1.0f,
   val rotationDegrees: Int = 0,
   val flipHorizontal: Boolean = false,
   val flipVertical: Boolean = false,
@@ -256,7 +306,7 @@ data class VideoClip(
   val cropScale: Float = 1.0f,
   val cropOffsetX: Float = 0f,
   val cropOffsetY: Float = 0f,
-  val opacity: Float = 1.0f,
+  override val opacity: Float = 1.0f,
   val blendMode: String = "Normal",
   val width: Int = 1920,
   val height: Int = 1080,
@@ -273,11 +323,20 @@ data class VideoClip(
   val mask: MaskSettings = MaskSettings(),
   val speedCurve: SpeedCurve = SpeedCurve(),
   val audioEffects: AudioEffectsSettings = AudioEffectsSettings(),
-  val isLocked: Boolean = false,
-  val isHidden: Boolean = false
-) {
+  override val isLocked: Boolean = false,
+  override val isHidden: Boolean = false
+) : TimelineClip {
+  override val transform: ClipTransform
+    get() = ClipTransform(posX = cropOffsetX, posY = cropOffsetY, scale = cropScale, rotation = rotationDegrees.toFloat())
+
+  override val trimState: TrimState
+    get() = TrimState(sourceInMs = sourceStartMs, sourceOutMs = sourceEndMs, totalSourceDurationMs = totalMediaDurationMs)
+
   val totalMediaDurationMs: Long
     get() = if (sourceTotalDurationMs > 0L) sourceTotalDurationMs else maxOf(sourceEndMs, durationMs)
+
+  val totalMediaDurationUs: Long
+    get() = totalMediaDurationMs * 1000L
 
   fun timelineToSourceMs(timelinePosMs: Long): Long {
     val offset = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
@@ -290,6 +349,10 @@ data class VideoClip(
     } else {
       (sourceStartMs + scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
     }
+  }
+
+  fun timelineToSourceUs(timelinePosUs: Long): Long {
+    return timelineToSourceMs(timelinePosUs / 1000L) * 1000L
   }
 
   private fun evaluateSpeedCurveFactor(normalizedT: Float): Float {
@@ -313,15 +376,18 @@ data class VideoClip(
 }
 
 data class AudioClip(
-  val id: String = UUID.randomUUID().toString(),
+  override val id: String = UUID.randomUUID().toString(),
   val uri: String,
+  override val sourceMediaId: String = uri,
+  override val trackId: String = "audio_0",
+  override val trackIndex: Int = 0,
   val title: String,
-  val timelineStartMs: Long = 0L,
-  val durationMs: Long = 3000L,
-  val sourceStartMs: Long = 0L,
-  val sourceEndMs: Long = 3000L,
-  val volume: Float = 1.0f,
-  val speed: Float = 1.0f,
+  override val timelineStartMs: Long = 0L,
+  override val durationMs: Long = 3000L,
+  override val sourceStartMs: Long = 0L,
+  override val sourceEndMs: Long = 3000L,
+  override val volume: Float = 1.0f,
+  override val speed: Float = 1.0f,
   val fadeInMs: Long = 0L,
   val fadeOutMs: Long = 0L,
   val isMuted: Boolean = false,
@@ -332,9 +398,27 @@ data class AudioClip(
   val keyframes: List<ClipKeyframe> = emptyList(),
   val speedCurve: SpeedCurve = SpeedCurve(),
   val audioEffects: AudioEffectsSettings = AudioEffectsSettings(),
-  val isLocked: Boolean = false,
-  val isHidden: Boolean = false
-)
+  override val isLocked: Boolean = false,
+  override val isHidden: Boolean = false
+) : TimelineClip {
+  override val opacity: Float get() = if (isMuted) 0f else volume.coerceIn(0f, 1f)
+  override val transform: ClipTransform get() = ClipTransform()
+  override val trimState: TrimState get() = TrimState(sourceInMs = sourceStartMs, sourceOutMs = sourceEndMs, totalSourceDurationMs = durationMs)
+
+  fun timelineToSourceMs(timelinePosMs: Long): Long {
+    val offset = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
+    val scaledOffset = (offset * speed).toLong()
+    return if (isReversed) {
+      (sourceEndMs - scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
+    } else {
+      (sourceStartMs + scaledOffset).coerceIn(sourceStartMs, sourceEndMs)
+    }
+  }
+
+  fun timelineToSourceUs(timelinePosUs: Long): Long {
+    return timelineToSourceMs(timelinePosUs / 1000L) * 1000L
+  }
+}
 
 data class WordTiming(
   val word: String,
@@ -343,11 +427,15 @@ data class WordTiming(
 )
 
 data class TextClip(
-  val id: String = UUID.randomUUID().toString(),
+  override val id: String = UUID.randomUUID().toString(),
+  override val sourceMediaId: String = id,
+  override val trackIndex: Int = 0,
+  override val trackId: String = "text_0",
   val text: String = "Tap to edit",
-  val timelineStartMs: Long = 0L,
-  val durationMs: Long = 3000L,
-  val trackIndex: Int = 0,
+  override val timelineStartMs: Long = 0L,
+  override val durationMs: Long = 3000L,
+  override val sourceStartMs: Long = 0L,
+  override val sourceEndMs: Long = 3000L,
   val fontFamily: String = "Default",
   val customFontPath: String? = null,
   val fontSizeSp: Float = 24f,
@@ -374,7 +462,7 @@ data class TextClip(
   val backgroundColor: Long = 0xAA000000,
   val cornerRadius: Float = 12f,
   val bgPadding: Float = 16f,
-  val opacity: Float = 1.0f,
+  override val opacity: Float = 1.0f,
   val rotation: Float = 0f,
   val posX: Float = 0f, // -1f to 1f normalized
   val posY: Float = 0.35f, // -1f to 1f normalized
@@ -398,9 +486,17 @@ data class TextClip(
   val color3D: Long = 0xFF1E293B,
   val animation3D: String = "None",
   val effectStyle: String = "None",
-  val isLocked: Boolean = false,
-  val isHidden: Boolean = false
-)
+  override val isLocked: Boolean = false,
+  override val isHidden: Boolean = false
+) : TimelineClip {
+  override val speed: Float get() = 1.0f
+  override val volume: Float get() = 1.0f
+  override val transform: ClipTransform get() = ClipTransform(posX = posX, posY = posY, scale = scale, rotation = rotation)
+  override val trimState: TrimState get() = TrimState(sourceInMs = sourceStartMs, sourceOutMs = sourceEndMs, totalSourceDurationMs = durationMs)
+
+  fun timelineToSourceMs(timelinePosMs: Long): Long = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
+  fun timelineToSourceUs(timelinePosUs: Long): Long = timelineToSourceMs(timelinePosUs / 1000L) * 1000L
+}
 
 enum class StickerAnimationType(val displayName: String) {
   NONE("Static"),
@@ -441,27 +537,40 @@ enum class BadgeType(
 }
 
 data class StickerClip(
-  val id: String = UUID.randomUUID().toString(),
+  override val id: String = UUID.randomUUID().toString(),
+  val elementId: String? = null,
+  override val sourceMediaId: String = id,
+  override val trackId: String = "sticker_0",
+  override val trackIndex: Int = 0,
   val emojiOrAsset: String = "🎬",
-  val timelineStartMs: Long = 0L,
-  val durationMs: Long = 3000L,
+  override val timelineStartMs: Long = 0L,
+  override val durationMs: Long = 3000L,
+  override val sourceStartMs: Long = 0L,
+  override val sourceEndMs: Long = 3000L,
   val posX: Float = 0f,
   val posY: Float = 0f,
   val scale: Float = 1f,
   val rotation: Float = 0f,
-  val opacity: Float = 1f,
+  override val opacity: Float = 1f,
   val animationType: StickerAnimationType = StickerAnimationType.NONE,
   val badgeType: BadgeType? = null,
   val category: String = "Emoji & Emotions",
-  val isLocked: Boolean = false,
-  val isHidden: Boolean = false,
-  val elementId: String? = null,
+  override val isLocked: Boolean = false,
+  override val isHidden: Boolean = false,
   val elementCategory: String? = null,
   val customColor: Long? = null,
   val secondaryColor: Long? = null,
   val elementData: String? = null,
   val keyframes: List<ClipKeyframe> = emptyList()
-)
+) : TimelineClip {
+  override val speed: Float get() = 1.0f
+  override val volume: Float get() = 1.0f
+  override val transform: ClipTransform get() = ClipTransform(posX = posX, posY = posY, scale = scale, rotation = rotation)
+  override val trimState: TrimState get() = TrimState(sourceInMs = sourceStartMs, sourceOutMs = sourceEndMs, totalSourceDurationMs = durationMs)
+
+  fun timelineToSourceMs(timelinePosMs: Long): Long = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
+  fun timelineToSourceUs(timelinePosUs: Long): Long = timelineToSourceMs(timelinePosUs / 1000L) * 1000L
+}
 
 enum class EffectType(val category: String, val displayName: String) {
   // Video Effects - Basic & Blur
@@ -579,18 +688,32 @@ enum class EffectType(val category: String, val displayName: String) {
 }
 
 data class EffectClip(
-  val id: String = UUID.randomUUID().toString(),
+  override val id: String = UUID.randomUUID().toString(),
+  override val sourceMediaId: String = id,
+  override val trackId: String = "effect_0",
+  override val trackIndex: Int = 0,
   val effectType: EffectType = EffectType.GLOW,
-  val timelineStartMs: Long = 0L,
-  val durationMs: Long = 3000L,
+  override val timelineStartMs: Long = 0L,
+  override val durationMs: Long = 3000L,
+  override val sourceStartMs: Long = 0L,
+  override val sourceEndMs: Long = 3000L,
   val intensity: Float = 0.8f,
   val keyframes: List<ClipKeyframe> = emptyList(),
   val customName: String = "",
   val effectCategory: String = "Video Effects",
   val targetClipId: String? = null,
-  val isLocked: Boolean = false,
-  val isHidden: Boolean = false
-)
+  override val isLocked: Boolean = false,
+  override val isHidden: Boolean = false
+) : TimelineClip {
+  override val opacity: Float get() = intensity
+  override val speed: Float get() = 1.0f
+  override val volume: Float get() = 1.0f
+  override val transform: ClipTransform get() = ClipTransform()
+  override val trimState: TrimState get() = TrimState(sourceInMs = sourceStartMs, sourceOutMs = sourceEndMs, totalSourceDurationMs = durationMs)
+
+  fun timelineToSourceMs(timelinePosMs: Long): Long = (timelinePosMs - timelineStartMs).coerceIn(0L, durationMs)
+  fun timelineToSourceUs(timelinePosUs: Long): Long = timelineToSourceMs(timelinePosUs / 1000L) * 1000L
+}
 
 enum class TransitionType(val displayName: String) {
   NONE("None"),
@@ -713,6 +836,18 @@ fun defaultTrackSettings(): Map<TrackType, TrackSettings> {
   return TrackType.values().associateWith { TrackSettings(it) }
 }
 
+data class Track(
+  val id: String,
+  val type: TrackType,
+  val index: Int = 0,
+  val name: String = "${type.name} $index",
+  val isLocked: Boolean = false,
+  val isHidden: Boolean = false,
+  val isMuted: Boolean = false,
+  val isSolo: Boolean = false,
+  val height: TrackHeight = TrackHeight.NORMAL
+)
+
 data class Timeline(
   val videoClips: List<VideoClip> = emptyList(),
   val overlayClips: List<VideoClip> = emptyList(),
@@ -738,4 +873,43 @@ data class Timeline(
       val effectDur = effectClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
       return maxOf(videoDur, overlayDur, audioDur, textDur, stickerDur, effectDur)
     }
+
+  val totalDurationUs: Long
+    get() = totalDurationMs * 1000L
+
+  fun getAllClips(): List<TimelineClip> {
+    return videoClips + overlayClips + audioClips + textClips + stickerClips + effectClips
+  }
+
+  fun findClipById(id: String): TimelineClip? {
+    return videoClips.find { it.id == id }
+      ?: overlayClips.find { it.id == id }
+      ?: audioClips.find { it.id == id }
+      ?: textClips.find { it.id == id }
+      ?: stickerClips.find { it.id == id }
+      ?: effectClips.find { it.id == id }
+  }
+
+  fun getActiveClipsAt(posMs: Long): List<TimelineClip> {
+    val results = mutableListOf<TimelineClip>()
+    videoClips.find { it.isTimeActive(posMs) }?.let { results.add(it) }
+    for (clip in overlayClips) {
+      if (clip.isTimeActive(posMs)) results.add(clip)
+    }
+    for (clip in audioClips) {
+      if (clip.isTimeActive(posMs)) results.add(clip)
+    }
+    for (clip in textClips) {
+      if (clip.isTimeActive(posMs)) results.add(clip)
+    }
+    for (clip in stickerClips) {
+      if (clip.isTimeActive(posMs)) results.add(clip)
+    }
+    for (clip in effectClips) {
+      if (clip.isTimeActive(posMs)) results.add(clip)
+    }
+    return results
+  }
+
+  fun getActiveClipsAtUs(posUs: Long): List<TimelineClip> = getActiveClipsAt(posUs / 1000L)
 }
