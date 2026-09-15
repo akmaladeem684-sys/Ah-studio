@@ -64,7 +64,8 @@ class TimelineSyncManager(
             // Hardware-backed authoritative calculation
             val playerPos = playbackManager.currentPosition
             val speed = active.speed.coerceAtLeast(0.01f)
-            val offsetInClip = ((playerPos - active.sourceStartMs) / speed).toLong()
+            val sourceOffset = (playerPos - active.sourceStartMs).coerceAtLeast(0L)
+            val offsetInClip = (sourceOffset / speed).toLong()
             val calculatedTimeline = active.timelineStartMs + offsetInClip
 
             if (calculatedTimeline >= active.timelineStartMs + active.durationMs) {
@@ -74,8 +75,10 @@ class TimelineSyncManager(
                 active.timelineStartMs,
                 currentTimeline.totalDurationMs.coerceAtLeast(0L)
               )
-              _timelinePositionMs.value = bounded
-              onTimelinePositionUpdated(bounded)
+              if (_timelinePositionMs.value != bounded) {
+                _timelinePositionMs.value = bounded
+                onTimelinePositionUpdated(bounded)
+              }
             }
           } else {
             // Image / Gap advancing loop

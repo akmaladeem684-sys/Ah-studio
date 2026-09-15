@@ -65,6 +65,7 @@ enum class EditorToolbarTab {
   AUDIO,
   VOLUME,
   TEXT,
+  ELEMENTS,
   STICKERS,
   EFFECTS,
   FILTERS,
@@ -104,7 +105,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     context = application,
     onTimelinePositionChanged = { posMs ->
       isSyncingFromPlayback = true
-      timelineEngine.setPosition(posMs, snap = false)
+      timelineEngine.updatePlayheadFromPlayback(posMs)
       isSyncingFromPlayback = false
     },
     onPlaybackEnded = {
@@ -267,6 +268,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   }
 
   fun onScrubStart() {
+    timelineEngine.startScrubbing()
     playbackEngine.startScrubbing()
   }
 
@@ -278,6 +280,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
   fun onScrubStop(posMs: Long? = null) {
     val finalPos = posMs ?: timelineEngine.currentPositionMs.value
     timelineEngine.setPosition(finalPos)
+    timelineEngine.stopScrubbing()
     playbackEngine.stopScrubbing(finalPos)
   }
 

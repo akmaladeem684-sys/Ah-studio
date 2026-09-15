@@ -145,11 +145,17 @@ fun KeyframeAnimationPanel(
             text = "Keyframe Property Panel",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
           )
-          val clipLabel = when (selectedElement) {
+          val currentElem = selectedElement
+          val clipLabel = when (currentElem) {
             is SelectedTrackElement.Video -> "Main Video Clip"
             is SelectedTrackElement.Overlay -> "PIP Overlay Clip"
             is SelectedTrackElement.Audio -> "Audio Track"
             is SelectedTrackElement.Effect -> "Visual Effect Clip"
+            is SelectedTrackElement.Sticker -> {
+              val clip = timeline.stickerClips.find { it.id == currentElem.clipId }
+              if (clip?.elementId != null) "Element: ${clip.emojiOrAsset.ifBlank { clip.elementCategory ?: "Shape" }}"
+              else "Sticker: ${clip?.emojiOrAsset ?: "Item"}"
+            }
             else -> "No clip selected"
           }
           Text(
@@ -178,10 +184,22 @@ fun KeyframeAnimationPanel(
           Icon(Icons.Default.Layers, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(32.dp))
           Spacer(modifier = Modifier.height(6.dp))
           Text(
-            text = "Select a video or audio clip on the timeline to animate",
+            text = "Select an element, video, or audio clip on the timeline to animate",
             style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary)
           )
           Spacer(modifier = Modifier.height(8.dp))
+          val firstSticker = timeline.stickerClips.firstOrNull()
+          if (firstSticker != null) {
+            Button(
+              onClick = {
+                viewModel.timelineEngine.selectElement(SelectedTrackElement.Sticker(firstSticker.id))
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent, contentColor = Color.White)
+            ) {
+              Text("Select Element (${firstSticker.emojiOrAsset.ifBlank { "Shape" }})", fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+          }
           val firstVideo = timeline.videoClips.firstOrNull()
           if (firstVideo != null) {
             Button(
@@ -406,7 +424,42 @@ fun KeyframeAnimationPanel(
         .verticalScroll(rememberScrollState()),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      val targetKf = activeKeyframe ?: ClipKeyframe(timeMs = 0L)
+      val currentElem = selectedElement
+      val currentRelTime = when (currentElem) {
+        is SelectedTrackElement.Video -> {
+          val clip = timeline.videoClips.find { it.id == currentElem.clipId }
+          (currentPosMs - (clip?.timelineStartMs ?: 0L)).coerceIn(0L, clip?.durationMs ?: 1000L)
+        }
+        is SelectedTrackElement.Overlay -> {
+          val clip = timeline.overlayClips.find { it.id == currentElem.clipId }
+          (currentPosMs - (clip?.timelineStartMs ?: 0L)).coerceIn(0L, clip?.durationMs ?: 1000L)
+        }
+        is SelectedTrackElement.Sticker -> {
+          val clip = timeline.stickerClips.find { it.id == currentElem.clipId }
+          (currentPosMs - (clip?.timelineStartMs ?: 0L)).coerceIn(0L, clip?.durationMs ?: 1000L)
+        }
+        else -> 0L
+      }
+
+      val defaultKf = when (currentElem) {
+        is SelectedTrackElement.Sticker -> {
+          val clip = timeline.stickerClips.find { it.id == currentElem.clipId }
+          if (clip != null) {
+            val interp = com.example.engine.KeyframeInterpolator.interpolate(clip, currentRelTime)
+            ClipKeyframe(
+              timeMs = currentRelTime,
+              posX = interp.posX,
+              posY = interp.posY,
+              scaleX = interp.scaleX,
+              scaleY = interp.scaleY,
+              rotation = interp.rotation,
+              opacity = interp.opacity
+            )
+          } else ClipKeyframe(timeMs = currentRelTime)
+        }
+        else -> ClipKeyframe(timeMs = currentRelTime)
+      }
+      val targetKf = activeKeyframe ?: defaultKf
 
       when (selectedCategory) {
         KeyframeCategory.TRANSFORM -> {

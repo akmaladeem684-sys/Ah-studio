@@ -42,6 +42,7 @@ object NavItemThemes {
   val AddText = NavItemColorTheme(Color(0xFF102A45), Color.White)
   val Captions = NavItemColorTheme(Color(0xFF321B60), Color.White)
   val Stickers = NavItemColorTheme(Color(0xFF0B4D3C), Color.White)
+  val Elements = NavItemColorTheme(Color(0xFF2E1A47), Color.White)
   val DrawTheme = NavItemColorTheme(Color(0xFF421C6E), Color.White)
   val Draw = DrawTheme
   val TextTemplateTheme = NavItemColorTheme(Color(0xFF5A380A), Color.White)

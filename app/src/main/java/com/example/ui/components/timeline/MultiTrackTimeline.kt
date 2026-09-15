@@ -54,18 +54,22 @@ import com.example.engine.SelectedTrackElement
 import com.example.ui.components.formatDurationShort
 import com.example.ui.theme.*
 
-private fun getOrderedTextTracks(textClips: List<TextClip>): List<List<TextClip>> {
-  if (textClips.isEmpty()) return emptyList()
-
-  val trackMap = mutableMapOf<Int, MutableList<TextClip>>()
-  val sortedClips = textClips.sortedBy { it.timelineStartMs }
+private fun <T> getOrderedClipTracks(
+  clips: List<T>,
+  timeSelector: (T) -> Pair<Long, Long>
+): List<List<T>> {
+  if (clips.isEmpty()) return emptyList()
+  val trackMap = mutableMapOf<Int, MutableList<T>>()
+  val sortedClips = clips.sortedBy { timeSelector(it).first }
 
   for (clip in sortedClips) {
-    var assignedTrack = clip.trackIndex
+    val (start, duration) = timeSelector(clip)
+    val end = start + duration
+    var assignedTrack = 0
     while (trackMap[assignedTrack]?.any { existing ->
-        val endExisting = existing.timelineStartMs + existing.durationMs
-        val endNew = clip.timelineStartMs + clip.durationMs
-        existing.timelineStartMs < endNew && clip.timelineStartMs < endExisting
+        val (eStart, eDuration) = timeSelector(existing)
+        val eEnd = eStart + eDuration
+        eStart < end && start < eEnd
       } == true) {
       assignedTrack++
     }
@@ -73,6 +77,10 @@ private fun getOrderedTextTracks(textClips: List<TextClip>): List<List<TextClip>
   }
 
   return trackMap.entries.sortedBy { it.key }.map { it.value }
+}
+
+private fun getOrderedTextTracks(textClips: List<TextClip>): List<List<TextClip>> {
+  return getOrderedClipTracks(textClips) { it.timelineStartMs to it.durationMs }
 }
 
 @Composable
@@ -181,6 +189,8 @@ fun MultiTrackTimeline(
   }
   val trackContentWidthDp = (maxTimelineMs / msPerPixel).dp
   val textTracks = remember(timeline.textClips) { getOrderedTextTracks(timeline.textClips) }
+  val overlayTracks = remember(timeline.overlayClips) { getOrderedClipTracks(timeline.overlayClips) { it.timelineStartMs to it.durationMs } }
+  val audioTracks = remember(timeline.audioClips) { getOrderedClipTracks(timeline.audioClips) { it.timelineStartMs to it.durationMs } }
 
   // Reorder dragging state on the Video track
   var draggedVideoIndex by remember { mutableStateOf<Int?>(null) }
@@ -568,90 +578,94 @@ fun MultiTrackTimeline(
                   }
 
                   // ==========================================
-                  // 2. OVERLAY / PIP TRACK (36.dp)
+                  // 2. OVERLAY / PIP TRACKS (Multi-track lanes)
                   // ==========================================
-                  if (timeline.overlayClips.isNotEmpty()) {
+                  if (overlayTracks.isNotEmpty()) {
                     val overlayTrackHeight = 36.dp
-                    Box(
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .height(overlayTrackHeight)
-                        .testTag("overlay_track_lane")
-                    ) {
+                    val maxOverlayEndMs = timeline.overlayClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                    val addOverlayOffset = (maxOverlayEndMs / msPerPixel).dp + 8.dp
+
+                    for ((trackIdx, trackClips) in overlayTracks.withIndex()) {
                       Box(
                         modifier = Modifier
-                          .fillMaxHeight()
-                          .offset(x = leftPaddingDp)
+                          .fillMaxWidth()
+                          .height(overlayTrackHeight)
+                          .testTag(if (trackIdx == 0) "overlay_track_lane" else "overlay_track_lane_$trackIdx")
                       ) {
-                        for (clip in timeline.overlayClips) {
-                          val isSelected = (selectedElement as? SelectedTrackElement.Overlay)?.clipId == clip.id
-                          val isMulti = clip.id in selectedClipIds
-
-                          TimelineClipView(
-                            clipId = clip.id,
-                            title = clip.name.ifBlank { "Overlay" },
-                            timelineStartMs = clip.timelineStartMs,
-                            durationMs = clip.durationMs,
-                            sourceStartMs = clip.sourceStartMs,
-                            sourceEndMs = clip.sourceEndMs,
-                            currentPlayheadMs = currentPosMs,
-                            hasAudio = clip.hasAudio,
-                            trackColor = OverlayTrackColor,
-                            heightDp = overlayTrackHeight,
-                            msPerPixel = msPerPixel,
-                            isSelected = isSelected,
-                            isMultiSelected = isMulti,
-                            isLocked = false,
-                            speed = clip.speed,
-                            filterName = if (clip.filter?.type != null && clip.filter.type != com.example.domain.model.FilterType.NONE) clip.filter.type.displayName else null,
-                            isVideoClip = clip.isVideo,
-                            uri = clip.uri,
-                            isVideo = clip.isVideo,
-                            onSelect = {
-                              if (isMultiSelectMode) onToggleClipSelection(clip.id)
-                              else {
-                                onSelectElement(SelectedTrackElement.Overlay(clip.id))
-                                onSeek(clip.timelineStartMs)
-                              }
-                            },
-                            onLongClick = { onToggleClipSelection(clip.id) },
-                            onMoveClip = { delta -> onMoveClip(clip.id, delta) },
-                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
-                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
-                            onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
-                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
-                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
-                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
-                          )
-                        }
-
-                        val maxOverlayEndMs = timeline.overlayClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-                        val addOverlayOffset = (maxOverlayEndMs / msPerPixel).dp + 8.dp
-
                         Box(
                           modifier = Modifier
-                            .offset(x = addOverlayOffset)
-                            .align(Alignment.CenterStart)
+                            .fillMaxHeight()
+                            .offset(x = leftPaddingDp)
                         ) {
-                          Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E222D),
-                            border = BorderStroke(1.dp, Color(0xFF2D3344)),
-                            modifier = Modifier
-                              .width(115.dp)
-                              .height(32.dp)
-                              .clickable { onAddOverlay?.invoke() }
-                              .testTag("add_overlay_pill_btn")
-                          ) {
-                            Row(
-                              modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                              verticalAlignment = Alignment.CenterVertically
+                          for (clip in trackClips) {
+                            val isSelected = (selectedElement as? SelectedTrackElement.Overlay)?.clipId == clip.id
+                            val isMulti = clip.id in selectedClipIds
+
+                            TimelineClipView(
+                              clipId = clip.id,
+                              title = clip.name.ifBlank { "Overlay" },
+                              timelineStartMs = clip.timelineStartMs,
+                              durationMs = clip.durationMs,
+                              sourceStartMs = clip.sourceStartMs,
+                              sourceEndMs = clip.sourceEndMs,
+                              currentPlayheadMs = currentPosMs,
+                              hasAudio = clip.hasAudio,
+                              trackColor = OverlayTrackColor,
+                              heightDp = overlayTrackHeight,
+                              msPerPixel = msPerPixel,
+                              isSelected = isSelected,
+                              isMultiSelected = isMulti,
+                              isLocked = false,
+                              speed = clip.speed,
+                              filterName = if (clip.filter?.type != null && clip.filter.type != com.example.domain.model.FilterType.NONE) clip.filter.type.displayName else null,
+                              isVideoClip = clip.isVideo,
+                              uri = clip.uri,
+                              isVideo = clip.isVideo,
+                              onSelect = {
+                                if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                                else {
+                                  onSelectElement(SelectedTrackElement.Overlay(clip.id))
+                                  onSeek(clip.timelineStartMs)
+                                }
+                              },
+                              onLongClick = { onToggleClipSelection(clip.id) },
+                              onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                              onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                              onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
+                              onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                              onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                              onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                              onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                              onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                              onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
+                            )
+                          }
+
+                          if (trackIdx == overlayTracks.lastIndex) {
+                            Box(
+                              modifier = Modifier
+                                .offset(x = addOverlayOffset)
+                                .align(Alignment.CenterStart)
                             ) {
-                              Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
-                              Spacer(modifier = Modifier.width(4.dp))
-                              Text("Add overlay", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium))
+                              Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF1E222D),
+                                border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                                modifier = Modifier
+                                  .width(115.dp)
+                                  .height(32.dp)
+                                  .clickable { onAddOverlay?.invoke() }
+                                  .testTag("add_overlay_pill_btn")
+                              ) {
+                                Row(
+                                  modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                                  verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                  Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                                  Spacer(modifier = Modifier.width(4.dp))
+                                  Text("Add overlay", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium))
+                                }
+                              }
                             }
                           }
                         }
@@ -660,97 +674,101 @@ fun MultiTrackTimeline(
                   }
 
                   // ==========================================
-                  // 3. AUDIO TRACK (+ Add audio button card / waveforms)
+                  // 3. AUDIO TRACKS (Multi-track lanes)
                   // ==========================================
-                  if (timeline.audioClips.isNotEmpty()) {
+                  if (audioTracks.isNotEmpty()) {
                     val audioTrackHeight = 36.dp
-                    Box(
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .height(audioTrackHeight)
-                        .testTag("audio_track_lane")
-                    ) {
+                    val maxAudioEndMs = timeline.audioClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
+                    val addAudioOffset = (maxAudioEndMs / msPerPixel).dp + 8.dp
+
+                    for ((trackIdx, trackClips) in audioTracks.withIndex()) {
                       Box(
                         modifier = Modifier
-                          .fillMaxHeight()
-                          .offset(x = leftPaddingDp)
+                          .fillMaxWidth()
+                          .height(audioTrackHeight)
+                          .testTag(if (trackIdx == 0) "audio_track_lane" else "audio_track_lane_$trackIdx")
                       ) {
-                        for (clip in timeline.audioClips) {
-                          val isSelected = (selectedElement as? SelectedTrackElement.Audio)?.clipId == clip.id
-                          val isMulti = clip.id in selectedClipIds
-
-                          TimelineClipView(
-                            clipId = clip.id,
-                            title = clip.title.ifBlank { "Audio" },
-                            timelineStartMs = clip.timelineStartMs,
-                            durationMs = clip.durationMs,
-                            trackColor = AudioTrackColor,
-                            heightDp = audioTrackHeight,
-                            msPerPixel = msPerPixel,
-                            isSelected = isSelected,
-                            isMultiSelected = isMulti,
-                            isLocked = false,
-                            waveformData = clip.waveformData,
-                            waveformStyle = waveformStyle,
-                            keyframes = clip.keyframes,
-                            selectedKeyframeIds = selectedKeyframeIds,
-                            baseVolume = clip.volume,
-                            fadeInMs = clip.fadeInMs,
-                            fadeOutMs = clip.fadeOutMs,
-                            showVolumeEnvelope = true,
-                            onSelectKeyframe = onSelectKeyframe,
-                            onMoveKeyframe = onMoveKeyframe,
-                            onAddVolumeKeyframe = { relTime, vol ->
-                              onAddAudioKeyframe?.invoke(clip.id, relTime, vol)
-                            },
-                            onUpdateVolumeKeyframe = { kfId, relTime, vol ->
-                              onUpdateAudioKeyframe?.invoke(clip.id, kfId, relTime, vol)
-                            },
-                            onDeleteVolumeKeyframe = { kfId ->
-                              onDeleteAudioKeyframe?.invoke(clip.id, kfId)
-                            },
-                            onSelect = {
-                              if (isMultiSelectMode) onToggleClipSelection(clip.id)
-                              else onSelectElement(SelectedTrackElement.Audio(clip.id))
-                            },
-                            onLongClick = { onToggleClipSelection(clip.id) },
-                            onMoveClip = { delta -> onMoveClip(clip.id, delta) },
-                            onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
-                            onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
-                            onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
-                            onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
-                            onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
-                            onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
-                            onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
-                            onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
-                          )
-                        }
-
-                        val maxAudioEndMs = timeline.audioClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-                        val addAudioOffset = (maxAudioEndMs / msPerPixel).dp + 8.dp
-
                         Box(
                           modifier = Modifier
-                            .offset(x = addAudioOffset)
-                            .align(Alignment.CenterStart)
+                            .fillMaxHeight()
+                            .offset(x = leftPaddingDp)
                         ) {
-                          Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E222D),
-                            border = BorderStroke(1.dp, Color(0xFF2D3344)),
-                            modifier = Modifier
-                              .width(120.dp)
-                              .height(34.dp)
-                              .clickable { onAddAudio?.invoke() }
-                              .testTag("add_audio_pill_btn")
-                          ) {
-                            Row(
-                              modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                              verticalAlignment = Alignment.CenterVertically
+                          for (clip in trackClips) {
+                            val isSelected = (selectedElement as? SelectedTrackElement.Audio)?.clipId == clip.id
+                            val isMulti = clip.id in selectedClipIds
+
+                            TimelineClipView(
+                              clipId = clip.id,
+                              title = clip.title.ifBlank { "Audio" },
+                              timelineStartMs = clip.timelineStartMs,
+                              durationMs = clip.durationMs,
+                              trackColor = AudioTrackColor,
+                              heightDp = audioTrackHeight,
+                              msPerPixel = msPerPixel,
+                              isSelected = isSelected,
+                              isMultiSelected = isMulti,
+                              isLocked = false,
+                              waveformData = clip.waveformData,
+                              waveformStyle = waveformStyle,
+                              keyframes = clip.keyframes,
+                              selectedKeyframeIds = selectedKeyframeIds,
+                              baseVolume = clip.volume,
+                              fadeInMs = clip.fadeInMs,
+                              fadeOutMs = clip.fadeOutMs,
+                              showVolumeEnvelope = true,
+                              onSelectKeyframe = onSelectKeyframe,
+                              onMoveKeyframe = onMoveKeyframe,
+                              onAddVolumeKeyframe = { relTime, vol ->
+                                onAddAudioKeyframe?.invoke(clip.id, relTime, vol)
+                              },
+                              onUpdateVolumeKeyframe = { kfId, relTime, vol ->
+                                onUpdateAudioKeyframe?.invoke(clip.id, kfId, relTime, vol)
+                              },
+                              onDeleteVolumeKeyframe = { kfId ->
+                                onDeleteAudioKeyframe?.invoke(clip.id, kfId)
+                              },
+                              onSelect = {
+                                if (isMultiSelectMode) onToggleClipSelection(clip.id)
+                                else onSelectElement(SelectedTrackElement.Audio(clip.id))
+                              },
+                              onLongClick = { onToggleClipSelection(clip.id) },
+                              onMoveClip = { delta -> onMoveClip(clip.id, delta) },
+                              onMoveClipStart = { onMoveClipStart?.invoke(clip.id) },
+                              onMoveClipEnd = { onMoveClipEnd?.invoke(clip.id) },
+                              onTrimLeft = { delta -> onTrimClipLeft(clip.id, delta) },
+                              onTrimLeftStart = { onTrimClipLeftStart?.invoke(clip.id) },
+                              onTrimLeftEnd = { onTrimClipLeftEnd?.invoke(clip.id) },
+                              onTrimRight = { delta -> onTrimClipRight(clip.id, delta) },
+                              onTrimRightStart = { onTrimClipRightStart?.invoke(clip.id) },
+                              onTrimRightEnd = { onTrimClipRightEnd?.invoke(clip.id) }
+                            )
+                          }
+
+                          if (trackIdx == audioTracks.lastIndex) {
+                            Box(
+                              modifier = Modifier
+                                .offset(x = addAudioOffset)
+                                .align(Alignment.CenterStart)
                             ) {
-                              Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
-                              Spacer(modifier = Modifier.width(6.dp))
-                              Text("Add audio", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                              Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF1E222D),
+                                border = BorderStroke(1.dp, Color(0xFF2D3344)),
+                                modifier = Modifier
+                                  .width(120.dp)
+                                  .height(34.dp)
+                                  .clickable { onAddAudio?.invoke() }
+                                  .testTag("add_audio_pill_btn")
+                              ) {
+                                Row(
+                                  modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                                  verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                  Icon(Icons.Default.Add, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+                                  Spacer(modifier = Modifier.width(6.dp))
+                                  Text("Add audio", style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Medium, fontSize = 11.5.sp))
+                                }
+                              }
                             }
                           }
                         }
@@ -873,6 +891,10 @@ fun MultiTrackTimeline(
                             isSelected = isSelected,
                             isMultiSelected = isMulti,
                             isLocked = false,
+                            keyframes = clip.keyframes,
+                            selectedKeyframeIds = selectedKeyframeIds,
+                            onSelectKeyframe = onSelectKeyframe,
+                            onMoveKeyframe = onMoveKeyframe,
                             onSelect = {
                               if (isMultiSelectMode) onToggleClipSelection(clip.id)
                               else onSelectElement(SelectedTrackElement.Sticker(clip.id))
@@ -1532,8 +1554,9 @@ private fun TimelineLeftUtilityColumn(
       }
     }
 
-    // Row 5: Sticker Track Icon (32.dp)
+    // Row 5: Sticker / Elements Track Icon (32.dp)
     if (timeline.stickerClips.isNotEmpty()) {
+      val hasElements = timeline.stickerClips.any { it.elementId != null }
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -1544,8 +1567,8 @@ private fun TimelineLeftUtilityColumn(
         contentAlignment = Alignment.Center
       ) {
         Icon(
-          imageVector = Icons.Default.EmojiEmotions,
-          contentDescription = "Sticker Track",
+          imageVector = if (hasElements) Icons.Default.Category else Icons.Default.EmojiEmotions,
+          contentDescription = if (hasElements) "Elements & Stickers Track" else "Sticker Track",
           tint = StickerTrackColor,
           modifier = Modifier.size(16.dp)
         )

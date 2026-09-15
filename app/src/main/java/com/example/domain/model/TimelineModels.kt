@@ -454,7 +454,13 @@ data class StickerClip(
   val badgeType: BadgeType? = null,
   val category: String = "Emoji & Emotions",
   val isLocked: Boolean = false,
-  val isHidden: Boolean = false
+  val isHidden: Boolean = false,
+  val elementId: String? = null,
+  val elementCategory: String? = null,
+  val customColor: Long? = null,
+  val secondaryColor: Long? = null,
+  val elementData: String? = null,
+  val keyframes: List<ClipKeyframe> = emptyList()
 )
 
 enum class EffectType(val category: String, val displayName: String) {

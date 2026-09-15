@@ -738,8 +738,8 @@ fun EditorScreen(
             .fillMaxSize()
             .navigationBarsPadding() // Ensures panel content stays safe from system gesture pill, while Surface background extends edge-to-edge
         ) {
-          // Universal Tool Panel Header Bar with ❌ Cross Button (hidden for Audio Tools, Text Tools, and Effects which have their own sleek headers)
-          if (activeTab != EditorToolbarTab.AUDIO && activeTab != EditorToolbarTab.TEXT && activeTab != EditorToolbarTab.EFFECTS) {
+          // Universal Tool Panel Header Bar with ❌ Cross Button (hidden for Audio Tools, Text Tools, Effects, and Elements which have their own sleek headers)
+          if (activeTab != EditorToolbarTab.AUDIO && activeTab != EditorToolbarTab.TEXT && activeTab != EditorToolbarTab.EFFECTS && activeTab != EditorToolbarTab.ELEMENTS) {
             Row(
               modifier = Modifier
                 .fillMaxWidth()
@@ -806,6 +806,7 @@ fun EditorScreen(
                     EditorToolbarTab.ANIMATIONS -> "Animations"
                     EditorToolbarTab.BACKGROUND -> "Background"
                     EditorToolbarTab.AI_AVATAR -> "AI Avatar"
+                    EditorToolbarTab.ELEMENTS -> "Elements"
                     null -> "Tools"
                   },
                   style = MaterialTheme.typography.titleMedium.copy(
@@ -897,6 +898,10 @@ fun EditorScreen(
                   onClose = { viewModel.setActiveToolbarTab(null) }
                 )
               }
+              EditorToolbarTab.ELEMENTS -> com.example.ui.components.elements.ElementsToolPanel(
+                viewModel = viewModel,
+                onClose = { viewModel.setActiveToolbarTab(null) }
+              )
               EditorToolbarTab.AUDIO -> com.example.ui.components.audio.AudioToolsContainerPanel(
                 viewModel = viewModel,
                 onClose = { viewModel.setActiveToolbarTab(null) }
@@ -2341,6 +2346,15 @@ private fun EditorBottomToolbar(
       onClick = { onTabSelected(EditorToolbarTab.TEXT) }
     ),
     FuturisticNavItemData(
+      id = "elements",
+      label = "Elements",
+      icon = Icons.Default.Category,
+      theme = NavItemThemes.Elements,
+      isSelected = activeTab == EditorToolbarTab.ELEMENTS,
+      testTag = "elements_btn",
+      onClick = { onTabSelected(EditorToolbarTab.ELEMENTS) }
+    ),
+    FuturisticNavItemData(
       id = "effects",
       label = "Effects",
       icon = Icons.Default.StarBorder,
@@ -2411,6 +2425,7 @@ private fun MoreToolsDialog(
     text = {
       val tools = listOf(
         Triple("Speed", Icons.Default.Speed, EditorToolbarTab.SPEED),
+        Triple("Elements", Icons.Default.Category, EditorToolbarTab.ELEMENTS),
         Triple("Trim", Icons.Default.Crop, EditorToolbarTab.TRIM),
         Triple("Adjust", Icons.Default.Tune, EditorToolbarTab.ADJUST),
         Triple("Volume", Icons.Default.VolumeUp, EditorToolbarTab.VOLUME),

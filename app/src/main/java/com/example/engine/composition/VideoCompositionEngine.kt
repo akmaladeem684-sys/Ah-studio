@@ -227,13 +227,14 @@ class VideoCompositionEngine(private val context: Context) {
       timeline.stickerClips.filter {
         !it.isHidden && posMs >= it.timelineStartMs && posMs < it.timelineStartMs + it.durationMs
       }.map { clip ->
+        val state = StickerLayerRenderer.evaluateAnimation(clip, posMs)
         ComposedSticker(
           clip = clip,
-          posX = clip.posX,
-          posY = clip.posY,
-          scale = clip.scale,
-          rotation = clip.rotation,
-          opacity = clip.opacity
+          posX = state.posX,
+          posY = state.posY,
+          scale = state.scale,
+          rotation = state.rotation,
+          opacity = state.opacity
         )
       }
     } else emptyList()

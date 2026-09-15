@@ -453,8 +453,29 @@ fun InteractiveTransformOverlay(
 
       val currentSticker by rememberUpdatedState(sticker)
       val isBadge = sticker.badgeType != null
-      val baseWidthDp = if (isBadge) 150.dp else 80.dp
-      val baseHeightDp = if (isBadge) 64.dp else 80.dp
+      val isElement = sticker.elementId != null
+      val baseWidthDp = when {
+        isBadge -> 150.dp
+        isElement -> when (sticker.elementCategory) {
+          "tables" -> 140.dp
+          "charts" -> 130.dp
+          "frames" -> 120.dp
+          "graphics" -> 100.dp
+          else -> 90.dp
+        }
+        else -> 80.dp
+      }
+      val baseHeightDp = when {
+        isBadge -> 64.dp
+        isElement -> when (sticker.elementCategory) {
+          "tables" -> 90.dp
+          "charts" -> 95.dp
+          "frames" -> 120.dp
+          "graphics" -> 100.dp
+          else -> 90.dp
+        }
+        else -> 80.dp
+      }
       val baseWidthPx = with(density) { baseWidthDp.toPx() }
       val baseHeightPx = with(density) { baseHeightDp.toPx() }
 
@@ -492,15 +513,43 @@ fun InteractiveTransformOverlay(
               onMoveDelta = { deltaNormX, deltaNormY ->
                 if (currentSticker.isLocked) return@detectElementTouchGestures
                 val clip = currentSticker
-                val newX = (clip.posX + deltaNormX).coerceIn(-1.8f, 1.8f)
-                val newY = (clip.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
-                currentOnUpdateSticker(clip.copy(posX = newX, posY = newY))
+                val rel = currentPosMs - clip.timelineStartMs
+                val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
+                if (activeKf != null) {
+                  val updatedKeyframes = clip.keyframes.map { kfItem ->
+                    if (kfItem.id == activeKf.id) {
+                      kfItem.copy(
+                        posX = (kfItem.posX + deltaNormX).coerceIn(-1.8f, 1.8f),
+                        posY = (kfItem.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
+                      )
+                    } else kfItem
+                  }
+                  currentOnUpdateSticker(clip.copy(keyframes = updatedKeyframes))
+                } else {
+                  val newX = (clip.posX + deltaNormX).coerceIn(-1.8f, 1.8f)
+                  val newY = (clip.posY + deltaNormY).coerceIn(-1.8f, 1.8f)
+                  currentOnUpdateSticker(clip.copy(posX = newX, posY = newY))
+                }
               },
               onTwoFingerTransform = if (sticker.isLocked) null else { scaleFactor, rotDelta ->
                 val clip = currentSticker
-                val newScale = (clip.scale * scaleFactor).coerceIn(0.15f, 8.0f)
-                val newRot = (clip.rotation + rotDelta) % 360f
-                currentOnUpdateSticker(clip.copy(scale = newScale, rotation = newRot))
+                val rel = currentPosMs - clip.timelineStartMs
+                val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
+                if (activeKf != null) {
+                  val updatedKeyframes = clip.keyframes.map { kfItem ->
+                    if (kfItem.id == activeKf.id) {
+                      val newScaleX = (kfItem.scaleX * scaleFactor).coerceIn(0.15f, 8.0f)
+                      val newScaleY = (kfItem.scaleY * scaleFactor).coerceIn(0.15f, 8.0f)
+                      val newRot = (kfItem.rotation + rotDelta) % 360f
+                      kfItem.copy(scaleX = newScaleX, scaleY = newScaleY, rotation = newRot)
+                    } else kfItem
+                  }
+                  currentOnUpdateSticker(clip.copy(keyframes = updatedKeyframes))
+                } else {
+                  val newScale = (clip.scale * scaleFactor).coerceIn(0.15f, 8.0f)
+                  val newRot = (clip.rotation + rotDelta) % 360f
+                  currentOnUpdateSticker(clip.copy(scale = newScale, rotation = newRot))
+                }
               },
               onTap = {
                 currentOnSelectElement(SelectedTrackElement.Sticker(currentSticker.id))
@@ -538,9 +587,23 @@ fun InteractiveTransformOverlay(
           },
           onTransformHandleDrag = { deltaScale, deltaRotation ->
             val clip = currentSticker
-            val newScale = (clip.scale * deltaScale).coerceIn(0.15f, 8.0f)
-            val newRot = (clip.rotation + deltaRotation) % 360f
-            currentOnUpdateSticker(clip.copy(scale = newScale, rotation = newRot))
+            val rel = currentPosMs - clip.timelineStartMs
+            val activeKf = clip.keyframes.find { abs(it.timeMs - rel) <= 150L }
+            if (activeKf != null) {
+              val updatedKeyframes = clip.keyframes.map { kfItem ->
+                if (kfItem.id == activeKf.id) {
+                  val newScaleX = (kfItem.scaleX * deltaScale).coerceIn(0.15f, 8.0f)
+                  val newScaleY = (kfItem.scaleY * deltaScale).coerceIn(0.15f, 8.0f)
+                  val newRot = (kfItem.rotation + deltaRotation) % 360f
+                  kfItem.copy(scaleX = newScaleX, scaleY = newScaleY, rotation = newRot)
+                } else kfItem
+              }
+              currentOnUpdateSticker(clip.copy(keyframes = updatedKeyframes))
+            } else {
+              val newScale = (clip.scale * deltaScale).coerceIn(0.15f, 8.0f)
+              val newRot = (clip.rotation + deltaRotation) % 360f
+              currentOnUpdateSticker(clip.copy(scale = newScale, rotation = newRot))
+            }
           }
         )
       }

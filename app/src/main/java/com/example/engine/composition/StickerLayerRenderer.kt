@@ -23,6 +23,16 @@ object StickerLayerRenderer {
     val relTimeMs = (currentPosMs - clip.timelineStartMs).coerceAtLeast(0L)
     val timeSec = relTimeMs / 1000f
 
+    val baseTransform = if (clip.keyframes.isNotEmpty()) {
+      com.example.engine.KeyframeInterpolator.interpolate(clip, relTimeMs)
+    } else null
+
+    val basePosX = baseTransform?.posX ?: clip.posX
+    val basePosY = baseTransform?.posY ?: clip.posY
+    val baseScale = baseTransform?.scale ?: clip.scale
+    val baseRotation = baseTransform?.rotation ?: clip.rotation
+    val baseOpacity = baseTransform?.opacity ?: clip.opacity
+
     var deltaX = 0f
     var deltaY = 0f
     var scaleMul = 1.0f
@@ -92,11 +102,11 @@ object StickerLayerRenderer {
     }
 
     return AnimatedStickerState(
-      posX = clip.posX + deltaX,
-      posY = clip.posY + deltaY,
-      scale = (clip.scale * scaleMul).coerceAtLeast(0.05f),
-      rotation = (clip.rotation + deltaRot) % 360f,
-      opacity = (clip.opacity * opacityMul).coerceIn(0f, 1f)
+      posX = basePosX + deltaX,
+      posY = basePosY + deltaY,
+      scale = (baseScale * scaleMul).coerceAtLeast(0.05f),
+      rotation = (baseRotation + deltaRot) % 360f,
+      opacity = (baseOpacity * opacityMul).coerceIn(0f, 1f)
     )
   }
 
@@ -117,7 +127,17 @@ object StickerLayerRenderer {
     canvas.translate(centerX, centerY)
     canvas.rotate(state.rotation)
 
-    if (clip.badgeType != null) {
+    if (clip.elementId != null) {
+      com.example.ui.components.elements.ElementRenderer.draw(
+        canvas = canvas,
+        clip = clip,
+        scale = state.scale,
+        opacity = state.opacity,
+        width = width,
+        height = height,
+        currentPosMs = currentPosMs
+      )
+    } else if (clip.badgeType != null) {
       drawBadge(canvas, clip.badgeType, state.scale, state.opacity, width, height)
     } else {
       drawEmojiOrAsset(canvas, clip.emojiOrAsset, state.scale, state.opacity, width)
