@@ -98,11 +98,24 @@ class PlaybackManager(
     currentLoadedUri = uriString
     currentLoadedStartMs = startPosMs
 
-    val mediaItem = MediaItem.fromUri(uri)
+    val normalizedUri = if (uri.scheme == "asset") {
+      var path = uri.path ?: ""
+      if (path.startsWith("/")) path = path.substring(1)
+      if (path.isEmpty()) path = uri.authority ?: ""
+      Uri.parse("asset:///$path")
+    } else if (uri.scheme == null || uri.scheme == "file") {
+      val path = uri.path ?: uriString
+      val f = java.io.File(path)
+      if (f.exists()) Uri.fromFile(f) else uri
+    } else {
+      uri
+    }
+
+    val mediaItem = MediaItem.fromUri(normalizedUri)
     player.setMediaItem(mediaItem, startPosMs)
     player.prepare()
     player.playWhenReady = autoPlay
-    Log.d(TAG, "Loaded media URI: $uriString at ${startPosMs}ms (autoPlay=$autoPlay)")
+    Log.d(TAG, "Loaded media URI: $uriString (normalized: $normalizedUri) at ${startPosMs}ms (autoPlay=$autoPlay)")
   }
 
   fun play() {

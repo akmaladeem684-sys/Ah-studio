@@ -1545,23 +1545,6 @@ fun VideoPreviewSurface(
               MediaRelinkManager.isRealPlayableMedia(context, activeClip.uri)
             }
             if (activeClip.isVideo && isRealPlayable && player != null) {
-              var fallbackBitmap by remember(activeClip.id, activeClip.uri) {
-                mutableStateOf<Bitmap?>(null)
-              }
-              LaunchedEffect(activeClip.id, activeClip.uri, currentPosMs) {
-                val sourceMs = activeClip.timelineToSourceMs(currentPosMs)
-                VideoThumbnailManager.requestThumbnail(
-                  context = context,
-                  uri = activeClip.uri,
-                  sourceTimeMs = sourceMs,
-                  targetWidth = 360,
-                  targetHeight = 360,
-                  isVideo = true
-                ) { bmp ->
-                  fallbackBitmap = bmp
-                }
-              }
-
               val realVideoFilterModifier = if (!isIdentityFilter && combinedColorFilter != null) {
                 Modifier
                   .fillMaxSize()
@@ -1579,107 +1562,42 @@ fun VideoPreviewSurface(
                 Modifier.fillMaxSize()
               }
 
-              Box(modifier = realVideoFilterModifier) {
-                val currentBmp = fallbackBitmap
-                if (currentBmp != null && !currentBmp.isRecycled) {
-                  Image(
-                    bitmap = currentBmp.asImageBitmap(),
-                    contentDescription = activeClip.name,
-                    contentScale = ContentScale.Fit,
-                    colorFilter = combinedColorFilter,
-                    modifier = Modifier.fillMaxSize()
-                  )
-                }
-                AndroidView(
-                  factory = { ctx ->
-                    val pv = LayoutInflater.from(ctx).inflate(R.layout.editor_player_view, null, false) as PlayerView
-                    pv.player = player
-                    pv.useController = false
-                    pv.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    pv.setKeepContentOnPlayerReset(true)
-                    pv.layoutParams = FrameLayout.LayoutParams(
+              AndroidView(
+                factory = { ctx ->
+                  PlayerView(ctx).apply {
+                    this.player = player
+                    useController = false
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    setKeepContentOnPlayerReset(true)
+                    layoutParams = FrameLayout.LayoutParams(
                       ViewGroup.LayoutParams.MATCH_PARENT,
                       ViewGroup.LayoutParams.MATCH_PARENT
                     )
-
-                    // SurfaceHolder callback for SurfaceView mode
-                    val surfaceView = (pv.videoSurfaceView as? android.view.SurfaceView)
-                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.SurfaceView>().firstOrNull()
-                    surfaceView?.holder?.addCallback(object : android.view.SurfaceHolder.Callback {
-                      override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                        if (holder.surface.isValid) {
-                          player?.setVideoSurface(holder.surface)
-                        }
-                      }
-                      override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
-                        if (holder.surface.isValid) {
-                          player?.setVideoSurface(holder.surface)
-                        }
-                      }
-                      override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
-                        // Cleanly detach surface without releasing player or resetting timeline
-                        player?.clearVideoSurface(holder.surface)
-                      }
-                    })
-
-                    // SurfaceTexture listener for TextureView mode
-                    val textureView = (pv.videoSurfaceView as? android.view.TextureView)
-                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.TextureView>().firstOrNull()
-                    textureView?.surfaceTextureListener = object : android.view.TextureView.SurfaceTextureListener {
-                      override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
-                        val s = android.view.Surface(surface)
-                        player?.setVideoSurface(s)
-                      }
-                      override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {}
-                      override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean {
-                        player?.clearVideoSurface()
-                        return true
-                      }
-                      override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
+                  }
+                },
+                update = { pv ->
+                  if (pv.player != player) {
+                    pv.player = player
+                  }
+                  val paint = if (isIdentityFilter) {
+                    null
+                  } else {
+                    android.graphics.Paint().apply {
+                      colorFilter = android.graphics.ColorMatrixColorFilter(androidCombinedMatrix)
                     }
-
-                    pv
-                  },
-                  update = { pv ->
-                    if (pv.player != player) {
-                      pv.player = player
-                    }
-                    val surfaceView = (pv.videoSurfaceView as? android.view.SurfaceView)
-                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.SurfaceView>().firstOrNull()
-                    if (surfaceView != null && surfaceView.holder.surface.isValid) {
-                      player?.setVideoSurface(surfaceView.holder.surface)
-                    }
-                    val paint = if (isIdentityFilter) {
-                      null
-                    } else {
-                      android.graphics.Paint().apply {
-                        colorFilter = android.graphics.ColorMatrixColorFilter(androidCombinedMatrix)
-                      }
-                    }
-                    val textureView = (pv.videoSurfaceView as? android.view.TextureView)
-                      ?: (0 until pv.childCount).map { pv.getChildAt(it) }.filterIsInstance<android.view.TextureView>().firstOrNull()
-
-                    if (textureView != null) {
-                      textureView.setLayerType(
-                        if (paint != null) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_NONE,
-                        paint
-                      )
-                      textureView.invalidate()
-                    } else {
-                      pv.setLayerType(
-                        if (paint != null) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_NONE,
-                        paint
-                      )
-                      pv.invalidate()
-                    }
-                  },
-                  onReset = { /* Preserve player across recomposition */ },
-                  onRelease = { pv ->
-                    pv.player = null
-                  },
-                  modifier = Modifier.fillMaxSize()
-                )
-              }
+                  }
+                  pv.setLayerType(
+                    if (paint != null) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_NONE,
+                    paint
+                  )
+                  pv.invalidate()
+                },
+                onReset = { /* Preserve player across recomposition */ },
+                onRelease = { pv ->
+                  pv.player = null
+                },
+                modifier = realVideoFilterModifier
+              )
             } else if (!activeClip.isVideo && activeClip.uri.isNotBlank() && !activeClip.uri.startsWith("stock://") && !activeClip.uri.startsWith("sample://")) {
               AsyncImage(
                 model = activeClip.uri,
