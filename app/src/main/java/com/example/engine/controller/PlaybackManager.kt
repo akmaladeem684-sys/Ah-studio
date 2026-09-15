@@ -70,11 +70,21 @@ class PlaybackManager(
 
   private val playerListener = object : Player.Listener {
     override fun onPlaybackStateChanged(state: Int) {
+      Log.d(TAG, "ExoPlayer playback state changed: $state")
       this@PlaybackManager.onPlaybackStateChanged(state)
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+      Log.d(TAG, "ExoPlayer isPlaying changed: $isPlaying")
       this@PlaybackManager.onIsPlayingChanged(isPlaying)
+    }
+
+    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+      Log.d(TAG, "ExoPlayer videoSize: ${videoSize.width}x${videoSize.height} unappliedRotation=${videoSize.unappliedRotationDegrees}")
+    }
+
+    override fun onRenderedFirstFrame() {
+      Log.d(TAG, "ExoPlayer rendered FIRST video frame to surface!")
     }
 
     override fun onPlayerError(error: PlaybackException) {

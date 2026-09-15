@@ -1436,28 +1436,6 @@ fun VideoPreviewSurface(
     if (isIdentityFilter) null else ColorFilter.colorMatrix(ColorMatrix(androidCombinedMatrix.array))
   }
 
-  // Synchronize color filter directly with ExoPlayer's video effects pipeline
-  LaunchedEffect(player, androidCombinedMatrix) {
-    if (player != null) {
-      try {
-        if (com.example.engine.composition.ColorFilterGenerator.isIdentityMatrix(androidCombinedMatrix)) {
-          player.setVideoEffects(emptyList())
-        } else {
-          val glMatrix = com.example.engine.composition.ColorFilterGenerator.colorMatrixToGlMatrix(androidCombinedMatrix)
-          val rgbMatrix = object : androidx.media3.effect.RgbMatrix {
-            override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = glMatrix
-          }
-          player.setVideoEffects(listOf(rgbMatrix))
-        }
-        if (player.playbackState != androidx.media3.common.Player.STATE_IDLE) {
-          player.seekTo(player.currentPosition)
-        }
-      } catch (e: Exception) {
-        android.util.Log.w("VideoPreviewSurface", "Failed to apply video effects to ExoPlayer: ${e.message}")
-      }
-    }
-  }
-
   // Pinch-to-zoom & pan inspection state
   var previewZoomScale by remember { mutableFloatStateOf(1.0f) }
   var previewPanOffset by remember { mutableStateOf(Offset.Zero) }

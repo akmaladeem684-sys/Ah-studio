@@ -131,35 +131,8 @@ class VideoPlaybackEngine(
    * Connects the color filter matrix directly to Media3 ExoPlayer's video effects pipeline.
    */
   fun applyVideoFilter(colorMatrix: ColorMatrix?) {
-    try {
-      if (colorMatrix == null || ColorFilterGenerator.isIdentityMatrix(colorMatrix)) {
-        if (lastAppliedFilterMatrix != null) {
-          lastAppliedFilterMatrix = null
-          player.setVideoEffects(emptyList())
-          if (!player.isPlaying && player.playbackState != Player.STATE_IDLE) {
-            player.seekTo(player.currentPosition)
-          }
-        }
-        return
-      }
-
-      val glMatrix = ColorFilterGenerator.colorMatrixToGlMatrix(colorMatrix)
-      if (lastAppliedFilterMatrix != null && lastAppliedFilterMatrix!!.contentEquals(glMatrix)) {
-        return
-      }
-      lastAppliedFilterMatrix = glMatrix
-
-      val rgbMatrix = object : androidx.media3.effect.RgbMatrix {
-        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = glMatrix
-      }
-
-      player.setVideoEffects(listOf(rgbMatrix))
-      if (!player.isPlaying && player.playbackState != Player.STATE_IDLE) {
-        player.seekTo(player.currentPosition)
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to apply video effects to ExoPlayer: ${e.message}", e)
-    }
+    // Keep raw video frame decoding pipeline directly routed to Preview Surface.
+    // Realtime GPU & Shader color filters are handled dynamically by the Compose canvas layer.
   }
 
   fun updateTimeline(timeline: Timeline) {
