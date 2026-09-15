@@ -63,7 +63,7 @@ fun MediaImportPanel(
   var selectedTarget by remember { mutableStateOf(defaultTarget) }
   var selectedFilterCategory by remember { mutableStateOf("All") }
   var imageDurationSec by remember { mutableFloatStateOf(3.0f) }
-  var insertAtPlayhead by remember { mutableStateOf(false) }
+  var insertAtPlayhead by remember { mutableStateOf(true) }
 
   // System Media Launchers (Zero-permission Android Photo & Video Picker)
   val pickMultipleMediaLauncher = rememberLauncherForActivityResult(

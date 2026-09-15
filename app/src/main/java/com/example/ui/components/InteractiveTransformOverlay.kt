@@ -38,6 +38,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.viewinterop.AndroidView
+import android.widget.FrameLayout
+import android.view.ViewGroup
+import com.example.engine.media.MediaRelinkManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -202,6 +206,7 @@ fun InteractiveTransformOverlay(
   onDeleteClip: (String) -> Unit,
   onDuplicateClip: (String) -> Unit,
   onEditText: ((TextClip) -> Unit)? = null,
+  getOverlayPlayer: ((String) -> androidx.media3.exoplayer.ExoPlayer?)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -342,13 +347,34 @@ fun InteractiveTransformOverlay(
           }
         }
 
-        AsyncImage(
-          model = overlay.uri,
-          contentDescription = overlay.name,
-          contentScale = ContentScale.Crop,
-          colorFilter = overlayColorFilter,
-          modifier = Modifier.fillMaxSize()
-        )
+        val isRealVideoOverlay = overlay.isVideo && MediaRelinkManager.isRealPlayableMedia(context, overlay.uri)
+        val overlayPlayer = if (isRealVideoOverlay) getOverlayPlayer?.invoke(overlay.id) else null
+
+        if (isRealVideoOverlay && overlayPlayer != null) {
+          AndroidView(
+            factory = { ctx ->
+              android.view.TextureView(ctx).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                  ViewGroup.LayoutParams.MATCH_PARENT,
+                  ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                overlayPlayer.setVideoTextureView(this)
+              }
+            },
+            update = { tv ->
+              overlayPlayer.setVideoTextureView(tv)
+            },
+            modifier = Modifier.fillMaxSize()
+          )
+        } else {
+          AsyncImage(
+            model = overlay.uri,
+            contentDescription = overlay.name,
+            contentScale = ContentScale.Crop,
+            colorFilter = overlayColorFilter,
+            modifier = Modifier.fillMaxSize()
+          )
+        }
 
         Column(
           modifier = Modifier

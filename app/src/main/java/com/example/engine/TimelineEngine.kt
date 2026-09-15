@@ -881,11 +881,7 @@ class TimelineEngine {
     val playhead = _currentPositionMs.value
     val currentClips = _timeline.value.videoClips.toMutableList()
     val currentMaxEnd = currentClips.maxOfOrNull { it.timelineStartMs + it.durationMs } ?: 0L
-    val startMs = if (atPlayhead && (currentClips.isNotEmpty() || playhead > 0L)) {
-      playhead
-    } else {
-      currentMaxEnd
-    }
+    val startMs = if (atPlayhead) playhead else currentMaxEnd
 
     // If inserted at CTI and there is an existing video clip spanning CTI:
     val clipUnderPlayhead = currentClips.find { startMs > it.timelineStartMs && startMs < it.timelineStartMs + it.durationMs }

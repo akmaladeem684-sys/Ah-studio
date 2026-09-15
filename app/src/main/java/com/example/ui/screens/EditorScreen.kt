@@ -212,7 +212,7 @@ fun EditorScreen(
             name = fileName,
             isVideo = metadata.isVideo,
             durationMs = metadata.durationMs,
-            atPlayhead = false,
+            atPlayhead = true,
             width = metadata.width,
             height = metadata.height,
             rotationDegrees = metadata.rotationDegrees,
@@ -372,6 +372,7 @@ fun EditorScreen(
             viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
           },
           player = viewModel.playbackEngine.player,
+          onGetOverlayPlayer = { clipId -> viewModel.playbackEngine.getOverlayPlayer(clipId) },
           onToggleFullscreen = { isFullscreenPreview = true },
           onAddMedia = {
             timelineMediaPickerLauncher.launch(
@@ -1084,6 +1085,7 @@ fun EditorScreen(
             viewModel.setActiveToolbarTab(EditorToolbarTab.TEXT)
           },
           player = viewModel.playbackEngine.player,
+          onGetOverlayPlayer = { clipId -> viewModel.playbackEngine.getOverlayPlayer(clipId) },
           onToggleFullscreen = { isFullscreenPreview = false },
           onAddMedia = {
             timelineMediaPickerLauncher.launch(
@@ -1351,6 +1353,7 @@ fun VideoPreviewSurface(
   onDuplicateClip: (String) -> Unit = {},
   onEditText: ((TextClip) -> Unit)? = null,
   player: ExoPlayer? = null,
+  onGetOverlayPlayer: ((String) -> ExoPlayer?)? = null,
   onToggleFullscreen: (() -> Unit)? = null,
   onAddMedia: (() -> Unit)? = null,
   modifier: Modifier = Modifier
@@ -1664,6 +1667,7 @@ fun VideoPreviewSurface(
           onDeleteClip = onDeleteClip,
           onDuplicateClip = onDuplicateClip,
           onEditText = onEditText,
+          getOverlayPlayer = onGetOverlayPlayer,
           modifier = Modifier.fillMaxSize()
         )
 

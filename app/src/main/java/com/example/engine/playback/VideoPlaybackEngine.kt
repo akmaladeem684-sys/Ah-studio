@@ -72,6 +72,11 @@ class VideoPlaybackEngine(
   private var loadedUri: String? = null
   private var isSyncingFromPlayer = false
 
+  // CTI Playback Sync Tracking Variables
+  private var playStartTimelineMs = 0L
+  private var playStartSourceMs = 0L
+  private var playStartRealtimeMs = 0L
+
   // Scrubbing & Request Coalescing
   private var isScrubbingMode = false
   private var wasPlayingBeforeScrub = false
@@ -135,6 +140,119 @@ class VideoPlaybackEngine(
     // Realtime GPU & Shader color filters are handled dynamically by the Compose canvas layer.
   }
 
+  // Multi-Overlay ExoPlayer Management (clipId -> ExoPlayer)
+  private val overlayPlayers = java.util.concurrent.ConcurrentHashMap<String, ExoPlayer>()
+  private val overlayLoadedUris = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+  fun getOverlayPlayer(clipId: String): ExoPlayer? {
+    return overlayPlayers[clipId]
+  }
+
+  fun syncOverlayPlayers(posMs: Long) {
+    if (isTrimPreviewMode) return
+
+    val activeOverlays = currentTimeline.overlayClips.filter { clip ->
+      clip.isVideo && !clip.isHidden && MediaRelinkManager.isRealPlayableMedia(context, clip.uri)
+    }
+
+    val activeIds = activeOverlays.map { it.id }.toSet()
+
+    // Clean up players for removed/inactive overlay clips
+    val existingIds = overlayPlayers.keys.toList()
+    for (id in existingIds) {
+      if (!activeIds.contains(id)) {
+        overlayPlayers.remove(id)?.let { p ->
+          try {
+            p.stop()
+            p.release()
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to release overlay player $id", e)
+          }
+        }
+        overlayLoadedUris.remove(id)
+      }
+    }
+
+    // Process each video overlay clip
+    for (overlay in activeOverlays) {
+      val effectiveUri = proxyEngine?.getProxyUri(overlay) ?: overlay.uri
+      var p = overlayPlayers[overlay.id]
+
+      if (p == null) {
+        try {
+          p = ExoPlayer.Builder(
+            context.applicationContext,
+            DefaultRenderersFactory(context.applicationContext)
+              .setEnableDecoderFallback(true)
+              .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+          ).setLoadControl(
+            DefaultLoadControl.Builder()
+              .setBufferDurationsMs(1000, 5000, 200, 500)
+              .build()
+          ).setSeekParameters(SeekParameters.CLOSEST_SYNC)
+          .build().apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+          }
+          overlayPlayers[overlay.id] = p
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to create overlay ExoPlayer for ${overlay.id}", e)
+          continue
+        }
+      }
+
+      val loadedUri = overlayLoadedUris[overlay.id]
+      if (loadedUri != effectiveUri || p.mediaItemCount == 0 || p.playbackState == Player.STATE_IDLE) {
+        try {
+          val parsedUri = Uri.parse(effectiveUri)
+          val normalizedUri = if (parsedUri.scheme == "asset") {
+            var path = parsedUri.path ?: ""
+            if (path.startsWith("/")) path = path.substring(1)
+            if (path.isEmpty()) path = parsedUri.authority ?: ""
+            Uri.parse("asset:///$path")
+          } else if (parsedUri.scheme == null || parsedUri.scheme == "file") {
+            val path = parsedUri.path ?: effectiveUri
+            val f = java.io.File(path)
+            if (f.exists()) Uri.fromFile(f) else parsedUri
+          } else {
+            parsedUri
+          }
+          p.setMediaItem(MediaItem.fromUri(normalizedUri))
+          p.prepare()
+          overlayLoadedUris[overlay.id] = effectiveUri
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to set media item for overlay ${overlay.id}", e)
+        }
+      }
+
+      p.playbackParameters = PlaybackParameters(overlay.speed.coerceAtLeast(0.01f))
+      p.volume = if (overlay.isMuted) 0f else overlay.volume
+
+      val isTimeActive = posMs >= overlay.timelineStartMs && posMs < (overlay.timelineStartMs + overlay.durationMs)
+      val targetSourceMs = overlay.timelineToSourceMs(posMs)
+
+      if (isTimeActive) {
+        val projectIsPlaying = _isPlaying.value || player.isPlaying
+        if (projectIsPlaying) {
+          val curPos = p.currentPosition
+          if (Math.abs(curPos - targetSourceMs) > 100L || !p.isPlaying) {
+            p.seekTo(targetSourceMs)
+            p.play()
+          }
+        } else {
+          if (p.isPlaying) {
+            p.pause()
+          }
+          p.seekTo(targetSourceMs)
+        }
+      } else {
+        if (p.isPlaying) {
+          p.pause()
+        }
+        p.seekTo(targetSourceMs.coerceIn(0L, overlay.durationMs))
+      }
+    }
+  }
+
   fun updateTimeline(timeline: Timeline) {
     this.currentTimeline = timeline
     val boundedPos = currentPosMs.coerceIn(0L, timeline.totalDurationMs.coerceAtLeast(0L))
@@ -149,6 +267,7 @@ class VideoPlaybackEngine(
     )
     applyVideoFilter(matrix)
     syncWithPosition(boundedPos, forceReload = false)
+    syncOverlayPlayers(boundedPos)
   }
 
   /**
@@ -212,6 +331,10 @@ class VideoPlaybackEngine(
     val active = findClipAt(boundedPos)
     _activeClip.value = active
 
+    playStartTimelineMs = boundedPos
+    playStartSourceMs = active?.timelineToSourceMs(boundedPos) ?: 0L
+    playStartRealtimeMs = android.os.SystemClock.elapsedRealtime()
+
     if (active != null && active.isVideo) {
       val sourcePosMs = active.timelineToSourceMs(boundedPos)
 
@@ -249,6 +372,10 @@ class VideoPlaybackEngine(
 
     val active = findClipAt(boundedPos)
     _activeClip.value = active
+
+    playStartTimelineMs = boundedPos
+    playStartSourceMs = active?.timelineToSourceMs(boundedPos) ?: 0L
+    playStartRealtimeMs = android.os.SystemClock.elapsedRealtime()
 
     if (active != null && active.isVideo) {
       val sourcePosMs = active.timelineToSourceMs(boundedPos)
@@ -302,6 +429,9 @@ class VideoPlaybackEngine(
         ensureClipLoaded(clip)
       }
       val sourcePosMs = clip.timelineToSourceMs(currentPosMs)
+      playStartTimelineMs = currentPosMs
+      playStartSourceMs = sourcePosMs
+      playStartRealtimeMs = android.os.SystemClock.elapsedRealtime()
       player.seekTo(sourcePosMs)
       if (player.playbackState == Player.STATE_IDLE) {
         player.prepare()
@@ -319,15 +449,21 @@ class VideoPlaybackEngine(
     _isPlaying.value = false
     progressSyncJob?.cancel()
     player.pause()
+    for (p in overlayPlayers.values) {
+      try { p.pause() } catch (ignored: Exception) {}
+    }
+    syncOverlayPlayers(currentPosMs)
     val active = _activeClip.value
-    if (active != null && active.isVideo && isPlayableInPlayer(active.uri) && player.playbackState != Player.STATE_IDLE) {
+    if (active != null && active.isVideo && isPlayableInPlayer(active.uri) && player.playbackState == Player.STATE_READY) {
       val playerPos = player.currentPosition
       val speed = active.speed.coerceAtLeast(0.01f)
       val offsetInClip = ((playerPos - active.sourceStartMs) / speed).toLong()
       val calculatedTimeline = (active.timelineStartMs + offsetInClip).coerceIn(active.timelineStartMs, active.timelineStartMs + active.durationMs)
-      currentPosMs = calculatedTimeline
-      _currentPositionMs.value = currentPosMs
-      onTimelinePositionChanged(currentPosMs)
+      if (Math.abs(calculatedTimeline - currentPosMs) < 300L) {
+        currentPosMs = calculatedTimeline
+        _currentPositionMs.value = calculatedTimeline
+        onTimelinePositionChanged(calculatedTimeline)
+      }
     }
   }
 
@@ -573,6 +709,9 @@ class VideoPlaybackEngine(
       if (nextClip != null && nextClip.isVideo && isPlayableInPlayer(nextClip.uri)) {
         ensureClipLoaded(nextClip)
         val sourcePosMs = nextClip.timelineToSourceMs(nextPos)
+        playStartTimelineMs = nextPos
+        playStartSourceMs = sourcePosMs
+        playStartRealtimeMs = android.os.SystemClock.elapsedRealtime()
         player.seekTo(sourcePosMs)
         player.play()
         _isPlaying.value = true
@@ -585,6 +724,13 @@ class VideoPlaybackEngine(
 
   private fun startProgressSync() {
     progressSyncJob?.cancel()
+    val startActive = _activeClip.value
+    if (playStartRealtimeMs == 0L || Math.abs(playStartTimelineMs - currentPosMs) > 100L) {
+      playStartTimelineMs = currentPosMs
+      playStartSourceMs = startActive?.timelineToSourceMs(currentPosMs) ?: 0L
+      playStartRealtimeMs = android.os.SystemClock.elapsedRealtime()
+    }
+
     progressSyncJob = scope.launch {
       while (isActive && (_isPlaying.value || player.isPlaying || player.playWhenReady)) {
         if (isTrimPreviewMode) {
@@ -596,11 +742,18 @@ class VideoPlaybackEngine(
         } else {
           val active = _activeClip.value
           if (active != null && active.isVideo && isPlayableInPlayer(active.uri)) {
-            val playerPos = player.currentPosition
             val speed = active.speed.coerceAtLeast(0.01f)
-            val offsetInClip = ((playerPos - active.sourceStartMs) / speed).toLong()
+            val elapsedMs = android.os.SystemClock.elapsedRealtime() - playStartRealtimeMs
+            val expectedSourceMs = playStartSourceMs + (elapsedMs * speed).toLong()
+            val playerPos = player.currentPosition
+
+            val isPlayerPosValid = player.playbackState == Player.STATE_READY &&
+                Math.abs(playerPos - expectedSourceMs) <= 300L
+
+            val effectiveSourceMs = if (isPlayerPosValid) playerPos else expectedSourceMs
+            val offsetInClip = ((effectiveSourceMs - active.sourceStartMs) / speed).toLong()
             val calculatedTimeline = (active.timelineStartMs + offsetInClip)
-            
+
             if (calculatedTimeline >= active.timelineStartMs + active.durationMs) {
               handleClipEnded()
               break
@@ -610,6 +763,7 @@ class VideoPlaybackEngine(
               currentPosMs = bounded
               _currentPositionMs.value = bounded
               onTimelinePositionChanged(bounded)
+              syncOverlayPlayers(bounded)
               isSyncingFromPlayer = false
             }
           } else {
@@ -625,9 +779,12 @@ class VideoPlaybackEngine(
   private fun startSyntheticPlaybackLoop() {
     progressSyncJob?.cancel()
     _isPlaying.value = true
+    val startPos = currentPosMs
+    val startRealtime = android.os.SystemClock.elapsedRealtime()
     progressSyncJob = scope.launch {
       while (isActive && _isPlaying.value) {
-        val next = currentPosMs + FRAME_INTERVAL_60FPS_MS
+        val elapsed = android.os.SystemClock.elapsedRealtime() - startRealtime
+        val next = startPos + elapsed
         if (next >= currentTimeline.totalDurationMs) {
           pause()
           seekTo(0L)
@@ -639,6 +796,7 @@ class VideoPlaybackEngine(
           currentPosMs = next
           _currentPositionMs.value = next
           onTimelinePositionChanged(currentPosMs)
+          syncOverlayPlayers(currentPosMs)
           val nextClip = findClipAt(currentPosMs)
           if (nextClip != null && nextClip.id != _activeClip.value?.id) {
             syncWithPosition(currentPosMs)
@@ -659,6 +817,14 @@ class VideoPlaybackEngine(
     coalescedSeekJob?.cancel()
     progressSyncJob?.cancel()
     scope.cancel()
+    for (p in overlayPlayers.values) {
+      try {
+        p.stop()
+        p.release()
+      } catch (ignored: Exception) {}
+    }
+    overlayPlayers.clear()
+    overlayLoadedUris.clear()
     engineController.release()
   }
 }

@@ -236,6 +236,10 @@ fun MultiTrackTimeline(
 
     val timelineViewportWidthDp = (maxWidth - leftColumnWidthDp - rightColumnWidthDp).coerceAtLeast(100.dp)
     val centerPaddingDp = timelineViewportWidthDp / 2
+    val shift15mmDp = (15f * 160f / 25.4f).dp
+    val ctiOffsetDp = (centerPaddingDp - shift15mmDp).coerceAtLeast(0.dp)
+    val leftPaddingDp = ctiOffsetDp
+    val rightPaddingDp = timelineViewportWidthDp - ctiOffsetDp
 
     Box(modifier = Modifier.fillMaxSize()) {
       Column(modifier = Modifier.fillMaxSize()) {
@@ -253,7 +257,8 @@ fun MultiTrackTimeline(
           onPinchEnd = { isPinching = false },
           fps = fps,
           isFrameSnapping = isFrameSnapping,
-          centerPaddingDp = centerPaddingDp,
+          leftPaddingDp = leftPaddingDp,
+          rightPaddingDp = rightPaddingDp,
           horizontalScrollState = horizontalScrollState,
           hasRightAddButton = hasRightAddButton,
           onTogglePlayPause = onTogglePlayPause,
@@ -261,7 +266,8 @@ fun MultiTrackTimeline(
           onSeekToNextCut = onSeekToNextCut,
           onScrubStart = onScrubStart,
           onScrubStop = onScrubStop,
-          onAddMedia = onAddMedia
+          onAddMedia = onAddMedia,
+          timeline = timeline
         )
 
         if (!hasAnyTrack) {
@@ -337,16 +343,15 @@ fun MultiTrackTimeline(
               ) {
                 Column(
                   modifier = Modifier
-                    .width(trackContentWidthDp + centerPaddingDp * 2)
+                    .width(trackContentWidthDp + leftPaddingDp + rightPaddingDp)
                     .fillMaxHeight()
                     .verticalScroll(verticalScrollState)
-                    .pointerInput(maxTimelineMs, msPerPixel, density) {
+                    .pointerInput(maxTimelineMs, msPerPixel, density, ctiOffsetDp) {
                       detectTapGestures { offset ->
-                        val viewportCenterXPx = size.width / 2f
-                        val deltaPx = offset.x - viewportCenterXPx
-                        val deltaDp = deltaPx / density.density
-                        val deltaMs = deltaDp * msPerPixel
-                        val clickedMs = (currentPosMs + deltaMs.toLong()).coerceIn(0L, maxTimelineMs)
+                        val ctiOffsetPx = with(density) { ctiOffsetDp.toPx() }
+                        val timePx = offset.x - ctiOffsetPx
+                        val timeDp = timePx / density.density
+                        val clickedMs = (timeDp * msPerPixel).toLong().coerceIn(0L, maxTimelineMs)
                         onSeek(clickedMs)
                       }
                     },
@@ -368,7 +373,7 @@ fun MultiTrackTimeline(
                     Box(
                       modifier = Modifier
                         .fillMaxHeight()
-                        .offset(x = centerPaddingDp)
+                        .offset(x = leftPaddingDp)
                     ) {
                       // Continuous Glowing Outer Border Frame around Video Clips Sequence
                       if (timeline.videoClips.isNotEmpty()) {
@@ -576,7 +581,7 @@ fun MultiTrackTimeline(
                       Box(
                         modifier = Modifier
                           .fillMaxHeight()
-                          .offset(x = centerPaddingDp)
+                          .offset(x = leftPaddingDp)
                       ) {
                         for (clip in timeline.overlayClips) {
                           val isSelected = (selectedElement as? SelectedTrackElement.Overlay)?.clipId == clip.id
@@ -668,7 +673,7 @@ fun MultiTrackTimeline(
                       Box(
                         modifier = Modifier
                           .fillMaxHeight()
-                          .offset(x = centerPaddingDp)
+                          .offset(x = leftPaddingDp)
                       ) {
                         for (clip in timeline.audioClips) {
                           val isSelected = (selectedElement as? SelectedTrackElement.Audio)?.clipId == clip.id
@@ -771,7 +776,7 @@ fun MultiTrackTimeline(
                         Box(
                           modifier = Modifier
                             .fillMaxHeight()
-                            .offset(x = centerPaddingDp)
+                            .offset(x = leftPaddingDp)
                         ) {
                           for (clip in trackClips) {
                             val isSelected = (selectedElement as? SelectedTrackElement.Text)?.clipId == clip.id
@@ -851,7 +856,7 @@ fun MultiTrackTimeline(
                       Box(
                         modifier = Modifier
                           .fillMaxHeight()
-                          .offset(x = centerPaddingDp)
+                          .offset(x = leftPaddingDp)
                       ) {
                         for (clip in timeline.stickerClips) {
                           val isSelected = (selectedElement as? SelectedTrackElement.Sticker)?.clipId == clip.id
@@ -931,7 +936,7 @@ fun MultiTrackTimeline(
                       Box(
                         modifier = Modifier
                           .fillMaxHeight()
-                          .offset(x = centerPaddingDp)
+                          .offset(x = leftPaddingDp)
                       ) {
                         for (clip in timeline.effectClips) {
                           val isSelected = (selectedElement as? SelectedTrackElement.Effect)?.clipId == clip.id
@@ -1024,10 +1029,11 @@ fun MultiTrackTimeline(
             .width(timelineViewportWidthDp)
             .fillMaxHeight()
         ) {
-          // Vertical Center Playhead Line (Professional Electric Blue)
+          // Vertical Center Playhead Line (Professional Electric Blue - Shifted 15mm Left)
           Box(
             modifier = Modifier
               .align(Alignment.Center)
+              .offset(x = -shift15mmDp)
               .fillMaxHeight()
               .width(2.5.dp)
               .background(
@@ -1042,11 +1048,11 @@ fun MultiTrackTimeline(
               .testTag("fixed_center_playhead_line")
           )
 
-          // CTI Top Needle Cap Badge on Ruler (Subtle Dark Black handle with Blue Accent)
+          // CTI Top Needle Cap Badge on Ruler (Subtle Dark Black handle with Blue Accent - Shifted 15mm Left)
           Box(
             modifier = Modifier
               .align(Alignment.TopCenter)
-              .offset(y = 0.dp)
+              .offset(x = -shift15mmDp, y = 0.dp)
               .width(13.dp)
               .height(18.dp)
               .clip(RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp, topStart = 3.dp, topEnd = 3.dp))
@@ -1067,69 +1073,19 @@ fun MultiTrackTimeline(
             )
           }
 
-          // Floating Frame & Timecode Tooltip Bubble when Touch Scrubbing or Zooming
+          // Dynamic Frame Preview Card on CTI Needle during Scrubbing & Playhead Movement
           if (isTouchScrubbing || isPinching) {
-            val frameNum = (currentPosMs / (1000.0 / fps)).toLong()
-            val zoomPct = (zoom * 100).roundToInt()
-            Surface(
-              shape = RoundedCornerShape(4.dp),
-              color = Color.Black.copy(alpha = 0.92f),
-              border = BorderStroke(1.dp, if (isPinching) CyanAccent else AmberAccent),
+            Box(
               modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = 22.dp)
+                .offset(x = -shift15mmDp, y = 2.dp)
             ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-              ) {
-                if (isPinching) {
-                  Icon(
-                    imageVector = Icons.Default.ZoomIn,
-                    contentDescription = null,
-                    tint = CyanAccent,
-                    modifier = Modifier.size(12.dp)
-                  )
-                  Text(
-                    text = "${zoomPct}%",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontFamily = FontFamily.Monospace,
-                      fontSize = 9.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = CyanAccent
-                    )
-                  )
-                  Text(
-                    text = "${String.format(java.util.Locale.US, "%.1f", 1000f / (msPerPixel * fps))} px/f",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontFamily = FontFamily.Monospace,
-                      fontSize = 8.5.sp,
-                      fontWeight = FontWeight.Normal,
-                      color = Color.White.copy(alpha = 0.8f)
-                    )
-                  )
-                } else {
-                  Text(
-                    text = formatDurationShort(currentPosMs),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontFamily = FontFamily.Monospace,
-                      fontSize = 9.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = AmberAccent
-                    )
-                  )
-                  Text(
-                    text = "F$frameNum",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                      fontFamily = FontFamily.Monospace,
-                      fontSize = 8.5.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = CyanAccent
-                    )
-                  )
-                }
-              }
+              CTIFramePreviewCard(
+                timeline = timeline,
+                currentPosMs = currentPosMs,
+                fps = fps,
+                isScrubbing = isTouchScrubbing
+              )
             }
           }
         }
@@ -1287,7 +1243,8 @@ private fun TimelineRulerHeader(
   onPinchEnd: () -> Unit = {},
   fps: Int,
   isFrameSnapping: Boolean,
-  centerPaddingDp: androidx.compose.ui.unit.Dp,
+  leftPaddingDp: androidx.compose.ui.unit.Dp,
+  rightPaddingDp: androidx.compose.ui.unit.Dp,
   horizontalScrollState: androidx.compose.foundation.ScrollState,
   hasRightAddButton: Boolean = false,
   onTogglePlayPause: (() -> Unit)?,
@@ -1296,12 +1253,17 @@ private fun TimelineRulerHeader(
   onScrubStart: () -> Unit = {},
   onScrubStop: () -> Unit = {},
   onAddMedia: (() -> Unit)? = null,
+  timeline: com.example.domain.model.Timeline? = null,
   modifier: Modifier = Modifier
 ) {
+  val hasVideoClips = remember(timeline) {
+    timeline?.videoClips?.isNotEmpty() == true || timeline?.overlayClips?.any { it.isVideo } == true
+  }
+
   Row(
     modifier = modifier
       .fillMaxWidth()
-      .height(30.dp)
+      .height(if (hasVideoClips) 54.dp else 34.dp)
       .background(Color.Black),
     verticalAlignment = Alignment.CenterVertically
   ) {
@@ -1342,7 +1304,7 @@ private fun TimelineRulerHeader(
         .horizontalScroll(horizontalScrollState)
     ) {
       Row(modifier = Modifier.fillMaxHeight()) {
-        Spacer(modifier = Modifier.width(centerPaddingDp))
+        Spacer(modifier = Modifier.width(leftPaddingDp))
         AccurateTimecodeRuler(
           totalDurationMs = maxTimelineMs,
           currentPosMs = currentPosMs,
@@ -1352,9 +1314,10 @@ private fun TimelineRulerHeader(
           onSeek = onSeek,
           onDoubleTapSnap = onSeekToNextCut,
           onScrubStart = onScrubStart,
-          onScrubStop = onScrubStop
+          onScrubStop = onScrubStop,
+          timeline = timeline
         )
-        Spacer(modifier = Modifier.width(centerPaddingDp))
+        Spacer(modifier = Modifier.width(rightPaddingDp))
       }
     }
   }
